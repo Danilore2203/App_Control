@@ -1,0 +1,333 @@
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app import models
+from app.services.fcm import enviar_alerta_push
+from app.services.procesos import color_efectivo, es_core, estado_efectivo
+
+COLORES_ALERTABLES = {"red", "orange"}
+TECNOLOGIAS_PROCESO_VALIDAS = {"AIRFLOW", "DATASTAGE", "PENTAHO"}
+TECNOLOGIAS_TABLA_VALIDAS = {"QA_CONTROL", "PG_PROD"}
+ESTADOS_TABLA_NORMALIZADOS = {
+    "ERROR": "ERROR",
+    "VACIA": "VACIA",
+    "VACÍA": "VACIA",
+}
+
+
+def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
+    """Un episodio de error = una fila por (proceso, dia). Mientras el
+    proceso siga leyendose en rojo ese mismo dia (se relee cada 5 min), se
+    actualiza fecha_actualizacion en la misma fila en vez de crear otra. Si
+    una lectura posterior el mismo dia lo muestra en verde, se cierra el
+    episodio guardando 'OK' en Estado_Fin."""
+
+    color = color_efectivo(proceso)
+    if color not in ("red", "green"):
+        return
+
+    episodio_abierto = (
+        db.query(models.BitacoraError)
+        .filter(
+            models.BitacoraError.nombre == proceso.nombre,
+            models.BitacoraError.tecnologia == proceso.fuente,
+            models.BitacoraError.estado_fin == "ERROR",
+            func.date(models.BitacoraError.fecha_hora) == proceso.snapshot_fecha,
+        )
+        .order_by(models.BitacoraError.id.desc())
+        .first()
+    )
+
+    if color == "red":
+        if episodio_abierto:
+            episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
+        else:
+            db.add(
+                models.BitacoraError(
+                    fecha_hora=proceso.snapshot_ts,
+                    fecha_actualizacion=proceso.snapshot_ts,
+                    nombre=proceso.nombre,
+                    tecnologia=proceso.fuente,
+                    estado="ERROR",
+                    estado_fin="ERROR",
+                    tipo="PROCESO",
+                    descripcion=f"Proceso finalizo con estado {estado_efectivo(proceso)}.",
+                )
+            )
+    elif episodio_abierto:
+        episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
+        episodio_abierto.estado_fin = "OK"
+
+
+def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
+    """Misma logica de episodio que _actualizar_bitacora_proceso, mirando
+    dataops_catalogo_tablas en vez de dataops_catalogo_procesos."""
+
+    if tabla.color not in ("red", "green"):
+        return
+
+    episodio_abierto = (
+        db.query(models.BitacoraError)
+        .filter(
+            models.BitacoraError.nombre == tabla.nombre,
+            models.BitacoraError.tecnologia == tabla.fuente,
+            models.BitacoraError.estado_fin == "ERROR",
+            func.date(models.BitacoraError.fecha_hora) == tabla.snapshot_fecha,
+        )
+        .order_by(models.BitacoraError.id.desc())
+        .first()
+    )
+
+    if tabla.color == "red":
+        estado_normalizado = ESTADOS_TABLA_NORMALIZADOS.get(tabla.estado.upper().strip(), "ERROR")
+        if episodio_abierto:
+            episodio_abierto.fecha_actualizacion = tabla.snapshot_ts
+        else:
+            db.add(
+                models.BitacoraError(
+                    fecha_hora=tabla.snapshot_ts,
+                    fecha_actualizacion=tabla.snapshot_ts,
+                    nombre=tabla.nombre,
+                    tecnologia=tabla.fuente,
+                    estado=estado_normalizado,
+                    estado_fin="ERROR",
+                    tipo="TABLA",
+                    descripcion=f"Tabla en estado {tabla.estado} (cantidad={tabla.cantidad}).",
+                )
+            )
+    elif episodio_abierto:
+        episodio_abierto.fecha_actualizacion = tabla.snapshot_ts
+        episodio_abierto.estado_fin = "OK"
+
+
+def _tablas_de_proceso(db: Session, proceso_nombre: str) -> list[str]:
+    filas = (
+        db.query(models.ProcesoTabla.tabla_nombre)
+        .filter(
+            models.ProcesoTabla.proceso_nombre == proceso_nombre,
+            models.ProcesoTabla.activo.is_(True),
+            models.ProcesoTabla.tipo_relacion == "ALIMENTA",
+        )
+        .all()
+    )
+    return [fila[0] for fila in filas]
+
+
+def _procesos_que_alimentan(db: Session, tabla_nombre: str) -> list[str]:
+    filas = (
+        db.query(models.ProcesoTabla.proceso_nombre)
+        .filter(
+            models.ProcesoTabla.tabla_nombre == tabla_nombre,
+            models.ProcesoTabla.activo.is_(True),
+            models.ProcesoTabla.tipo_relacion == "ALIMENTA",
+        )
+        .all()
+    )
+    return [fila[0] for fila in filas]
+
+
+def _obtener_destinatarios(db: Session):
+    return (
+        db.query(models.Usuario, models.UsuarioFcmToken)
+        .join(models.UsuarioFcmToken, models.UsuarioFcmToken.usuario_id == models.Usuario.id)
+        .filter(models.Usuario.activo.is_(True))
+        .all()
+    )
+
+
+def _alertar_a_destinatarios(db: Session, control_id: int, mensaje: str, titulo: str) -> None:
+    for usuario, token_row in _obtener_destinatarios(db):
+        alerta = models.Alerta(
+            control_id=control_id,
+            usuario_id=usuario.id,
+            mensaje=mensaje,
+            nivel="critica",
+        )
+        db.add(alerta)
+        try:
+            enviar_alerta_push(token_row.fcm_token, titulo=titulo, cuerpo=mensaje, critica=True)
+            alerta.enviada = True
+        except Exception:
+            alerta.enviada = False
+
+
+def _registrar_incoherencia(
+    db: Session,
+    proceso_id: int,
+    proceso_nombre: str,
+    proceso_fuente: str,
+    tabla_nombre: str,
+    tabla_estado: str,
+    dia,
+    ts,
+) -> None:
+    """Un proceso core que termino OK pero cuya tabla dependiente quedo vacia/en
+    error: el proceso no lo reporta como error (por eso el monitor normal no lo
+    alcanza a ver), asi que se registra aparte como 'fallo silencioso' y se
+    alerta igual que una falla critica normal."""
+
+    nombre_compuesto = f"{proceso_nombre} -> {tabla_nombre}"
+    ya_registrada = (
+        db.query(models.BitacoraError)
+        .filter(
+            models.BitacoraError.nombre == nombre_compuesto,
+            models.BitacoraError.tecnologia == proceso_fuente,
+            func.date(models.BitacoraError.fecha_hora) == dia,
+        )
+        .first()
+    )
+    if ya_registrada:
+        ya_registrada.fecha_actualizacion = ts
+        return
+
+    mensaje = (
+        f"Proceso {proceso_nombre} finalizo OK pero la tabla {tabla_nombre} "
+        f"quedo en estado {tabla_estado} (posible fallo silencioso)."
+    )
+    db.add(
+        models.BitacoraError(
+            fecha_hora=ts,
+            fecha_actualizacion=ts,
+            nombre=nombre_compuesto,
+            tecnologia=proceso_fuente,
+            estado="INCOHERENCIA",
+            estado_fin="ERROR",
+            tipo="PROCESO",
+            descripcion=mensaje,
+        )
+    )
+    _alertar_a_destinatarios(db, proceso_id, mensaje, titulo="Fallo silencioso detectado")
+
+
+def _revisar_incoherencia_desde_proceso(db: Session, proceso: models.Control) -> None:
+    for tabla_nombre in _tablas_de_proceso(db, proceso.nombre):
+        tabla = (
+            db.query(models.Tabla)
+            .filter(
+                models.Tabla.nombre == tabla_nombre,
+                models.Tabla.snapshot_fecha == proceso.snapshot_fecha,
+            )
+            .order_by(models.Tabla.id.desc())
+            .first()
+        )
+        if tabla and tabla.color == "red":
+            _registrar_incoherencia(
+                db, proceso.id, proceso.nombre, proceso.fuente, tabla.nombre, tabla.estado,
+                proceso.snapshot_fecha, proceso.snapshot_ts,
+            )
+
+
+def _revisar_incoherencia_desde_tabla(db: Session, tabla: models.Tabla) -> None:
+    for proceso_nombre in _procesos_que_alimentan(db, tabla.nombre):
+        proceso = (
+            db.query(models.Control)
+            .filter(
+                models.Control.nombre == proceso_nombre,
+                models.Control.snapshot_fecha == tabla.snapshot_fecha,
+            )
+            .order_by(models.Control.id.desc())
+            .first()
+        )
+        if proceso and color_efectivo(proceso) == "green" and es_core(proceso):
+            _registrar_incoherencia(
+                db, proceso.id, proceso.nombre, proceso.fuente, tabla.nombre, tabla.estado,
+                tabla.snapshot_fecha, tabla.snapshot_ts,
+            )
+
+
+def _obtener_o_crear_estado(db: Session) -> models.PollerState:
+    estado = db.query(models.PollerState).first()
+    if estado is None:
+        ultimo_id = db.query(models.Control.id).order_by(models.Control.id.desc()).limit(1).scalar() or 0
+        estado = models.PollerState(ultimo_id_revisado=ultimo_id)
+        db.add(estado)
+        db.commit()
+        db.refresh(estado)
+    return estado
+
+
+def revisar_procesos_nuevos(db: Session) -> int:
+    """Busca snapshots nuevos en dataops_catalogo_procesos (id mayor al ultimo revisado)
+    y genera una alerta + push por cada proceso en rojo/naranja. Devuelve cuantos
+    procesos nuevos generaron alerta."""
+
+    estado_poller = _obtener_o_crear_estado(db)
+
+    nuevos = (
+        db.query(models.Control)
+        .filter(models.Control.id > estado_poller.ultimo_id_revisado)
+        .order_by(models.Control.id.asc())
+        .all()
+    )
+    if not nuevos:
+        return 0
+
+    destinatarios = _obtener_destinatarios(db)
+    procesos_alertados = 0
+
+    for proceso in nuevos:
+        color = color_efectivo(proceso)
+
+        if proceso.fuente in TECNOLOGIAS_PROCESO_VALIDAS:
+            _actualizar_bitacora_proceso(db, proceso)
+
+        if color == "green" and es_core(proceso):
+            _revisar_incoherencia_desde_proceso(db, proceso)
+
+        if color in COLORES_ALERTABLES:
+            es_critica = color == "red"
+            mensaje = f"[{proceso.fuente}] {proceso.nombre}: {estado_efectivo(proceso)}"
+
+            for usuario, token_row in destinatarios:
+                alerta = models.Alerta(
+                    control_id=proceso.id,
+                    usuario_id=usuario.id,
+                    mensaje=mensaje,
+                    nivel="critica" if es_critica else "normal",
+                )
+                db.add(alerta)
+
+                try:
+                    enviar_alerta_push(
+                        token_row.fcm_token,
+                        titulo="Alerta de proceso" if es_critica else "Proceso demorado",
+                        cuerpo=mensaje,
+                        critica=es_critica,
+                    )
+                    alerta.enviada = True
+                except Exception:
+                    alerta.enviada = False
+
+            procesos_alertados += 1
+
+    estado_poller.ultimo_id_revisado = nuevos[-1].id
+    db.commit()
+    return procesos_alertados
+
+
+def revisar_tablas_nuevas(db: Session) -> int:
+    """Busca snapshots nuevos en dataops_catalogo_tablas (id mayor al ultimo revisado)
+    y actualiza la bitacora con la misma logica de episodio que los procesos.
+    No genera alertas push, solo llena la bitacora."""
+
+    estado_poller = _obtener_o_crear_estado(db)
+
+    nuevas = (
+        db.query(models.Tabla)
+        .filter(models.Tabla.id > estado_poller.ultimo_id_tablas_revisado)
+        .order_by(models.Tabla.id.asc())
+        .all()
+    )
+    if not nuevas:
+        return 0
+
+    for tabla in nuevas:
+        if tabla.fuente in TECNOLOGIAS_TABLA_VALIDAS:
+            _actualizar_bitacora_tabla(db, tabla)
+
+        if tabla.color == "red":
+            _revisar_incoherencia_desde_tabla(db, tabla)
+
+    estado_poller.ultimo_id_tablas_revisado = nuevas[-1].id
+    db.commit()
+    return len(nuevas)

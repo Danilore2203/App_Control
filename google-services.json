@@ -1,0 +1,30 @@
+
+{
+  "project_info": {
+    "project_number": "983197006246",
+    "project_id": "opcontroles-56a46",
+    "storage_bucket": "opcontroles-56a46.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:983197006246:android:c7b7e8041ce5e092533767",
+        "android_client_info": {
+          "package_name": "com.nuevatel.controles"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA6sASuVokZBQxtfiCnXNIMwlrTJVJF8E8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
