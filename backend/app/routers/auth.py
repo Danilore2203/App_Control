@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
+from app.services.fcm import enviar_alerta_push
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -136,3 +137,38 @@ def guardar_fcm_token(
         db.add(fila)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/me/probar-alerta")
+def probar_alerta(
+    usuario_actual: models.Usuario = Depends(auth.obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    """Manda una push de prueba al token FCM de este dispositivo, sin esperar
+    a que falle un proceso real. A diferencia del poller, no traga la
+    excepcion: si algo esta mal (credenciales, token invalido, etc.) el
+    detalle real se lo devuelve a la app en vez de quedar solo en logs."""
+
+    fila = (
+        db.query(models.UsuarioFcmToken)
+        .filter(models.UsuarioFcmToken.usuario_id == usuario_actual.id)
+        .first()
+    )
+    if fila is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Este dispositivo todavia no registro un token de notificaciones "
+            "(abri la app y volve a intentar en un rato).",
+        )
+
+    try:
+        message_id = enviar_alerta_push(
+            fila.fcm_token,
+            titulo="Prueba de alarma",
+            cuerpo="Si escuchaste esto, la alerta critica esta funcionando.",
+            critica=True,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo enviar el push: {exc}")
+
+    return {"ok": True, "message_id": message_id}

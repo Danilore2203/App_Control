@@ -1,9 +1,13 @@
+import logging
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models
 from app.services.fcm import enviar_alerta_push
 from app.services.procesos import color_efectivo, es_core, estado_efectivo
+
+logger = logging.getLogger(__name__)
 
 COLORES_ALERTABLES = {"red", "orange"}
 TECNOLOGIAS_PROCESO_VALIDAS = {"AIRFLOW", "DATASTAGE", "PENTAHO"}
@@ -148,6 +152,7 @@ def _alertar_a_destinatarios(db: Session, control_id: int, mensaje: str, titulo:
             enviar_alerta_push(token_row.fcm_token, titulo=titulo, cuerpo=mensaje, critica=True)
             alerta.enviada = True
         except Exception:
+            logger.exception("Fallo al enviar push a usuario %s (control %s)", usuario.id, control_id)
             alerta.enviada = False
 
 
@@ -296,6 +301,9 @@ def revisar_procesos_nuevos(db: Session) -> int:
                     )
                     alerta.enviada = True
                 except Exception:
+                    logger.exception(
+                        "Fallo al enviar push a usuario %s (proceso %s)", usuario.id, proceso.id
+                    )
                     alerta.enviada = False
 
             procesos_alertados += 1
