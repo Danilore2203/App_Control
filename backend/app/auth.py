@@ -50,6 +50,9 @@ def autenticar_contra_monitor(username: str, password: str) -> Optional[str]:
     (ese mismo token sirve despues para llamar directo a sus endpoints de
     Netezza/Postgres), o None si las rechaza o el servicio no responde."""
 
+    if not settings.monitor_auth_url:
+        return None
+
     url = f"{settings.monitor_auth_url.rstrip('/')}/api/auth/token"
     try:
         response = httpx.post(url, json={"user": username, "password": password}, timeout=10)
