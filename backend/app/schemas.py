@@ -35,7 +35,8 @@ class GoogleLoginIn(BaseModel):
 
 class ConfigurarPasswordIn(BaseModel):
     username: str
-    password_actual: str
+    password_actual: Optional[str] = None
+    correo_verificacion: Optional[str] = None
     password_nueva: str = Field(min_length=8)
 
     @field_validator("password_nueva")
@@ -46,6 +47,12 @@ class ConfigurarPasswordIn(BaseModel):
         if not re.search(r"[^A-Za-z0-9]", valor):
             raise ValueError("La contrasena debe incluir al menos un simbolo")
         return valor
+
+    @model_validator(mode="after")
+    def _requiere_alguna_verificacion(self) -> "ConfigurarPasswordIn":
+        if not self.password_actual and not self.correo_verificacion:
+            raise ValueError("Debes indicar tu contrasena actual o tu correo de verificacion")
+        return self
 
 
 class FcmTokenIn(BaseModel):

@@ -55,7 +55,11 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 @router.post("/configurar-password", response_model=schemas.Token)
 def configurar_password(payload: schemas.ConfigurarPasswordIn, db: Session = Depends(get_db)):
     usuario = auth.configurar_password_local(
-        payload.username, payload.password_actual, payload.password_nueva, db
+        payload.username,
+        payload.password_actual,
+        payload.correo_verificacion,
+        payload.password_nueva,
+        db,
     )
     if not usuario:
         raise HTTPException(status_code=401, detail="Usuario o contrasena actual incorrectos")
