@@ -31,6 +31,18 @@ def registrar(usuario_in: schemas.UsuarioCreate, db: Session = Depends(get_db)):
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     usuario = auth.autenticar_usuario(form_data.username, form_data.password, db)
     if not usuario:
+        cuenta = auth.buscar_usuario_por_identificador(form_data.username, db)
+        if cuenta is not None and cuenta.activo and not cuenta.password_hash:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "codigo": "sin_password",
+                    "mensaje": (
+                        "Tu cuenta todavia no tiene una contrasena configurada para la app. "
+                        "Usa 'Olvide mi contrasena' e ingresa tu contrasena habitual (AD) para crearla."
+                    ),
+                },
+            )
         raise HTTPException(status_code=401, detail="Usuario o contrasena incorrectos")
 
     access_token = auth.crear_access_token(data={"sub": usuario.username})
