@@ -18,15 +18,19 @@ Base.metadata.create_all(bind=engine)
 INTERVALO_POLLER_SEGUNDOS = 60
 
 
+def _ejecutar_poller():
+    db = SessionLocal()
+    try:
+        revisar_procesos_nuevos(db)
+        revisar_tablas_nuevas(db)
+    finally:
+        db.close()
+
+
 async def _loop_poller():
     while True:
         try:
-            db = SessionLocal()
-            try:
-                revisar_procesos_nuevos(db)
-                revisar_tablas_nuevas(db)
-            finally:
-                db.close()
+            await asyncio.to_thread(_ejecutar_poller)
         except Exception:
             pass
         await asyncio.sleep(INTERVALO_POLLER_SEGUNDOS)
