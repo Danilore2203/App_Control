@@ -31,3 +31,6 @@ mobile/ios/.symlinks/
 .codegraph/
 .cursor/
 .claude/
+
+# Repo aparte (Azure DevOps de la empresa), clonado dentro por error/comparacion
+app-control-data/
