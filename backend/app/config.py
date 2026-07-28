@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
     firebase_credentials_path: str = "firebase-service-account.json"
+    firebase_credentials_json: str = ""
     critical_alerts_enabled: bool = False
     monitor_auth_url: str
     google_oauth_client_id: str = ""

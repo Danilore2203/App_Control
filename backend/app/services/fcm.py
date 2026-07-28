@@ -1,3 +1,5 @@
+import json
+
 import firebase_admin
 from firebase_admin import credentials, messaging
 
@@ -9,7 +11,10 @@ _firebase_app = None
 def inicializar_firebase():
     global _firebase_app
     if _firebase_app is None:
-        cred = credentials.Certificate(settings.firebase_credentials_path)
+        if settings.firebase_credentials_json:
+            cred = credentials.Certificate(json.loads(settings.firebase_credentials_json))
+        else:
+            cred = credentials.Certificate(settings.firebase_credentials_path)
         _firebase_app = firebase_admin.initialize_app(cred)
     return _firebase_app
 
