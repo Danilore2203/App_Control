@@ -179,6 +179,42 @@ def autenticar_con_google(id_token_str: str, db: Session) -> Optional[models.Usu
     raise AccesoGoogleNoConcedido("Tu solicitud de acceso todavia esta pendiente de aprobacion.")
 
 
+def vincular_cuenta_google(usuario: models.Usuario, id_token_str: str, db: Session) -> models.Usuario:
+    """Asocia una cuenta de Google al usuario ya autenticado (self-service, sin
+    pasar por solicitud/aprobacion de admin: quien llama ya probo ser dueno de
+    esta cuenta AD). Futuros logins con ese Google entran directo a esta misma
+    cuenta."""
+
+    try:
+        payload = google_id_token.verify_oauth2_token(
+            id_token_str, google_requests.Request(), audience=settings.google_oauth_client_id
+        )
+    except Exception as exc:
+        logger.warning("Token de Google invalido: %s", exc)
+        raise ValueError("Token de Google invalido")
+
+    if not payload.get("email_verified"):
+        raise ValueError("El correo de Google no esta verificado")
+
+    email = payload["email"]
+
+    en_uso_por_otro = (
+        db.query(models.Usuario)
+        .filter(
+            models.Usuario.id != usuario.id,
+            (models.Usuario.email.ilike(email)) | (models.Usuario.email_google.ilike(email)),
+        )
+        .first()
+    )
+    if en_uso_por_otro is not None:
+        raise ValueError("Esa cuenta de Google ya esta vinculada a otro usuario")
+
+    usuario.email_google = email
+    db.commit()
+    db.refresh(usuario)
+    return usuario
+
+
 def es_administrador(usuario: models.Usuario, db: Session) -> bool:
     return (
         db.query(models.Administrador).filter(models.Administrador.usuario_id == usuario.id).first()

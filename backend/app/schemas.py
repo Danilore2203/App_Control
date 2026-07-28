@@ -19,6 +19,7 @@ class UsuarioOut(BaseModel):
     username: str
     nombre: Optional[str] = None
     email: Optional[str] = None
+    email_google: Optional[str] = None
     activo: bool
     es_admin: bool = False
 
@@ -30,6 +31,10 @@ class Token(BaseModel):
 
 
 class GoogleLoginIn(BaseModel):
+    id_token: str
+
+
+class VincularGoogleIn(BaseModel):
     id_token: str
 
 

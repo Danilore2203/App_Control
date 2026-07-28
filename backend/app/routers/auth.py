@@ -82,6 +82,30 @@ def login_con_google(payload: schemas.GoogleLoginIn, db: Session = Depends(get_d
     return schemas.Token(access_token=access_token)
 
 
+@router.post("/vincular-google", response_model=schemas.UsuarioOut)
+def vincular_google(
+    payload: schemas.VincularGoogleIn,
+    usuario_actual: models.Usuario = Depends(auth.obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    try:
+        usuario = auth.vincular_cuenta_google(usuario_actual, payload.id_token, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return usuario
+
+
+@router.post("/desvincular-google", response_model=schemas.UsuarioOut)
+def desvincular_google(
+    usuario_actual: models.Usuario = Depends(auth.obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    usuario_actual.email_google = None
+    db.commit()
+    db.refresh(usuario_actual)
+    return usuario_actual
+
+
 @router.get("/me", response_model=schemas.UsuarioOut)
 def obtener_perfil(
     usuario_actual: models.Usuario = Depends(auth.obtener_usuario_actual),
@@ -92,6 +116,7 @@ def obtener_perfil(
         username=usuario_actual.username,
         nombre=usuario_actual.nombre,
         email=usuario_actual.email,
+        email_google=usuario_actual.email_google,
         activo=usuario_actual.activo,
         es_admin=auth.es_administrador(usuario_actual, db),
     )
