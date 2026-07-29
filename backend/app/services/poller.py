@@ -1,5 +1,6 @@
 import logging
 
+from firebase_admin import messaging
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -302,21 +303,46 @@ def _obtener_destinatarios(db: Session):
     )
 
 
+def _intentar_push(
+    db: Session,
+    usuario: models.Usuario,
+    token_row: models.UsuarioFcmToken,
+    control_id: int,
+    mensaje: str,
+    titulo: str,
+    critica: bool,
+) -> bool:
+    """Registra la Alerta y hace UN intento de push. Si Firebase dice que el
+    token ya no esta registrado (app desinstalada/reinstalada, token
+    rotado), no tiene sentido reintentar contra el mismo token para
+    siempre -se borra aca mismo, y el usuario vuelve a quedar cubierto en
+    cuanto la app guarde un token nuevo (`registrarFcmToken` en el login/
+    refresh). Cualquier otro error (red, cuota, etc.) se loggea completo
+    para diagnosticar, pero se conserva el token para reintentar."""
+
+    alerta = models.Alerta(control_id=control_id, usuario_id=usuario.id, mensaje=mensaje, nivel="critica" if critica else "normal")
+    db.add(alerta)
+    try:
+        enviar_alerta_push(token_row.fcm_token, titulo=titulo, cuerpo=mensaje, critica=critica)
+        alerta.enviada = True
+        return True
+    except messaging.UnregisteredError:
+        logger.warning(
+            "Token FCM de usuario %s ya no esta registrado en Firebase: se elimina para no reintentar en vano",
+            usuario.id,
+        )
+        alerta.enviada = False
+        db.delete(token_row)
+        return False
+    except Exception:
+        logger.exception("Fallo al enviar push a usuario %s (control %s)", usuario.id, control_id)
+        alerta.enviada = False
+        return False
+
+
 def _alertar_a_destinatarios(db: Session, control_id: int, mensaje: str, titulo: str) -> None:
     for usuario, token_row in _obtener_destinatarios(db):
-        alerta = models.Alerta(
-            control_id=control_id,
-            usuario_id=usuario.id,
-            mensaje=mensaje,
-            nivel="critica",
-        )
-        db.add(alerta)
-        try:
-            enviar_alerta_push(token_row.fcm_token, titulo=titulo, cuerpo=mensaje, critica=True)
-            alerta.enviada = True
-        except Exception:
-            logger.exception("Fallo al enviar push a usuario %s (control %s)", usuario.id, control_id)
-            alerta.enviada = False
+        _intentar_push(db, usuario, token_row, control_id, mensaje, titulo, critica=True)
 
 
 def _registrar_incoherencia(
@@ -536,23 +562,8 @@ def _disparar_alarma(db: Session, proceso: models.Control, episodio: models.Epis
 
     algun_envio_ok = False
     for usuario, token_row in destinatarios:
-        alerta = models.Alerta(
-            control_id=proceso.id,
-            usuario_id=usuario.id,
-            mensaje=mensaje,
-            nivel="critica" if es_critica else "normal",
-        )
-        db.add(alerta)
-        try:
-            enviar_alerta_push(token_row.fcm_token, titulo=titulo, cuerpo=mensaje, critica=es_critica)
-            alerta.enviada = True
+        if _intentar_push(db, usuario, token_row, proceso.id, mensaje, titulo, critica=es_critica):
             algun_envio_ok = True
-        except Exception:
-            logger.exception(
-                "Fallo al enviar push a usuario %s (proceso %s [%s])",
-                usuario.id, proceso.nombre, proceso.fuente,
-            )
-            alerta.enviada = False
 
     return algun_envio_ok
 
