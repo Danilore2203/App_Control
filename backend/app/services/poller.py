@@ -78,6 +78,15 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
         estado_actual = estado_efectivo(proceso)
         frase_estado = "demorado" if estado_actual == "DEMORADO" else f"en {estado_actual.lower()}"
         if episodio_abierto:
+            # El proceso puede pasar de ERROR a DEMORADO (o al reves) sin
+            # cerrarse el episodio - sin esto el estado quedaba pegado al
+            # que tenia quiando se abrio la fila, aunque el origen ya haya
+            # cambiado (por eso demorados reales se seguian viendo como error).
+            if episodio_abierto.estado != estado_actual:
+                episodio_abierto.descripcion += (
+                    f" Cambió a {frase_estado} a las {proceso.snapshot_ts.strftime('%H:%M')}."
+                )
+                episodio_abierto.estado = estado_actual
             episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
         else:
             db.add(
@@ -132,6 +141,11 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
     if tabla.color == "red":
         estado_normalizado = ESTADOS_TABLA_NORMALIZADOS.get(tabla.estado.upper().strip(), "ERROR")
         if episodio_abierto:
+            if episodio_abierto.estado != estado_normalizado:
+                episodio_abierto.descripcion += (
+                    f" Cambió a {estado_normalizado.lower()} a las {tabla.snapshot_ts.strftime('%H:%M')}."
+                )
+                episodio_abierto.estado = estado_normalizado
             episodio_abierto.fecha_actualizacion = tabla.snapshot_ts
         else:
             db.add(
