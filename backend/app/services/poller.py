@@ -52,7 +52,7 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
                     fecha_actualizacion=proceso.snapshot_ts,
                     nombre=proceso.nombre,
                     tecnologia=proceso.fuente,
-                    estado="ERROR",
+                    estado=estado_efectivo(proceso),
                     estado_fin="ERROR",
                     tipo="PROCESO",
                     descripcion=f"Proceso finalizo con estado {estado_efectivo(proceso)}.",
@@ -61,6 +61,7 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
     elif episodio_abierto:
         episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
         episodio_abierto.estado_fin = "OK"
+        episodio_abierto.descripcion += f" Paso a OK a las {proceso.snapshot_ts.strftime('%H:%M')}."
 
 
 def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
@@ -102,6 +103,7 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
     elif episodio_abierto:
         episodio_abierto.fecha_actualizacion = tabla.snapshot_ts
         episodio_abierto.estado_fin = "OK"
+        episodio_abierto.descripcion += f" Paso a OK a las {tabla.snapshot_ts.strftime('%H:%M')}."
 
 
 def _tablas_de_proceso(db: Session, proceso_nombre: str) -> list[str]:

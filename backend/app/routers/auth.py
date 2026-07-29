@@ -139,6 +139,22 @@ def guardar_fcm_token(
     return {"ok": True}
 
 
+@router.delete("/me/fcm-token")
+def eliminar_fcm_token(
+    usuario_actual: models.Usuario = Depends(auth.obtener_usuario_actual),
+    db: Session = Depends(get_db),
+):
+    """Usado cuando el usuario desactiva las notificaciones desde Ajustes: se
+    borra el token para que el poller ni intente mandarle push a este
+    dispositivo (no alcanza con ignorarlo del lado del cliente)."""
+
+    db.query(models.UsuarioFcmToken).filter(
+        models.UsuarioFcmToken.usuario_id == usuario_actual.id
+    ).delete()
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/me/probar-alerta")
 def probar_alerta(
     usuario_actual: models.Usuario = Depends(auth.obtener_usuario_actual),

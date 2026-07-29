@@ -19,4 +19,4 @@ def color_efectivo(proceso) -> str:
 
 
 def estado_efectivo(proceso) -> str:
-    return "ERROR" if _demorado(proceso) else proceso.estado
+    return "DEMORADO" if _demorado(proceso) else proceso.estado
