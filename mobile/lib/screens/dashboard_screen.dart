@@ -143,9 +143,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       conteos[control.color] = (conteos[control.color] ?? 0) + 1;
     }
     // Orden fijo: primero lo urgente (rojo/naranja), despues el resto.
+    // Siempre se muestran las 5 (aunque una este en 0), para que "Demorados"
+    // no aparezca y desaparezca segun si hay algun proceso demorado ahora.
     const ordenColores = ["red", "orange", "blue", "green", "gray"];
-    final coloresPresentes =
-        ordenColores.where((c) => conteos.containsKey(c)).toList();
     return SizedBox(
       height: 42,
       child: ListView(
@@ -164,9 +164,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             }),
           ),
           const SizedBox(width: 8),
-          for (final color in coloresPresentes) ...[
+          for (final color in ordenColores) ...[
             _FiltroPill(
-              texto: "${_etiquetaColor(color)} (${conteos[color]})",
+              texto: "${_etiquetaColor(color)} (${conteos[color] ?? 0})",
               punto: _colorEstado(color),
               seleccionado: _filtroColor == color,
               onTap: () => setState(

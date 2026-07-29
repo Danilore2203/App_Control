@@ -83,42 +83,16 @@ Color colorEvento(BitacoraError entrada) {
   }
 }
 
-/// Etiqueta legible por categoría de filtro (Todos/Errores/Resueltos/
-/// Demorados/Ejecutados/Información), en el mismo orden que pidió el
-/// usuario.
-const _categoriasFiltro = ["ERROR", "RESUELTO", "DEMORADO", "EJECUTADO", "INFORMACION"];
-
-String etiquetaCategoria(String categoria) {
-  switch (categoria) {
-    case "ERROR":
-      return "ERRORES";
-    case "RESUELTO":
-      return "RESUELTOS";
-    case "DEMORADO":
-      return "DEMORADOS";
-    case "EJECUTADO":
-      return "EJECUTADOS";
-    case "INFORMACION":
-      return "INFORMACIÓN";
-    default:
-      return categoria;
-  }
-}
-
-Color colorCategoria(String categoria) {
-  switch (categoria) {
-    case "RESUELTO":
-      return StatusColors.exitoso;
-    case "DEMORADO":
-      return StatusColors.demorado;
-    case "EJECUTADO":
-      return StatusColors.info;
-    case "INFORMACION":
-      return StatusColors.neutral;
-    default:
-      return StatusColors.critico;
-  }
-}
+/// Las 5 tecnologías posibles, siempre visibles como filtro (antes solo se
+/// mostraban las que tenían fallas ese día, lo que hacía aparecer y
+/// desaparecer el filtro entre días).
+const _todasLasTecnologias = [
+  "AIRFLOW",
+  "DATASTAGE",
+  "PENTAHO",
+  "PG_PROD",
+  "QA_CONTROL",
+];
 
 /// Detalle de un dia especifico de la bitacora: fallos reales (con su
 /// descripcion real, no inventada) ocurridos ese dia.
@@ -146,10 +120,8 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
   late List<BitacoraError> _entradas;
   final _busquedaController = TextEditingController();
   String _busqueda = "";
-  String? _filtroEstado; // null=todos, "ERROR"=abiertos, "OK"=resueltos
-  bool? _filtroEsProceso; // null=todos, true=procesos, false=tablas
+  String? _filtroEstado; // null=todos, "ABIERTO", "RESUELTO" o "DEMORADO"
   String? _filtroTecnologia;
-  String? _filtroCategoria; // null=todos, o una de _categoriasFiltro
   late final AnimationController _pulseController;
 
   @override
@@ -193,31 +165,34 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
   List<String> get _tecnologiasAfectadas =>
       _entradas.map((e) => e.tecnologia).toSet().toList();
 
+  /// Bucket exclusivo para los 4 filtros pedidos: un demorado no cuenta como
+  /// "abierto" aparte (tiene su propio filtro), igual que en Controles
+  /// "Con error" y "Demorados" son categorías separadas.
+  String _bucketEstado(BitacoraError e) {
+    if (e.resuelto) return "RESUELTO";
+    if ((e.estado ?? "").toUpperCase() == "DEMORADO") return "DEMORADO";
+    return "ABIERTO";
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final busquedaLimpia = _busqueda.trim().toLowerCase();
-    final abiertos = _entradas.where((e) => !e.resuelto).length;
-    final resueltos = _entradas.where((e) => e.resuelto).length;
-    final procesos = _entradas.where((e) => e.esProceso).length;
-    final tablas = _entradas.length - procesos;
+    final abiertos =
+        _entradas.where((e) => _bucketEstado(e) == "ABIERTO").length;
+    final resueltos =
+        _entradas.where((e) => _bucketEstado(e) == "RESUELTO").length;
+    final demorados =
+        _entradas.where((e) => _bucketEstado(e) == "DEMORADO").length;
     final entradasFiltradas = _entradas.where((e) {
       final coincideBusqueda = busquedaLimpia.isEmpty ||
           e.nombre.toLowerCase().contains(busquedaLimpia) ||
           e.tecnologia.toLowerCase().contains(busquedaLimpia);
-      final coincideEstado = _filtroEstado == null ||
-          (_filtroEstado == "OK" ? e.resuelto : !e.resuelto);
-      final coincideTipo =
-          _filtroEsProceso == null || e.esProceso == _filtroEsProceso;
+      final coincideEstado =
+          _filtroEstado == null || _bucketEstado(e) == _filtroEstado;
       final coincideTecnologia =
           _filtroTecnologia == null || e.tecnologia == _filtroTecnologia;
-      final coincideCategoria =
-          _filtroCategoria == null || e.categoria == _filtroCategoria;
-      return coincideBusqueda &&
-          coincideEstado &&
-          coincideTipo &&
-          coincideTecnologia &&
-          coincideCategoria;
+      return coincideBusqueda && coincideEstado && coincideTecnologia;
     }).toList();
 
     return Scaffold(
@@ -354,16 +329,24 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
                   etiqueta: "ABIERTOS",
                   cantidad: abiertos,
                   color: StatusColors.critico,
-                  seleccionado: _filtroEstado == "ERROR",
-                  onTap: () => setState(() => _filtroEstado = "ERROR"),
+                  seleccionado: _filtroEstado == "ABIERTO",
+                  onTap: () => setState(() => _filtroEstado = "ABIERTO"),
                 ),
                 const SizedBox(width: 8),
                 _ChipEstado(
                   etiqueta: "RESUELTOS",
                   cantidad: resueltos,
                   color: StatusColors.exitoso,
-                  seleccionado: _filtroEstado == "OK",
-                  onTap: () => setState(() => _filtroEstado = "OK"),
+                  seleccionado: _filtroEstado == "RESUELTO",
+                  onTap: () => setState(() => _filtroEstado = "RESUELTO"),
+                ),
+                const SizedBox(width: 8),
+                _ChipEstado(
+                  etiqueta: "DEMORADO",
+                  cantidad: demorados,
+                  color: StatusColors.demorado,
+                  seleccionado: _filtroEstado == "DEMORADO",
+                  onTap: () => setState(() => _filtroEstado = "DEMORADO"),
                 ),
               ],
             ),
@@ -374,76 +357,14 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: [
-                _ChipEstado(
-                  etiqueta: "TODOS",
-                  cantidad: _entradas.length,
-                  color: colorScheme.primary,
-                  seleccionado: _filtroEsProceso == null,
-                  onTap: () => setState(() => _filtroEsProceso = null),
-                ),
-                const SizedBox(width: 8),
-                _ChipEstado(
-                  etiqueta: "PROCESOS",
-                  cantidad: procesos,
-                  color: StatusColors.info,
-                  seleccionado: _filtroEsProceso == true,
-                  onTap: () => setState(() => _filtroEsProceso = true),
-                ),
-                const SizedBox(width: 8),
-                _ChipEstado(
-                  etiqueta: "TABLAS",
-                  cantidad: tablas,
-                  color: StatusColors.advertencia,
-                  seleccionado: _filtroEsProceso == false,
-                  onTap: () => setState(() => _filtroEsProceso = false),
-                ),
-              ],
-            ),
-          ),
-          if (_tecnologiasAfectadas.length > 1) ...[
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 34,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  for (final tecnologia in _tecnologiasAfectadas) ...[
-                    _ChipTecnologia(
-                      tecnologia: tecnologia,
-                      seleccionado: _filtroTecnologia == tecnologia,
-                      onTap: () => setState(() => _filtroTecnologia =
-                          _filtroTecnologia == tecnologia ? null : tecnologia),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                ],
-              ),
-            ),
-          ],
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 34,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                _ChipEstado(
-                  etiqueta: "TODOS",
-                  cantidad: _entradas.length,
-                  color: colorScheme.primary,
-                  seleccionado: _filtroCategoria == null,
-                  onTap: () => setState(() => _filtroCategoria = null),
-                ),
-                for (final categoria in _categoriasFiltro) ...[
-                  const SizedBox(width: 8),
-                  _ChipEstado(
-                    etiqueta: etiquetaCategoria(categoria),
-                    cantidad:
-                        _entradas.where((e) => e.categoria == categoria).length,
-                    color: colorCategoria(categoria),
-                    seleccionado: _filtroCategoria == categoria,
-                    onTap: () => setState(() => _filtroCategoria =
-                        _filtroCategoria == categoria ? null : categoria),
+                for (final tecnologia in _todasLasTecnologias) ...[
+                  _ChipTecnologia(
+                    tecnologia: tecnologia,
+                    seleccionado: _filtroTecnologia == tecnologia,
+                    onTap: () => setState(() => _filtroTecnologia =
+                        _filtroTecnologia == tecnologia ? null : tecnologia),
                   ),
+                  const SizedBox(width: 8),
                 ],
               ],
             ),

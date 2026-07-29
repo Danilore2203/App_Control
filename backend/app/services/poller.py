@@ -67,7 +67,7 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
                     estado_fin="ERROR",
                     tipo="PROCESO",
                     descripcion=(
-                        f"Proceso presentó ADVERTENCIA a las {proceso.snapshot_ts.strftime('%H:%M')} "
+                        f"Proceso en estado ADVERTENCIA a las {proceso.snapshot_ts.strftime('%H:%M')} "
                         f"(estado original: {proceso.estado}, color: {proceso.color})."
                     ),
                 )
@@ -76,6 +76,7 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
 
     if color == "red":
         estado_actual = estado_efectivo(proceso)
+        frase_estado = "demorado" if estado_actual == "DEMORADO" else f"en {estado_actual.lower()}"
         if episodio_abierto:
             episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
         else:
@@ -88,7 +89,7 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
                     estado=estado_actual,
                     estado_fin="ERROR",
                     tipo="PROCESO",
-                    descripcion=f"Proceso presentó {estado_actual} a las {proceso.snapshot_ts.strftime('%H:%M')}.",
+                    descripcion=f"Proceso {frase_estado} a las {proceso.snapshot_ts.strftime('%H:%M')}.",
                 )
             )
     elif episodio_abierto:
@@ -96,7 +97,7 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
         episodio_abierto.estado_fin = "OK"
         duracion = _formatear_duracion(episodio_abierto.fecha_hora, proceso.snapshot_ts)
         episodio_abierto.descripcion += (
-            f" Se recuperó a las {proceso.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+            f" Pasó a OK a las {proceso.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
         )
 
 
@@ -121,7 +122,7 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
                     estado_fin="ERROR",
                     tipo="TABLA",
                     descripcion=(
-                        f"Tabla presentó ADVERTENCIA a las {tabla.snapshot_ts.strftime('%H:%M')} "
+                        f"Tabla en estado ADVERTENCIA a las {tabla.snapshot_ts.strftime('%H:%M')} "
                         f"(estado original: {tabla.estado}, color: {tabla.color})."
                     ),
                 )
@@ -143,7 +144,7 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
                     estado_fin="ERROR",
                     tipo="TABLA",
                     descripcion=(
-                        f"Tabla presentó {estado_normalizado} a las {tabla.snapshot_ts.strftime('%H:%M')} "
+                        f"Tabla en {estado_normalizado.lower()} a las {tabla.snapshot_ts.strftime('%H:%M')} "
                         f"(cantidad={tabla.cantidad})."
                     ),
                 )
@@ -153,7 +154,7 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
         episodio_abierto.estado_fin = "OK"
         duracion = _formatear_duracion(episodio_abierto.fecha_hora, tabla.snapshot_ts)
         episodio_abierto.descripcion += (
-            f" Se recuperó a las {tabla.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+            f" Pasó a OK a las {tabla.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
         )
 
 
@@ -232,7 +233,7 @@ def _registrar_incoherencia(
         return
 
     mensaje = (
-        f"Proceso {proceso_nombre} presentó INCOHERENCIA a las {ts.strftime('%H:%M')}: "
+        f"Proceso {proceso_nombre} en incoherencia a las {ts.strftime('%H:%M')}: "
         f"finalizó OK pero la tabla {tabla_nombre} quedó en estado {tabla_estado} "
         f"(posible fallo silencioso)."
     )
@@ -266,7 +267,7 @@ def _cerrar_incoherencia_si_existe(
     abierta.fecha_actualizacion = ts
     abierta.estado_fin = "OK"
     duracion = _formatear_duracion(abierta.fecha_hora, ts)
-    abierta.descripcion += f" Se recuperó a las {ts.strftime('%H:%M')}. Duración: {duracion}."
+    abierta.descripcion += f" Pasó a OK a las {ts.strftime('%H:%M')}. Duración: {duracion}."
 
 
 def _revisar_incoherencia_desde_proceso(db: Session, proceso: models.Control) -> None:
