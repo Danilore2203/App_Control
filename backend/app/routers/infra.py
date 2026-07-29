@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 import httpx
@@ -6,7 +7,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from app import auth, models
 from app.config import settings
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/infra", tags=["infra"])
+
+_ERROR_CONTACTO = "No se pudo contactar el monitor de infraestructura"
 
 
 def _base_url() -> str:
@@ -21,26 +26,34 @@ def _headers(x_infra_token: str = Header(..., alias="X-Infra-Token")) -> dict:
     }
 
 
-def _reenviar_get(path: str, headers: dict, params: Optional[dict] = None) -> dict:
+def _reenviar(
+    metodo: str,
+    path: str,
+    headers: dict,
+    params: Optional[dict] = None,
+    json_body: Optional[dict] = None,
+) -> dict:
     try:
-        respuesta = httpx.get(f"{_base_url()}{path}", headers=headers, params=params, timeout=15)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"No se pudo contactar el monitor de infraestructura: {exc}")
+        respuesta = httpx.request(
+            metodo, f"{_base_url()}{path}", headers=headers, params=params, json=json_body, timeout=15
+        )
+    except Exception:
+        # El detalle real (URL interna, timeout, etc.) queda en logs del
+        # servidor; al cliente solo le llega un mensaje generico.
+        logger.exception("Fallo al contactar el monitor de infraestructura en %s", path)
+        raise HTTPException(status_code=502, detail=_ERROR_CONTACTO)
     try:
         return respuesta.json()
     except Exception:
         raise HTTPException(status_code=502, detail="Respuesta invalida del monitor de infraestructura")
+
+
+def _reenviar_get(path: str, headers: dict, params: Optional[dict] = None) -> dict:
+    return _reenviar("GET", path, headers, params=params)
 
 
 def _reenviar_post(path: str, headers: dict, json_body: dict) -> dict:
-    try:
-        respuesta = httpx.post(f"{_base_url()}{path}", headers=headers, json=json_body, timeout=15)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"No se pudo contactar el monitor de infraestructura: {exc}")
-    try:
-        return respuesta.json()
-    except Exception:
-        raise HTTPException(status_code=502, detail="Respuesta invalida del monitor de infraestructura")
+    return _reenviar("POST", path, headers, json_body=json_body)
 
 
 _dep_usuario = Depends(auth.obtener_usuario_actual)

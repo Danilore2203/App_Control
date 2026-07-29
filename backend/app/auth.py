@@ -240,7 +240,7 @@ def obtener_usuario_actual(
         raise credentials_exception
 
     usuario = db.query(models.Usuario).filter(models.Usuario.username == username).first()
-    if usuario is None:
+    if usuario is None or not usuario.activo:
         raise credentials_exception
     return usuario
 

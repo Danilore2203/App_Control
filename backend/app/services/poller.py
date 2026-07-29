@@ -206,6 +206,33 @@ def _registrar_incoherencia(
     _alertar_a_destinatarios(db, proceso_id, mensaje, titulo="Fallo silencioso detectado")
 
 
+def _cerrar_incoherencia_si_existe(
+    db: Session, proceso_nombre: str, proceso_fuente: str, tabla_nombre: str, dia, ts
+) -> None:
+    """`_registrar_incoherencia` nunca se llamaba de vuelta cuando la
+    incoherencia se resolvia, asi que el episodio quedaba "abierto" para
+    siempre en la bitacora aunque la tabla ya estuviera bien. Se cierra aca,
+    con la misma logica de episodio (por dia) que las otras bitacoras."""
+
+    nombre_compuesto = f"{proceso_nombre} -> {tabla_nombre}"
+    abierta = (
+        db.query(models.BitacoraError)
+        .filter(
+            models.BitacoraError.nombre == nombre_compuesto,
+            models.BitacoraError.tecnologia == proceso_fuente,
+            models.BitacoraError.estado_fin != "OK",
+            func.date(models.BitacoraError.fecha_hora) == dia,
+        )
+        .order_by(models.BitacoraError.id.desc())
+        .first()
+    )
+    if abierta is None:
+        return
+    abierta.fecha_actualizacion = ts
+    abierta.estado_fin = "OK"
+    abierta.descripcion += f" Paso a OK a las {ts.strftime('%H:%M')}."
+
+
 def _revisar_incoherencia_desde_proceso(db: Session, proceso: models.Control) -> None:
     for tabla_nombre in _tablas_de_proceso(db, proceso.nombre):
         tabla = (
@@ -221,6 +248,10 @@ def _revisar_incoherencia_desde_proceso(db: Session, proceso: models.Control) ->
             _registrar_incoherencia(
                 db, proceso.id, proceso.nombre, proceso.fuente, tabla.nombre, tabla.estado,
                 proceso.snapshot_fecha, proceso.snapshot_ts,
+            )
+        else:
+            _cerrar_incoherencia_si_existe(
+                db, proceso.nombre, proceso.fuente, tabla_nombre, proceso.snapshot_fecha, proceso.snapshot_ts
             )
 
 
@@ -239,6 +270,10 @@ def _revisar_incoherencia_desde_tabla(db: Session, tabla: models.Tabla) -> None:
             _registrar_incoherencia(
                 db, proceso.id, proceso.nombre, proceso.fuente, tabla.nombre, tabla.estado,
                 tabla.snapshot_fecha, tabla.snapshot_ts,
+            )
+        elif proceso:
+            _cerrar_incoherencia_si_existe(
+                db, proceso_nombre, proceso.fuente, tabla.nombre, tabla.snapshot_fecha, tabla.snapshot_ts
             )
 
 

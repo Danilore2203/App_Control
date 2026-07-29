@@ -1,16 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
+from app.rate_limit import limiter
 from app.services.fcm import enviar_alerta_push
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=schemas.MensajeOut)
-def registrar(usuario_in: schemas.UsuarioCreate, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def registrar(request: Request, usuario_in: schemas.UsuarioCreate, db: Session = Depends(get_db)):
     """No crea la cuenta directo (eso dejaba entrar a cualquiera sin ningun
     control): queda como solicitud pendiente, igual que el acceso via Google,
     hasta que un administrador la apruebe desde /admin/solicitudes-registro."""
@@ -47,7 +49,8 @@ def registrar(usuario_in: schemas.UsuarioCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=schemas.Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     usuario = auth.autenticar_usuario(form_data.username, form_data.password, db)
     if not usuario:
         cuenta = auth.buscar_usuario_por_identificador(form_data.username, db)
@@ -72,7 +75,8 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 
 
 @router.post("/configurar-password", response_model=schemas.Token)
-def configurar_password(payload: schemas.ConfigurarPasswordIn, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def configurar_password(request: Request, payload: schemas.ConfigurarPasswordIn, db: Session = Depends(get_db)):
     usuario = auth.configurar_password_local(
         payload.username,
         payload.password_actual,
@@ -88,7 +92,8 @@ def configurar_password(payload: schemas.ConfigurarPasswordIn, db: Session = Dep
 
 
 @router.post("/login/google", response_model=schemas.Token)
-def login_con_google(payload: schemas.GoogleLoginIn, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login_con_google(request: Request, payload: schemas.GoogleLoginIn, db: Session = Depends(get_db)):
     try:
         usuario = auth.autenticar_con_google(payload.id_token, db)
     except auth.AccesoGoogleNoConcedido as exc:
