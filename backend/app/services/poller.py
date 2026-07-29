@@ -1,6 +1,5 @@
 import logging
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models
@@ -19,30 +18,42 @@ ESTADOS_TABLA_NORMALIZADOS = {
 }
 
 
-def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
-    """Un episodio de error = una fila por (proceso, dia). Mientras el
-    proceso siga leyendose en rojo ese mismo dia (se relee cada 5 min), se
-    actualiza fecha_actualizacion en la misma fila en vez de crear otra. Si
-    una lectura posterior el mismo dia lo muestra en verde, se cierra el
-    episodio guardando 'OK' en Estado_Fin."""
+def _formatear_duracion(inicio, fin) -> str:
+    segundos = max(0, int((fin - inicio).total_seconds()))
+    horas, resto = divmod(segundos, 3600)
+    minutos = resto // 60
+    if horas:
+        return f"{horas}h {minutos}m"
+    return f"{minutos}m"
 
-    color = color_efectivo(proceso)
-    if color not in ("red", "green"):
-        return
 
-    episodio_abierto = (
+def _episodio_abierto(db: Session, nombre: str, tecnologia: str):
+    """Episodio abierto = misma fila hasta que se cierre con Estado_Fin='OK',
+    sin importar si cruza medianoche - un incidente real dura lo que dure."""
+
+    return (
         db.query(models.BitacoraError)
         .filter(
-            models.BitacoraError.nombre == proceso.nombre,
-            models.BitacoraError.tecnologia == proceso.fuente,
+            models.BitacoraError.nombre == nombre,
+            models.BitacoraError.tecnologia == tecnologia,
             models.BitacoraError.estado_fin == "ERROR",
-            func.date(models.BitacoraError.fecha_hora) == proceso.snapshot_fecha,
         )
         .order_by(models.BitacoraError.id.desc())
         .first()
     )
 
-    if color == "red":
+
+def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
+    """Un episodio de error = una fila mientras el proceso siga sin volver a
+    verde (se relee cada 5 min), sin cortar por dia calendario. Si el color de
+    origen no es ninguno de los conocidos (red/orange/green), se registra
+    igual como ADVERTENCIA en vez de perderse en silencio."""
+
+    color = color_efectivo(proceso)
+    conocido = color in ("red", "green")
+    episodio_abierto = _episodio_abierto(db, proceso.nombre, proceso.fuente)
+
+    if not conocido:
         if episodio_abierto:
             episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
         else:
@@ -52,36 +63,70 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
                     fecha_actualizacion=proceso.snapshot_ts,
                     nombre=proceso.nombre,
                     tecnologia=proceso.fuente,
-                    estado=estado_efectivo(proceso),
+                    estado="ADVERTENCIA",
                     estado_fin="ERROR",
                     tipo="PROCESO",
-                    descripcion=f"Proceso finalizo con estado {estado_efectivo(proceso)}.",
+                    descripcion=(
+                        f"Proceso presentó ADVERTENCIA a las {proceso.snapshot_ts.strftime('%H:%M')} "
+                        f"(estado original: {proceso.estado}, color: {proceso.color})."
+                    ),
+                )
+            )
+        return
+
+    if color == "red":
+        estado_actual = estado_efectivo(proceso)
+        if episodio_abierto:
+            episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
+        else:
+            db.add(
+                models.BitacoraError(
+                    fecha_hora=proceso.snapshot_ts,
+                    fecha_actualizacion=proceso.snapshot_ts,
+                    nombre=proceso.nombre,
+                    tecnologia=proceso.fuente,
+                    estado=estado_actual,
+                    estado_fin="ERROR",
+                    tipo="PROCESO",
+                    descripcion=f"Proceso presentó {estado_actual} a las {proceso.snapshot_ts.strftime('%H:%M')}.",
                 )
             )
     elif episodio_abierto:
         episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
         episodio_abierto.estado_fin = "OK"
-        episodio_abierto.descripcion += f" Paso a OK a las {proceso.snapshot_ts.strftime('%H:%M')}."
+        duracion = _formatear_duracion(episodio_abierto.fecha_hora, proceso.snapshot_ts)
+        episodio_abierto.descripcion += (
+            f" Se recuperó a las {proceso.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+        )
 
 
 def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
     """Misma logica de episodio que _actualizar_bitacora_proceso, mirando
     dataops_catalogo_tablas en vez de dataops_catalogo_procesos."""
 
-    if tabla.color not in ("red", "green"):
-        return
+    conocido = tabla.color in ("red", "green")
+    episodio_abierto = _episodio_abierto(db, tabla.nombre, tabla.fuente)
 
-    episodio_abierto = (
-        db.query(models.BitacoraError)
-        .filter(
-            models.BitacoraError.nombre == tabla.nombre,
-            models.BitacoraError.tecnologia == tabla.fuente,
-            models.BitacoraError.estado_fin == "ERROR",
-            func.date(models.BitacoraError.fecha_hora) == tabla.snapshot_fecha,
-        )
-        .order_by(models.BitacoraError.id.desc())
-        .first()
-    )
+    if not conocido:
+        if episodio_abierto:
+            episodio_abierto.fecha_actualizacion = tabla.snapshot_ts
+        else:
+            db.add(
+                models.BitacoraError(
+                    fecha_hora=tabla.snapshot_ts,
+                    fecha_actualizacion=tabla.snapshot_ts,
+                    nombre=tabla.nombre,
+                    tecnologia=tabla.fuente,
+                    estado="ADVERTENCIA",
+                    estado_fin="ERROR",
+                    tipo="TABLA",
+                    descripcion=(
+                        f"Tabla presentó ADVERTENCIA a las {tabla.snapshot_ts.strftime('%H:%M')} "
+                        f"(estado original: {tabla.estado}, color: {tabla.color})."
+                    ),
+                )
+            )
+        return
 
     if tabla.color == "red":
         estado_normalizado = ESTADOS_TABLA_NORMALIZADOS.get(tabla.estado.upper().strip(), "ERROR")
@@ -97,13 +142,19 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
                     estado=estado_normalizado,
                     estado_fin="ERROR",
                     tipo="TABLA",
-                    descripcion=f"Tabla en estado {tabla.estado} (cantidad={tabla.cantidad}).",
+                    descripcion=(
+                        f"Tabla presentó {estado_normalizado} a las {tabla.snapshot_ts.strftime('%H:%M')} "
+                        f"(cantidad={tabla.cantidad})."
+                    ),
                 )
             )
     elif episodio_abierto:
         episodio_abierto.fecha_actualizacion = tabla.snapshot_ts
         episodio_abierto.estado_fin = "OK"
-        episodio_abierto.descripcion += f" Paso a OK a las {tabla.snapshot_ts.strftime('%H:%M')}."
+        duracion = _formatear_duracion(episodio_abierto.fecha_hora, tabla.snapshot_ts)
+        episodio_abierto.descripcion += (
+            f" Se recuperó a las {tabla.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+        )
 
 
 def _tablas_de_proceso(db: Session, proceso_nombre: str) -> list[str]:
@@ -165,31 +216,25 @@ def _registrar_incoherencia(
     proceso_fuente: str,
     tabla_nombre: str,
     tabla_estado: str,
-    dia,
     ts,
 ) -> None:
     """Un proceso core que termino OK pero cuya tabla dependiente quedo vacia/en
     error: el proceso no lo reporta como error (por eso el monitor normal no lo
     alcanza a ver), asi que se registra aparte como 'fallo silencioso' y se
-    alerta igual que una falla critica normal."""
+    alerta igual que una falla critica normal. Mismo criterio de episodio
+    abierto (estado_fin='ERROR', sin corte por dia) que el resto de la
+    bitacora."""
 
     nombre_compuesto = f"{proceso_nombre} -> {tabla_nombre}"
-    ya_registrada = (
-        db.query(models.BitacoraError)
-        .filter(
-            models.BitacoraError.nombre == nombre_compuesto,
-            models.BitacoraError.tecnologia == proceso_fuente,
-            func.date(models.BitacoraError.fecha_hora) == dia,
-        )
-        .first()
-    )
+    ya_registrada = _episodio_abierto(db, nombre_compuesto, proceso_fuente)
     if ya_registrada:
         ya_registrada.fecha_actualizacion = ts
         return
 
     mensaje = (
-        f"Proceso {proceso_nombre} finalizo OK pero la tabla {tabla_nombre} "
-        f"quedo en estado {tabla_estado} (posible fallo silencioso)."
+        f"Proceso {proceso_nombre} presentó INCOHERENCIA a las {ts.strftime('%H:%M')}: "
+        f"finalizó OK pero la tabla {tabla_nombre} quedó en estado {tabla_estado} "
+        f"(posible fallo silencioso)."
     )
     db.add(
         models.BitacoraError(
@@ -207,30 +252,21 @@ def _registrar_incoherencia(
 
 
 def _cerrar_incoherencia_si_existe(
-    db: Session, proceso_nombre: str, proceso_fuente: str, tabla_nombre: str, dia, ts
+    db: Session, proceso_nombre: str, proceso_fuente: str, tabla_nombre: str, ts
 ) -> None:
     """`_registrar_incoherencia` nunca se llamaba de vuelta cuando la
     incoherencia se resolvia, asi que el episodio quedaba "abierto" para
     siempre en la bitacora aunque la tabla ya estuviera bien. Se cierra aca,
-    con la misma logica de episodio (por dia) que las otras bitacoras."""
+    con el mismo criterio de episodio que el resto de la bitacora."""
 
     nombre_compuesto = f"{proceso_nombre} -> {tabla_nombre}"
-    abierta = (
-        db.query(models.BitacoraError)
-        .filter(
-            models.BitacoraError.nombre == nombre_compuesto,
-            models.BitacoraError.tecnologia == proceso_fuente,
-            models.BitacoraError.estado_fin != "OK",
-            func.date(models.BitacoraError.fecha_hora) == dia,
-        )
-        .order_by(models.BitacoraError.id.desc())
-        .first()
-    )
+    abierta = _episodio_abierto(db, nombre_compuesto, proceso_fuente)
     if abierta is None:
         return
     abierta.fecha_actualizacion = ts
     abierta.estado_fin = "OK"
-    abierta.descripcion += f" Paso a OK a las {ts.strftime('%H:%M')}."
+    duracion = _formatear_duracion(abierta.fecha_hora, ts)
+    abierta.descripcion += f" Se recuperó a las {ts.strftime('%H:%M')}. Duración: {duracion}."
 
 
 def _revisar_incoherencia_desde_proceso(db: Session, proceso: models.Control) -> None:
@@ -247,11 +283,11 @@ def _revisar_incoherencia_desde_proceso(db: Session, proceso: models.Control) ->
         if tabla and tabla.color == "red":
             _registrar_incoherencia(
                 db, proceso.id, proceso.nombre, proceso.fuente, tabla.nombre, tabla.estado,
-                proceso.snapshot_fecha, proceso.snapshot_ts,
+                proceso.snapshot_ts,
             )
         else:
             _cerrar_incoherencia_si_existe(
-                db, proceso.nombre, proceso.fuente, tabla_nombre, proceso.snapshot_fecha, proceso.snapshot_ts
+                db, proceso.nombre, proceso.fuente, tabla_nombre, proceso.snapshot_ts
             )
 
 
@@ -269,11 +305,11 @@ def _revisar_incoherencia_desde_tabla(db: Session, tabla: models.Tabla) -> None:
         if proceso and color_efectivo(proceso) == "green" and es_core(proceso):
             _registrar_incoherencia(
                 db, proceso.id, proceso.nombre, proceso.fuente, tabla.nombre, tabla.estado,
-                tabla.snapshot_fecha, tabla.snapshot_ts,
+                tabla.snapshot_ts,
             )
         elif proceso:
             _cerrar_incoherencia_si_existe(
-                db, proceso_nombre, proceso.fuente, tabla.nombre, tabla.snapshot_fecha, tabla.snapshot_ts
+                db, proceso_nombre, proceso.fuente, tabla.nombre, tabla.snapshot_ts
             )
 
 

@@ -18,6 +18,8 @@ class StatusColors {
   static const advertencia = Color(0xFFFFB300);
   static const exitoso = Color(0xFF4CAF50);
   static const info = Color(0xFF2196F3);
+  static const demorado = Color(0xFFFFD600);
+  static const neutral = Color(0xFF9E9E9E);
 }
 
 /// Esquema de color exacto "VIVA Operational Control" (NOC Control Room)

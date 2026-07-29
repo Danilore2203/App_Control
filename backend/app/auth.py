@@ -44,6 +44,44 @@ def crear_access_token(data: dict, expires_delta: Optional[timedelta] = None) ->
     return jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
+REFRESH_TOKEN_EXPIRE_DIAS = 30
+
+
+def crear_refresh_token(username: str) -> str:
+    """Token de vida larga (30 dias) que solo sirve para pedir un access_token
+    nuevo (POST /auth/refresh), nunca para llamar al resto de la API
+    directamente -por eso el claim "type": "refresh", que se chequea aparte."""
+
+    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DIAS)
+    return jwt.encode(
+        {"sub": username, "type": "refresh", "exp": expire},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def verificar_refresh_token(token: str, db: Session) -> Optional[models.Usuario]:
+    """None si el token es invalido, vencido, no es de tipo refresh, o el
+    usuario ya no existe/esta activo."""
+
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    except JWTError:
+        return None
+
+    if payload.get("type") != "refresh":
+        return None
+
+    username = payload.get("sub")
+    if not username:
+        return None
+
+    usuario = db.query(models.Usuario).filter(models.Usuario.username == username).first()
+    if usuario is None or not usuario.activo:
+        return None
+    return usuario
+
+
 def autenticar_contra_monitor(username: str, password: str) -> Optional[str]:
     """Llama al mismo endpoint de login que usa el monitor web (AD + fallback interno).
     Devuelve el access_token que emite ese monitor si las credenciales son validas

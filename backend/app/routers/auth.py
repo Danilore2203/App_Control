@@ -68,10 +68,11 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
         raise HTTPException(status_code=401, detail="Usuario o contrasena incorrectos")
 
     access_token = auth.crear_access_token(data={"sub": usuario.username})
+    refresh_token = auth.crear_refresh_token(usuario.username)
     # Token del monitor OP (Netezza/Postgres): mismo AD, se pide aparte para no
     # atar el login de la app a que el modulo de infraestructura este disponible.
     infra_token = auth.autenticar_contra_monitor(form_data.username, form_data.password)
-    return schemas.Token(access_token=access_token, infra_token=infra_token)
+    return schemas.Token(access_token=access_token, refresh_token=refresh_token, infra_token=infra_token)
 
 
 @router.post("/configurar-password", response_model=schemas.Token)
@@ -88,7 +89,8 @@ def configurar_password(request: Request, payload: schemas.ConfigurarPasswordIn,
         raise HTTPException(status_code=401, detail="Usuario o contrasena actual incorrectos")
 
     access_token = auth.crear_access_token(data={"sub": usuario.username})
-    return schemas.Token(access_token=access_token)
+    refresh_token = auth.crear_refresh_token(usuario.username)
+    return schemas.Token(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/login/google", response_model=schemas.Token)
@@ -103,7 +105,25 @@ def login_con_google(request: Request, payload: schemas.GoogleLoginIn, db: Sessi
         raise HTTPException(status_code=401, detail="Token de Google invalido")
 
     access_token = auth.crear_access_token(data={"sub": usuario.username})
-    return schemas.Token(access_token=access_token)
+    refresh_token = auth.crear_refresh_token(usuario.username)
+    return schemas.Token(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/refresh", response_model=schemas.Token)
+@limiter.limit("20/minute")
+def refrescar_token(request: Request, payload: schemas.RefreshIn, db: Session = Depends(get_db)):
+    """Cambia un refresh_token todavia valido por un access_token nuevo, sin
+    pedir credenciales de nuevo. Tambien rota el refresh_token (ventana
+    deslizante): mientras el usuario abra la app dentro de los 30 dias, la
+    sesion nunca vence de verdad."""
+
+    usuario = auth.verificar_refresh_token(payload.refresh_token, db)
+    if usuario is None:
+        raise HTTPException(status_code=401, detail="Sesion vencida, volve a iniciar sesion")
+
+    access_token = auth.crear_access_token(data={"sub": usuario.username})
+    nuevo_refresh_token = auth.crear_refresh_token(usuario.username)
+    return schemas.Token(access_token=access_token, refresh_token=nuevo_refresh_token)
 
 
 @router.post("/vincular-google", response_model=schemas.UsuarioOut)

@@ -9,6 +9,10 @@ import "package:http/http.dart" as http;
 import "../config.dart";
 import "../models/usuario.dart";
 
+/// Se lanza cuando el refresh_token tambien esta vencido/invalido: ahi si
+/// hay que loguearse de nuevo a mano, no antes.
+class SesionExpiradaException implements Exception {}
+
 /// Se lanza cuando el login falla porque la cuenta (tipicamente AD) todavia
 /// no tiene una contrasena local configurada para la app.
 class RequiereConfigurarPasswordException implements Exception {
@@ -23,6 +27,7 @@ class RequiereConfigurarPasswordException implements Exception {
 class AuthService {
   static const _storage = FlutterSecureStorage();
   static const _tokenKey = "access_token";
+  static const _refreshTokenKey = "refresh_token";
   static const _infraTokenKey = "infra_token";
   // Mas largo que en ApiService: el login ademas espera a que el backend
   // consulte el monitor de AD, que puede tardar unos segundos.
@@ -77,8 +82,16 @@ class AuthService {
     }
 
     final data = jsonDecode(response.body);
-    await _storage.write(key: _tokenKey, value: data["access_token"]);
+    await _guardarTokens(data);
     await _guardarInfraToken(data);
+  }
+
+  Future<void> _guardarTokens(Map<String, dynamic> data) async {
+    await _storage.write(key: _tokenKey, value: data["access_token"]);
+    final refreshToken = data["refresh_token"];
+    if (refreshToken is String && refreshToken.isNotEmpty) {
+      await _storage.write(key: _refreshTokenKey, value: refreshToken);
+    }
   }
 
   Future<void> _guardarInfraToken(Map<String, dynamic> data) async {
@@ -133,7 +146,7 @@ class AuthService {
     }
 
     final data = jsonDecode(response.body);
-    await _storage.write(key: _tokenKey, value: data["access_token"]);
+    await _guardarTokens(data);
   }
 
   Future<void> loginConGoogle() async {
@@ -162,7 +175,7 @@ class AuthService {
     }
 
     final data = jsonDecode(response.body);
-    await _storage.write(key: _tokenKey, value: data["access_token"]);
+    await _guardarTokens(data);
   }
 
   /// Asocia una cuenta de Google (puede ser distinta a la del correo de AD)
@@ -220,12 +233,44 @@ class AuthService {
 
   Future<String?> obtenerToken() => _storage.read(key: _tokenKey);
 
+  Future<String?> obtenerRefreshToken() => _storage.read(key: _refreshTokenKey);
+
   /// Token del monitor OP (Netezza/PostgreSQL DEV/PROD). Nulo si el usuario
   /// entro por Google o si el monitor no estaba disponible al hacer login.
   Future<String?> obtenerInfraToken() => _storage.read(key: _infraTokenKey);
 
+  /// Cambia el refresh_token guardado por un access_token nuevo, sin pedir
+  /// credenciales de vuelta. Lanza [SesionExpiradaException] especificamente
+  /// cuando el refresh_token esta vencido/invalido (ahi si hay que loguearse
+  /// de nuevo a mano) - cualquier otro error (red, timeout) se propaga tal
+  /// cual, porque no significa que la sesion este realmente muerta.
+  Future<void> refrescarToken() async {
+    final refreshToken = await obtenerRefreshToken();
+    if (refreshToken == null) {
+      throw SesionExpiradaException();
+    }
+
+    final response = await http
+        .post(
+          Uri.parse("${AppConfig.apiBaseUrl}/auth/refresh"),
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode({"refresh_token": refreshToken}),
+        )
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+
+    if (response.statusCode == 401) {
+      throw SesionExpiradaException();
+    }
+    if (response.statusCode != 200) {
+      throw Exception("No se pudo renovar la sesión.");
+    }
+
+    await _guardarTokens(jsonDecode(response.body));
+  }
+
   Future<void> logout() async {
     await _storage.delete(key: _tokenKey);
+    await _storage.delete(key: _refreshTokenKey);
     await _storage.delete(key: _infraTokenKey);
     await _googleSignIn.signOut();
   }

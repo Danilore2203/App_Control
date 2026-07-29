@@ -78,14 +78,37 @@ class _LoginScreenState extends State<LoginScreen> {
     final ok = await _biometricService.autenticar();
     if (!mounted) return;
 
-    if (ok) {
-      await _entrarADashboard();
+    if (!ok) {
+      setState(() {
+        _cargando = false;
+        _error = "No se pudo verificar tu identidad.";
+      });
       return;
     }
-    setState(() {
-      _cargando = false;
-      _error = "No se pudo verificar tu identidad.";
-    });
+
+    // La huella solo confirma que sos vos - no confirma que la sesion siga
+    // viva en el backend. Se intenta refrescar antes de entrar: si el
+    // refresh_token tambien esta vencido, se manda al formulario de login
+    // en vez de entrar con una sesion muerta (antes pasaba justo eso: entraba
+    // igual y recien ahi el usuario empezaba a ver errores en cada pantalla).
+    try {
+      await _authService.refrescarToken();
+    } on SesionExpiradaException {
+      if (!mounted) return;
+      await _authService.logout();
+      setState(() {
+        _cargando = false;
+        _hayTokenGuardado = false;
+        _error = "Tu sesión expiró. Iniciá sesión de nuevo.";
+      });
+      return;
+    } catch (_) {
+      // Error de red/timeout al refrescar: no bloquea el ingreso, el resto
+      // de la app ya maneja sus propios errores de conexion pantalla por
+      // pantalla.
+    }
+
+    await _entrarADashboard();
   }
 
   Future<void> _iniciarSesion() async {

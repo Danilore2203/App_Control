@@ -6,6 +6,7 @@ import "package:http/http.dart" as http;
 import "../config.dart";
 import "../models/netezza_sesion.dart";
 import "../models/postgres_sesion.dart";
+import "api_client.dart";
 import "auth_service.dart";
 
 /// Habla con el monitor OP existente (Netezza / PostgreSQL DEV / PostgreSQL
@@ -46,12 +47,12 @@ class InfraService {
   }
 
   Future<Map<String, dynamic>> _get(String path) async {
-    final response = await http
+    final response = await ApiClient.enviar(() async => http
         .get(
           Uri.parse("${AppConfig.apiBaseUrl}/infra$path"),
           headers: await _headers(),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
     final body = _decodificar(response);
     if (response.statusCode != 200 || body["ok"] != true) {
       throw Exception(body["error"]?.toString() ??
@@ -63,13 +64,13 @@ class InfraService {
 
   Future<Map<String, dynamic>> _post(
       String path, Map<String, dynamic> data) async {
-    final response = await http
+    final response = await ApiClient.enviar(() async => http
         .post(
           Uri.parse("${AppConfig.apiBaseUrl}/infra$path"),
           headers: await _headers(),
           body: jsonEncode(data),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
     final body = _decodificar(response);
     if (body["ok"] != true) {
       throw Exception(body["error"]?.toString() ??

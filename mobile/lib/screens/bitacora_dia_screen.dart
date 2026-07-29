@@ -5,6 +5,7 @@ import "../services/api_service.dart";
 import "../theme.dart";
 import "../utils/meses_es.dart";
 import "../widgets/estado_vacio.dart";
+import "../widgets/formulario_entrada_bitacora.dart";
 
 IconData iconoTecnologia(String tecnologia) {
   switch (tecnologia) {
@@ -41,6 +42,84 @@ Color colorTecnologia(String tecnologia) {
   }
 }
 
+/// Ícono según el tipo de evento (estado crudo de la fila), no según la
+/// tecnología - ERROR/INCOHERENCIA/VACIA/DATOS_INCORRECTOS comparten ícono
+/// de fallo, cada categoría nueva tiene el suyo.
+IconData iconoEvento(BitacoraError entrada) {
+  if (entrada.resuelto) return Icons.check_circle_outline;
+  switch ((entrada.estado ?? "").toUpperCase()) {
+    case "DEMORADO":
+      return Icons.schedule;
+    case "EJECUTADO":
+      return Icons.play_circle_outline;
+    case "ADVERTENCIA":
+      return Icons.warning_amber_rounded;
+    case "INFORMACION":
+      return Icons.info_outline;
+    case "REINTENTO":
+      return Icons.refresh;
+    default:
+      return Icons.error_outline;
+  }
+}
+
+/// Color según el tipo de evento: ERROR=rojo, RESUELTO=verde, DEMORADO=
+/// amarillo, EJECUTADO=azul, ADVERTENCIA=naranja, INFORMACIÓN=gris.
+Color colorEvento(BitacoraError entrada) {
+  if (entrada.resuelto) return StatusColors.exitoso;
+  switch ((entrada.estado ?? "").toUpperCase()) {
+    case "DEMORADO":
+      return StatusColors.demorado;
+    case "EJECUTADO":
+      return StatusColors.info;
+    case "ADVERTENCIA":
+      return StatusColors.advertencia;
+    case "INFORMACION":
+      return StatusColors.neutral;
+    case "REINTENTO":
+      return StatusColors.info;
+    default:
+      return StatusColors.critico;
+  }
+}
+
+/// Etiqueta legible por categoría de filtro (Todos/Errores/Resueltos/
+/// Demorados/Ejecutados/Información), en el mismo orden que pidió el
+/// usuario.
+const _categoriasFiltro = ["ERROR", "RESUELTO", "DEMORADO", "EJECUTADO", "INFORMACION"];
+
+String etiquetaCategoria(String categoria) {
+  switch (categoria) {
+    case "ERROR":
+      return "ERRORES";
+    case "RESUELTO":
+      return "RESUELTOS";
+    case "DEMORADO":
+      return "DEMORADOS";
+    case "EJECUTADO":
+      return "EJECUTADOS";
+    case "INFORMACION":
+      return "INFORMACIÓN";
+    default:
+      return categoria;
+  }
+}
+
+Color colorCategoria(String categoria) {
+  switch (categoria) {
+    case "RESUELTO":
+      return StatusColors.exitoso;
+    case "DEMORADO":
+      return StatusColors.demorado;
+    case "EJECUTADO":
+      return StatusColors.info;
+    case "INFORMACION":
+      return StatusColors.neutral;
+    default:
+      return StatusColors.critico;
+  }
+}
+
 /// Detalle de un dia especifico de la bitacora: fallos reales (con su
 /// descripcion real, no inventada) ocurridos ese dia.
 class BitacoraDiaScreen extends StatefulWidget {
@@ -70,6 +149,7 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
   String? _filtroEstado; // null=todos, "ERROR"=abiertos, "OK"=resueltos
   bool? _filtroEsProceso; // null=todos, true=procesos, false=tablas
   String? _filtroTecnologia;
+  String? _filtroCategoria; // null=todos, o una de _categoriasFiltro
   late final AnimationController _pulseController;
 
   @override
@@ -95,7 +175,7 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _FormularioEntradaDia(
+      builder: (_) => FormularioEntradaBitacora(
         fechaHora: DateTime(
             widget.anio, widget.mes, widget.dia, ahora.hour, ahora.minute),
       ),
@@ -131,10 +211,13 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
           _filtroEsProceso == null || e.esProceso == _filtroEsProceso;
       final coincideTecnologia =
           _filtroTecnologia == null || e.tecnologia == _filtroTecnologia;
+      final coincideCategoria =
+          _filtroCategoria == null || e.categoria == _filtroCategoria;
       return coincideBusqueda &&
           coincideEstado &&
           coincideTipo &&
-          coincideTecnologia;
+          coincideTecnologia &&
+          coincideCategoria;
     }).toList();
 
     return Scaffold(
@@ -337,6 +420,34 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
               ),
             ),
           ],
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 34,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                _ChipEstado(
+                  etiqueta: "TODOS",
+                  cantidad: _entradas.length,
+                  color: colorScheme.primary,
+                  seleccionado: _filtroCategoria == null,
+                  onTap: () => setState(() => _filtroCategoria = null),
+                ),
+                for (final categoria in _categoriasFiltro) ...[
+                  const SizedBox(width: 8),
+                  _ChipEstado(
+                    etiqueta: etiquetaCategoria(categoria),
+                    cantidad:
+                        _entradas.where((e) => e.categoria == categoria).length,
+                    color: colorCategoria(categoria),
+                    seleccionado: _filtroCategoria == categoria,
+                    onTap: () => setState(() => _filtroCategoria =
+                        _filtroCategoria == categoria ? null : categoria),
+                  ),
+                ],
+              ],
+            ),
+          ),
           const SizedBox(height: 16),
           if (entradasFiltradas.isEmpty)
             Padding(
@@ -463,8 +574,9 @@ class _TarjetaFalloDia extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final resuelto = entrada.resuelto;
-    final color = resuelto ? StatusColors.exitoso : StatusColors.critico;
-    final colorTech = colorTecnologia(entrada.tecnologia);
+    final color = colorEvento(entrada);
+    final estadoTexto = entrada.estado ?? (entrada.esProceso ? "ERROR" : "TABLA");
+    final sistema = entrada.sistema ?? entrada.tecnologia;
 
     return Container(
       decoration: BoxDecoration(
@@ -486,11 +598,10 @@ class _TarjetaFalloDia extends StatelessWidget {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: colorTech.withValues(alpha: 0.15),
+                  color: color.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(iconoTecnologia(entrada.tecnologia),
-                    color: colorTech, size: 18),
+                child: Icon(iconoEvento(entrada), color: color, size: 18),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -501,23 +612,21 @@ class _TarjetaFalloDia extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            "${entrada.tecnologia} · ${entrada.estado ?? (entrada.esProceso ? 'ERROR' : 'TABLA')}",
-                            style: AppTextStyles.tech(
-                                color: colorTech, fontSize: 9),
+                            "$sistema · $estadoTexto",
+                            style:
+                                AppTextStyles.tech(color: color, fontSize: 9),
                           ),
                         ),
-                        if (resuelto)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 1),
-                            decoration: BoxDecoration(
-                                color: StatusColors.exitoso
-                                    .withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(6)),
-                            child: Text("RESUELTO",
-                                style: AppTextStyles.tech(
-                                    color: StatusColors.exitoso, fontSize: 8)),
-                          ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 1),
+                          decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(6)),
+                          child: Text(resuelto ? "RESUELTO" : "ABIERTO",
+                              style:
+                                  AppTextStyles.tech(color: color, fontSize: 8)),
+                        ),
                       ],
                     ),
                     Text(
@@ -532,27 +641,28 @@ class _TarjetaFalloDia extends StatelessWidget {
                   ],
                 ),
               ),
-              Text(
-                _hora(entrada.fechaHora),
-                style: AppTextStyles.tech(
-                    color: colorScheme.onSurfaceVariant, fontSize: 10),
-              ),
             ],
           ),
-          if (!resuelto &&
-              entrada.fechaActualizacion != null &&
-              entrada.fechaActualizacion!
-                      .difference(entrada.fechaHora)
-                      .inMinutes
-                      .abs() >=
-                  1) ...[
-            const SizedBox(height: 4),
-            Text(
-              "Última lectura: ${_hora(entrada.fechaActualizacion!)}",
-              style: TextStyle(
-                  color: colorScheme.onSurfaceVariant, fontSize: 10.5),
-            ),
-          ],
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 14,
+            runSpacing: 4,
+            children: [
+              _DatoTarjeta(
+                  icono: Icons.play_arrow_outlined,
+                  texto: "Inicio ${_hora(entrada.fechaHora)}"),
+              if (resuelto && entrada.fechaActualizacion != null)
+                _DatoTarjeta(
+                    icono: Icons.flag_outlined,
+                    texto: "Resuelto ${_hora(entrada.fechaActualizacion!)}"),
+              _DatoTarjeta(
+                  icono: Icons.timelapse,
+                  texto: "Duración ${entrada.duracionFormateada}"),
+              if (entrada.origen != null)
+                _DatoTarjeta(
+                    icono: Icons.person_outline, texto: entrada.origen!),
+            ],
+          ),
           const SizedBox(height: 10),
           Container(
             width: double.infinity,
@@ -565,12 +675,7 @@ class _TarjetaFalloDia extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                    resuelto
-                        ? Icons.check_circle_outline
-                        : Icons.warning_amber_rounded,
-                    color: color,
-                    size: 15),
+                Icon(iconoEvento(entrada), color: color, size: 15),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -588,163 +693,24 @@ class _TarjetaFalloDia extends StatelessWidget {
   }
 }
 
-class _FormularioEntradaDia extends StatefulWidget {
-  final DateTime fechaHora;
+class _DatoTarjeta extends StatelessWidget {
+  final IconData icono;
+  final String texto;
 
-  const _FormularioEntradaDia({required this.fechaHora});
-
-  @override
-  State<_FormularioEntradaDia> createState() => _FormularioEntradaDiaState();
-}
-
-class _FormularioEntradaDiaState extends State<_FormularioEntradaDia> {
-  final _apiService = ApiService();
-  final _formKey = GlobalKey<FormState>();
-  final _nombreController = TextEditingController();
-  final _descripcionController = TextEditingController();
-  bool _esProceso = true;
-  String _tecnologia = tecnologiasProceso.first;
-  String _estado = estadosProceso.first;
-  bool _guardando = false;
-  String? _error;
-
-  @override
-  void dispose() {
-    _nombreController.dispose();
-    _descripcionController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _guardar() async {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-    setState(() {
-      _guardando = true;
-      _error = null;
-    });
-    try {
-      await _apiService.crearEntradaBitacora(
-        nombre: _nombreController.text.trim(),
-        tecnologia: _tecnologia,
-        estado: _estado,
-        descripcion: _descripcionController.text.trim(),
-        fechaHora: widget.fechaHora,
-      );
-      if (mounted) Navigator.of(context).pop(true);
-    } catch (e) {
-      setState(() => _error = e.toString().replaceFirst("Exception: ", ""));
-    } finally {
-      if (mounted) setState(() => _guardando = false);
-    }
-  }
+  const _DatoTarjeta({required this.icono, required this.texto});
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final opciones = _esProceso ? tecnologiasProceso : tecnologiasTabla;
-    final opcionesEstado = _esProceso ? estadosProceso : estadosTabla;
-
-    return Padding(
-      padding:
-          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHigh,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                      color:
-                          colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(2)),
-                ),
-              ),
-              Text(
-                  "Registrar error · ${widget.fechaHora.day} DE ${nombresMesEs[widget.fechaHora.month - 1].toUpperCase()}",
-                  style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 16),
-              SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(value: true, label: Text("Proceso")),
-                  ButtonSegment(value: false, label: Text("Tabla")),
-                ],
-                selected: {_esProceso},
-                onSelectionChanged: (seleccion) => setState(() {
-                  _esProceso = seleccion.first;
-                  _tecnologia = opciones.first;
-                  _estado = (_esProceso ? estadosProceso : estadosTabla).first;
-                }),
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                initialValue: _tecnologia,
-                decoration: const InputDecoration(labelText: "Tecnología"),
-                items: opciones
-                    .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                    .toList(),
-                onChanged: (valor) => setState(() => _tecnologia = valor!),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _estado,
-                decoration: const InputDecoration(labelText: "Estado"),
-                items: opcionesEstado
-                    .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                    .toList(),
-                onChanged: (valor) => setState(() => _estado = valor!),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _nombreController,
-                decoration: InputDecoration(
-                    labelText: _esProceso
-                        ? "Nombre del proceso"
-                        : "Nombre de la tabla"),
-                validator: (valor) =>
-                    (valor?.trim().isEmpty ?? true) ? "Obligatorio" : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _descripcionController,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  labelText: "Descripción",
-                  hintText: _esProceso
-                      ? "Por qué falló el proceso..."
-                      : "¿Tabla vacía? ¿Cuenta con datos incorrectos?...",
-                ),
-                validator: (valor) =>
-                    (valor?.trim().isEmpty ?? true) ? "Obligatorio" : null,
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 10),
-                Text(_error!,
-                    style: TextStyle(color: colorScheme.error, fontSize: 12)),
-              ],
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _guardando ? null : _guardar,
-                child: _guardando
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text("Guardar"),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icono, size: 12, color: colorScheme.onSurfaceVariant),
+        const SizedBox(width: 4),
+        Text(texto,
+            style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 10.5)),
+      ],
     );
   }
 }
+

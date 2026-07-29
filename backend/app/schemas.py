@@ -42,6 +42,11 @@ class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
     infra_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+
+
+class RefreshIn(BaseModel):
+    refresh_token: str
 
 
 class GoogleLoginIn(BaseModel):
@@ -135,8 +140,18 @@ class AlertaOut(BaseModel):
 
 TECNOLOGIAS_PROCESO = {"AIRFLOW", "DATASTAGE", "PENTAHO"}
 TECNOLOGIAS_TABLA = {"QA_CONTROL", "PG_PROD"}
-ESTADOS_PROCESO = {"ERROR", "DEMORADO"}
-ESTADOS_TABLA = {"VACIA", "ERROR", "DATOS_INCORRECTOS"}
+
+CATEGORIAS_MANUALES = {"RESUELTO", "ADVERTENCIA", "INFORMACION", "REINTENTO", "EJECUTADO"}
+ESTADOS_PROCESO = {"ERROR", "DEMORADO"} | CATEGORIAS_MANUALES
+ESTADOS_TABLA = {"VACIA", "ERROR", "DATOS_INCORRECTOS"} | CATEGORIAS_MANUALES
+
+SISTEMAS_LEGIBLES = {
+    "AIRFLOW": "Airflow",
+    "DATASTAGE": "DataStage",
+    "PENTAHO": "Pentaho",
+    "QA_CONTROL": "QA Control",
+    "PG_PROD": "PostgreSQL Producción",
+}
 
 
 class BitacoraErrorIn(BaseModel):
@@ -183,6 +198,19 @@ class BitacoraErrorOut(BaseModel):
     estado_fin: Optional[str] = None
     tipo: Optional[str] = None
     descripcion: str
+    creado_por_id: Optional[int] = Field(default=None, exclude=True)
+
+    duracion_segundos: Optional[int] = None
+    sistema: Optional[str] = None
+    origen: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _calcular_campos_derivados(self) -> "BitacoraErrorOut":
+        self.sistema = SISTEMAS_LEGIBLES.get(self.tecnologia, self.tecnologia)
+        self.origen = "Manual" if self.creado_por_id is not None else "Automático"
+        if self.estado_fin == "OK" and self.fecha_actualizacion is not None:
+            self.duracion_segundos = int((self.fecha_actualizacion - self.fecha_hora).total_seconds())
+        return self
 
 
 class BitacoraResumenMesOut(BaseModel):

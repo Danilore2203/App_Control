@@ -10,6 +10,7 @@ import "../models/control.dart";
 import "../models/historial_falla.dart";
 import "../models/solicitud_acceso.dart";
 import "../models/usuario.dart";
+import "api_client.dart";
 import "auth_service.dart";
 
 class ApiService {
@@ -27,12 +28,12 @@ class ApiService {
   }
 
   Future<List<Control>> obtenerControles() async {
-    final response = await http
+    final response = await ApiClient.enviar(() async => http
         .get(
           Uri.parse("${AppConfig.apiBaseUrl}/controles"),
           headers: await _headers(),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
 
     if (response.statusCode != 200) {
       throw Exception("No se pudieron obtener los controles");
@@ -43,12 +44,12 @@ class ApiService {
   }
 
   Future<List<HistorialFalla>> obtenerHistorialFallas({int dias = 7}) async {
-    final response = await http
+    final response = await ApiClient.enviar(() async => http
         .get(
           Uri.parse("${AppConfig.apiBaseUrl}/controles/historial-fallas?dias=$dias"),
           headers: await _headers(),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
 
     if (response.statusCode != 200) {
       throw Exception("No se pudo obtener el historial de fallas");
@@ -59,12 +60,12 @@ class ApiService {
   }
 
   Future<List<Alerta>> obtenerAlertas() async {
-    final response = await http
+    final response = await ApiClient.enviar(() async => http
         .get(
           Uri.parse("${AppConfig.apiBaseUrl}/alertas"),
           headers: await _headers(),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
 
     if (response.statusCode != 200) {
       throw Exception("No se pudieron obtener las alertas");
@@ -75,43 +76,43 @@ class ApiService {
   }
 
   Future<void> registrarFcmToken(String fcmToken) async {
-    await http
+    await ApiClient.enviar(() async => http
         .post(
           Uri.parse("${AppConfig.apiBaseUrl}/auth/me/fcm-token"),
           headers: await _headers(),
           body: jsonEncode({"fcm_token": fcmToken}),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
   }
 
   Future<void> eliminarFcmToken() async {
-    await http
+    await ApiClient.enviar(() async => http
         .delete(
           Uri.parse("${AppConfig.apiBaseUrl}/auth/me/fcm-token"),
           headers: await _headers(),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
   }
 
   Future<void> probarAlerta() async {
-    final response = await http
+    final response = await ApiClient.enviar(() async => http
         .post(
           Uri.parse("${AppConfig.apiBaseUrl}/auth/me/probar-alerta"),
           headers: await _headers(),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
     if (response.statusCode != 200) {
       throw Exception(_extraerDetalleError(response, "No se pudo mandar la alerta de prueba."));
     }
   }
 
   Future<Usuario> obtenerPerfil() async {
-    final response = await http
+    final response = await ApiClient.enviar(() async => http
         .get(
           Uri.parse("${AppConfig.apiBaseUrl}/auth/me"),
           headers: await _headers(),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
 
     if (response.statusCode != 200) {
       throw Exception("No se pudo obtener el perfil");
@@ -125,15 +126,15 @@ class ApiService {
   /// ordenada por fecha. Los endpoints son distintos porque son tablas
   /// distintas en el backend (una cuenta de Google no tiene contraseña).
   Future<List<SolicitudAcceso>> obtenerSolicitudes({String estado = "pendiente"}) async {
-    final headers = await _headers();
     final respuestas = await Future.wait([
-      http
-          .get(Uri.parse("${AppConfig.apiBaseUrl}/admin/solicitudes?estado=$estado"), headers: headers)
-          .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)),
-      http
+      ApiClient.enviar(() async => http
+          .get(Uri.parse("${AppConfig.apiBaseUrl}/admin/solicitudes?estado=$estado"),
+              headers: await _headers())
+          .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg))),
+      ApiClient.enviar(() async => http
           .get(Uri.parse("${AppConfig.apiBaseUrl}/admin/solicitudes-registro?estado=$estado"),
-              headers: headers)
-          .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)),
+              headers: await _headers())
+          .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg))),
     ]);
 
     if (respuestas[0].statusCode != 200 || respuestas[1].statusCode != 200) {
@@ -151,12 +152,12 @@ class ApiService {
 
   Future<void> aprobarSolicitud(SolicitudAcceso solicitud) async {
     final ruta = solicitud.tipo == "registro" ? "solicitudes-registro" : "solicitudes";
-    final response = await http
+    final response = await ApiClient.enviar(() async => http
         .post(
           Uri.parse("${AppConfig.apiBaseUrl}/admin/$ruta/${solicitud.id}/aprobar"),
           headers: await _headers(),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
     if (response.statusCode != 200) {
       throw Exception(_extraerDetalleError(response, "No se pudo aprobar la solicitud"));
     }
@@ -164,24 +165,24 @@ class ApiService {
 
   Future<void> rechazarSolicitud(SolicitudAcceso solicitud) async {
     final ruta = solicitud.tipo == "registro" ? "solicitudes-registro" : "solicitudes";
-    final response = await http
+    final response = await ApiClient.enviar(() async => http
         .post(
           Uri.parse("${AppConfig.apiBaseUrl}/admin/$ruta/${solicitud.id}/rechazar"),
           headers: await _headers(),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
     if (response.statusCode != 200) {
       throw Exception(_extraerDetalleError(response, "No se pudo rechazar la solicitud"));
     }
   }
 
   Future<BitacoraResumenAnio> obtenerBitacoraResumen(int anio) async {
-    final response = await http
+    final response = await ApiClient.enviar(() async => http
         .get(
           Uri.parse("${AppConfig.apiBaseUrl}/bitacora/resumen?anio=$anio"),
           headers: await _headers(),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
     if (response.statusCode != 200) {
       throw Exception("No se pudo obtener el resumen de la bitácora");
     }
@@ -190,12 +191,12 @@ class ApiService {
 
   Future<List<BitacoraError>> obtenerBitacoraEntradas(int anio, {int? mes}) async {
     final query = mes == null ? "anio=$anio" : "anio=$anio&mes=$mes";
-    final response = await http
+    final response = await ApiClient.enviar(() async => http
         .get(
           Uri.parse("${AppConfig.apiBaseUrl}/bitacora?$query"),
           headers: await _headers(),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
     if (response.statusCode != 200) {
       throw Exception("No se pudieron obtener las entradas de la bitácora");
     }
@@ -210,7 +211,7 @@ class ApiService {
     required String descripcion,
     DateTime? fechaHora,
   }) async {
-    final response = await http
+    final response = await ApiClient.enviar(() async => http
         .post(
           Uri.parse("${AppConfig.apiBaseUrl}/bitacora"),
           headers: await _headers(),
@@ -222,7 +223,7 @@ class ApiService {
             if (fechaHora != null) "fecha_hora": fechaHora.toIso8601String(),
           }),
         )
-        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
     if (response.statusCode != 200) {
       throw Exception(_extraerDetalleError(response, "No se pudo registrar la entrada."));
     }
