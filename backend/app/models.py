@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -186,3 +186,26 @@ class PollerState(Base):
     id = Column(Integer, primary_key=True)
     ultimo_id_revisado = Column(Integer, nullable=False, default=0)
     ultimo_id_tablas_revisado = Column(Integer, nullable=False, default=0)
+
+
+class EpisodioAlerta(Base):
+    """Estado de alarma de un proceso (nombre+fuente), independiente de si el
+    origen escribe filas nuevas o no. Mientras `abierto` sea true el proceso
+    sigue en rojo/naranja y no debe generarse una alarma nueva si `push_ok`
+    ya es true (evita duplicados); si `push_ok` es false se reintenta en el
+    proximo ciclo (el push previo fallo). Se cierra cuando el proceso vuelve
+    a verde y se reabre (como episodio nuevo) si vuelve a fallar despues."""
+
+    __tablename__ = "episodios_alerta"
+    __table_args__ = (UniqueConstraint("nombre", "fuente", name="uq_episodio_alerta_nombre_fuente"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String(255), nullable=False)
+    fuente = Column(String(20), nullable=False)
+    color = Column(String(20), nullable=False)
+    abierto = Column(Boolean, nullable=False, default=True)
+    push_ok = Column(Boolean, nullable=False, default=False)
+    control_id_actual = Column(Integer, nullable=True)
+    primera_deteccion = Column(DateTime, nullable=False, default=datetime.utcnow)
+    ultima_alerta_en = Column(DateTime, nullable=True)
+    cerrado_en = Column(DateTime, nullable=True)

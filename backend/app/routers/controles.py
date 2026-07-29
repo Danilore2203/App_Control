@@ -80,7 +80,7 @@ def historial_fallas(
             models.Control.snapshot_fecha,
             func.count(models.Control.id).label("fallas"),
         )
-        .filter(models.Control.color.in_(["red", "orange"]))
+        .filter(func.trim(func.lower(models.Control.color)).in_(["red", "orange"]))
         .group_by(models.Control.snapshot_fecha)
         .order_by(models.Control.snapshot_fecha.desc())
         .limit(dias)

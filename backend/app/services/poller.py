@@ -1,5 +1,6 @@
 import logging
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models
@@ -106,15 +107,18 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
         episodio_abierto.estado_fin = "OK"
         duracion = _formatear_duracion(episodio_abierto.fecha_hora, proceso.snapshot_ts)
         episodio_abierto.descripcion += (
-            f" Pasó a OK a las {proceso.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+            f" Solucionado - Estado OK a las {proceso.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
         )
 
 
 def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
     """Misma logica de episodio que _actualizar_bitacora_proceso, mirando
-    dataops_catalogo_tablas en vez de dataops_catalogo_procesos."""
+    dataops_catalogo_tablas en vez de dataops_catalogo_procesos. El color se
+    normaliza (strip + lower) por la misma razon que en procesos.py: el
+    origen no siempre lo escribe con la misma capitalizacion."""
 
-    conocido = tabla.color in ("red", "green")
+    color_tabla = (tabla.color or "").strip().lower()
+    conocido = color_tabla in ("red", "green")
     episodio_abierto = _episodio_abierto(db, tabla.nombre, tabla.fuente)
 
     if not conocido:
@@ -138,7 +142,7 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
             )
         return
 
-    if tabla.color == "red":
+    if color_tabla == "red":
         estado_normalizado = ESTADOS_TABLA_NORMALIZADOS.get(tabla.estado.upper().strip(), "ERROR")
         if episodio_abierto:
             if episodio_abierto.estado != estado_normalizado:
@@ -168,7 +172,7 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
         episodio_abierto.estado_fin = "OK"
         duracion = _formatear_duracion(episodio_abierto.fecha_hora, tabla.snapshot_ts)
         episodio_abierto.descripcion += (
-            f" Pasó a OK a las {tabla.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+            f" Solucionado - Estado OK a las {tabla.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
         )
 
 
@@ -211,7 +215,7 @@ def resincronizar_episodios_abiertos(db: Session) -> int:
                 episodio.fecha_actualizacion = ultimo.snapshot_ts
                 duracion = _formatear_duracion(episodio.fecha_hora, ultimo.snapshot_ts)
                 episodio.descripcion += (
-                    f" Pasó a OK a las {ultimo.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+                    f" Solucionado - Estado OK a las {ultimo.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
                 )
                 corregidos += 1
                 continue
@@ -237,14 +241,15 @@ def resincronizar_episodios_abiertos(db: Session) -> int:
             )
             if ultimo is None:
                 continue
-            if ultimo.color not in ("red", "green"):
+            color_tabla = (ultimo.color or "").strip().lower()
+            if color_tabla not in ("red", "green"):
                 continue
-            if ultimo.color == "green":
+            if color_tabla == "green":
                 episodio.estado_fin = "OK"
                 episodio.fecha_actualizacion = ultimo.snapshot_ts
                 duracion = _formatear_duracion(episodio.fecha_hora, ultimo.snapshot_ts)
                 episodio.descripcion += (
-                    f" Pasó a OK a las {ultimo.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+                    f" Solucionado - Estado OK a las {ultimo.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
                 )
                 corregidos += 1
                 continue
@@ -371,7 +376,7 @@ def _cerrar_incoherencia_si_existe(
     abierta.fecha_actualizacion = ts
     abierta.estado_fin = "OK"
     duracion = _formatear_duracion(abierta.fecha_hora, ts)
-    abierta.descripcion += f" Pasó a OK a las {ts.strftime('%H:%M')}. Duración: {duracion}."
+    abierta.descripcion += f" Solucionado - Estado OK a las {ts.strftime('%H:%M')}. Duración: {duracion}."
 
 
 def _revisar_incoherencia_desde_proceso(db: Session, proceso: models.Control) -> None:
@@ -385,7 +390,7 @@ def _revisar_incoherencia_desde_proceso(db: Session, proceso: models.Control) ->
             .order_by(models.Tabla.id.desc())
             .first()
         )
-        if tabla and tabla.color == "red":
+        if tabla and (tabla.color or "").strip().lower() == "red":
             _registrar_incoherencia(
                 db, proceso.id, proceso.nombre, proceso.fuente, tabla.nombre, tabla.estado,
                 proceso.snapshot_ts,
@@ -431,8 +436,12 @@ def _obtener_o_crear_estado(db: Session) -> models.PollerState:
 
 def revisar_procesos_nuevos(db: Session) -> int:
     """Busca snapshots nuevos en dataops_catalogo_procesos (id mayor al ultimo revisado)
-    y genera una alerta + push por cada proceso en rojo/naranja. Devuelve cuantos
-    procesos nuevos generaron alerta."""
+    y actualiza bitacora + incoherencia por cada proceso. Ya NO envia alarmas
+    aca (ver `revisar_alarmas_activas`): esto solo miraba filas NUEVAS, asi que
+    un proceso que ya estaba en ERROR antes de que el origen volviera a
+    escribir una fila para el (o antes de que el poller/token FCM existieran)
+    se quedaba sin alarma para siempre. La alarma ahora se decide mirando el
+    estado ACTUAL de cada proceso en cada ciclo, no las filas nuevas."""
 
     estado_poller = _obtener_o_crear_estado(db)
 
@@ -445,8 +454,7 @@ def revisar_procesos_nuevos(db: Session) -> int:
     if not nuevos:
         return 0
 
-    destinatarios = _obtener_destinatarios(db)
-    procesos_alertados = 0
+    procesos_procesados = 0
 
     for proceso in nuevos:
         color = color_efectivo(proceso)
@@ -457,38 +465,173 @@ def revisar_procesos_nuevos(db: Session) -> int:
         if color == "green" and es_core(proceso):
             _revisar_incoherencia_desde_proceso(db, proceso)
 
-        if color in COLORES_ALERTABLES:
-            es_critica = color == "red"
-            mensaje = f"[{proceso.fuente}] {proceso.nombre}: {estado_efectivo(proceso)}"
-
-            for usuario, token_row in destinatarios:
-                alerta = models.Alerta(
-                    control_id=proceso.id,
-                    usuario_id=usuario.id,
-                    mensaje=mensaje,
-                    nivel="critica" if es_critica else "normal",
-                )
-                db.add(alerta)
-
-                try:
-                    enviar_alerta_push(
-                        token_row.fcm_token,
-                        titulo="Alerta de proceso" if es_critica else "Proceso demorado",
-                        cuerpo=mensaje,
-                        critica=es_critica,
-                    )
-                    alerta.enviada = True
-                except Exception:
-                    logger.exception(
-                        "Fallo al enviar push a usuario %s (proceso %s)", usuario.id, proceso.id
-                    )
-                    alerta.enviada = False
-
-            procesos_alertados += 1
+        procesos_procesados += 1
 
     estado_poller.ultimo_id_revisado = nuevos[-1].id
     db.commit()
-    return procesos_alertados
+    return procesos_procesados
+
+
+def _estado_actual_procesos(db: Session) -> list[models.Control]:
+    """Un registro por (nombre, fuente): el de snapshot_ts mas reciente. Misma
+    consulta que expone /controles, para que la alarma se decida sobre
+    exactamente lo mismo que ve el usuario en la app, no sobre un cursor
+    aparte que puede quedar desincronizado."""
+
+    ultimo_por_proceso = (
+        db.query(
+            models.Control.nombre,
+            models.Control.fuente,
+            func.max(models.Control.snapshot_ts).label("ultimo_ts"),
+        )
+        .group_by(models.Control.nombre, models.Control.fuente)
+        .subquery()
+    )
+    return (
+        db.query(models.Control)
+        .join(
+            ultimo_por_proceso,
+            (models.Control.nombre == ultimo_por_proceso.c.nombre)
+            & (models.Control.fuente == ultimo_por_proceso.c.fuente)
+            & (models.Control.snapshot_ts == ultimo_por_proceso.c.ultimo_ts),
+        )
+        .all()
+    )
+
+
+def _obtener_episodio_alerta(db: Session, nombre: str, fuente: str) -> models.EpisodioAlerta | None:
+    return (
+        db.query(models.EpisodioAlerta)
+        .filter(models.EpisodioAlerta.nombre == nombre, models.EpisodioAlerta.fuente == fuente)
+        .first()
+    )
+
+
+def _disparar_alarma(db: Session, proceso: models.Control, episodio: models.EpisodioAlerta) -> bool:
+    """Envia el push a todos los destinatarios y devuelve True si al menos
+    uno lo recibio (con eso alcanza para marcar el episodio como avisado;
+    si TODOS fallan, se reintenta el proximo ciclo)."""
+
+    color = color_efectivo(proceso)
+    es_critica = color == "red"
+    mensaje = f"[{proceso.fuente}] {proceso.nombre}: {estado_efectivo(proceso)}"
+    titulo = (
+        "Alerta de proceso CORE" if es_core(proceso) and es_critica
+        else "Alerta de proceso" if es_critica
+        else "Proceso demorado"
+    )
+
+    destinatarios = _obtener_destinatarios(db)
+    if not destinatarios:
+        logger.warning(
+            "No hay destinatarios con token FCM registrado: no se puede alarmar %s [%s]",
+            proceso.nombre, proceso.fuente,
+        )
+        return False
+
+    logger.warning(
+        "Disparando alarma para %s [%s] (core=%s, color=%s) a %d destinatario(s)",
+        proceso.nombre, proceso.fuente, es_core(proceso), color, len(destinatarios),
+    )
+
+    algun_envio_ok = False
+    for usuario, token_row in destinatarios:
+        alerta = models.Alerta(
+            control_id=proceso.id,
+            usuario_id=usuario.id,
+            mensaje=mensaje,
+            nivel="critica" if es_critica else "normal",
+        )
+        db.add(alerta)
+        try:
+            enviar_alerta_push(token_row.fcm_token, titulo=titulo, cuerpo=mensaje, critica=es_critica)
+            alerta.enviada = True
+            algun_envio_ok = True
+        except Exception:
+            logger.exception(
+                "Fallo al enviar push a usuario %s (proceso %s [%s])",
+                usuario.id, proceso.nombre, proceso.fuente,
+            )
+            alerta.enviada = False
+
+    return algun_envio_ok
+
+
+def _revisar_alarma_de_proceso(db: Session, proceso: models.Control) -> bool:
+    """Decide si hace falta (re)disparar la alarma para el estado ACTUAL de
+    este proceso, sin importar si esta fila es nueva o ya se habia visto
+    antes. Devuelve True si se disparo (o reintento) un push exitoso."""
+
+    color = color_efectivo(proceso)
+    episodio = _obtener_episodio_alerta(db, proceso.nombre, proceso.fuente)
+
+    if color not in COLORES_ALERTABLES:
+        if episodio is not None and episodio.abierto:
+            episodio.abierto = False
+            episodio.cerrado_en = proceso.snapshot_ts
+            logger.info("Alarma cerrada: %s [%s] volvio a %s", proceso.nombre, proceso.fuente, color)
+        return False
+
+    episodio_nuevo = episodio is None
+    reabre = episodio is not None and not episodio.abierto
+    reintento_pendiente = episodio is not None and episodio.abierto and not episodio.push_ok
+
+    if episodio_nuevo:
+        episodio = models.EpisodioAlerta(
+            nombre=proceso.nombre,
+            fuente=proceso.fuente,
+            color=color,
+            abierto=True,
+            control_id_actual=proceso.id,
+            primera_deteccion=proceso.snapshot_ts,
+        )
+        db.add(episodio)
+        logger.warning("Nueva alarma detectada: %s [%s] en %s", proceso.nombre, proceso.fuente, estado_efectivo(proceso))
+    elif reabre:
+        episodio.abierto = True
+        episodio.push_ok = False
+        episodio.primera_deteccion = proceso.snapshot_ts
+        episodio.cerrado_en = None
+        logger.warning("Proceso %s [%s] volvio a fallar: reabre alarma", proceso.nombre, proceso.fuente)
+    elif reintento_pendiente:
+        logger.info("Reintentando alarma pendiente: %s [%s]", proceso.nombre, proceso.fuente)
+
+    episodio.color = color
+    episodio.control_id_actual = proceso.id
+
+    if not (episodio_nuevo or reabre or reintento_pendiente):
+        # Ya hay alarma activa y avisada para este episodio: no duplicar.
+        return False
+
+    exito = _disparar_alarma(db, proceso, episodio)
+    episodio.push_ok = exito
+    episodio.ultima_alerta_en = proceso.snapshot_ts
+    return exito
+
+
+def revisar_alarmas_activas(db: Session) -> int:
+    """Recorre el estado ACTUAL de todos los procesos (no solo filas nuevas)
+    y garantiza que exista una alarma activa mientras alguno siga en
+    rojo/naranja. Corrige el bug de fondo: antes la alarma solo se evaluaba
+    cuando llegaba una fila nueva del origen, asi que un proceso que YA
+    estaba en ERROR (sin fila nueva todavia, o detectado antes de que
+    hubiera un token FCM registrado) nunca generaba push. Se commitea
+    proceso por proceso para que una falla puntual en uno no le cueste la
+    alarma a los demas."""
+
+    disparadas = 0
+    for proceso in _estado_actual_procesos(db):
+        try:
+            if _revisar_alarma_de_proceso(db, proceso):
+                disparadas += 1
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "Fallo revisando alarma de %s [%s]; se reintenta el proximo ciclo",
+                proceso.nombre, proceso.fuente,
+            )
+    return disparadas
 
 
 def revisar_tablas_nuevas(db: Session) -> int:
@@ -511,7 +654,7 @@ def revisar_tablas_nuevas(db: Session) -> int:
         if tabla.fuente in TECNOLOGIAS_TABLA_VALIDAS:
             _actualizar_bitacora_tabla(db, tabla)
 
-        if tabla.color == "red":
+        if (tabla.color or "").strip().lower() == "red":
             _revisar_incoherencia_desde_tabla(db, tabla)
 
     estado_poller.ultimo_id_tablas_revisado = nuevas[-1].id

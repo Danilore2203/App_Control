@@ -17,6 +17,7 @@ from app.routers import controles as controles_router
 from app.routers import infra as infra_router
 from app.services.poller import (
     resincronizar_episodios_abiertos,
+    revisar_alarmas_activas,
     revisar_procesos_nuevos,
     revisar_tablas_nuevas,
 )
@@ -35,6 +36,11 @@ INTERVALO_POLLER_SEGUNDOS = 60
 def _ejecutar_poller():
     db = SessionLocal()
     try:
+        # Va primero y no depende de las otras dos: decide la alarma mirando
+        # el estado ACTUAL de cada proceso, no filas nuevas ni el cursor de
+        # bitacora, para que una falla en esas otras dos nunca le cueste una
+        # alarma real al usuario.
+        revisar_alarmas_activas(db)
         revisar_procesos_nuevos(db)
         revisar_tablas_nuevas(db)
         resincronizar_episodios_abiertos(db)
