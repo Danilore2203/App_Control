@@ -9,23 +9,41 @@ from app.services.fcm import enviar_alerta_push
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/register", response_model=schemas.UsuarioOut)
+@router.post("/register", response_model=schemas.MensajeOut)
 def registrar(usuario_in: schemas.UsuarioCreate, db: Session = Depends(get_db)):
-    existente = db.query(models.Usuario).filter(models.Usuario.username == usuario_in.username).first()
-    if existente:
+    """No crea la cuenta directo (eso dejaba entrar a cualquiera sin ningun
+    control): queda como solicitud pendiente, igual que el acceso via Google,
+    hasta que un administrador la apruebe desde /admin/solicitudes-registro."""
+
+    existente_usuario = (
+        db.query(models.Usuario).filter(models.Usuario.username == usuario_in.username).first()
+    )
+    if existente_usuario:
         raise HTTPException(status_code=400, detail="El usuario ya esta registrado")
 
-    usuario = models.Usuario(
+    existente_solicitud = (
+        db.query(models.SolicitudRegistro)
+        .filter(
+            models.SolicitudRegistro.username == usuario_in.username,
+            models.SolicitudRegistro.estado == "pendiente",
+        )
+        .first()
+    )
+    if existente_solicitud:
+        raise HTTPException(status_code=400, detail="Ya existe una solicitud pendiente para ese usuario")
+
+    solicitud = models.SolicitudRegistro(
         username=usuario_in.username,
         email=usuario_in.email,
-        password_hash=auth.hashear_password(usuario_in.password),
         nombre=usuario_in.nombre,
-        activo=True,
+        password_hash=auth.hashear_password(usuario_in.password),
     )
-    db.add(usuario)
+    db.add(solicitud)
     db.commit()
-    db.refresh(usuario)
-    return usuario
+    return schemas.MensajeOut(
+        ok=True,
+        mensaje="Tu solicitud fue enviada. Un administrador debe aprobarla antes de que puedas ingresar.",
+    )
 
 
 @router.post("/login", response_model=schemas.Token)

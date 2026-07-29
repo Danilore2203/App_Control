@@ -131,6 +131,24 @@ class SolicitudAccesoGoogle(Base):
     creado_en = Column(DateTime, default=datetime.utcnow)
 
 
+class SolicitudRegistro(Base):
+    """Solicitud de una cuenta local (usuario/contrasena elegidos a mano en
+    la app, sin pasar por AD ni Google). Un administrador la aprueba o
+    rechaza; al aprobarla recien se crea la fila en usuarios, con el
+    password_hash que ya se guardo aca (nunca se guarda en texto plano).
+    Tabla propia, no toca la estructura de la tabla usuarios compartida."""
+
+    __tablename__ = "solicitudes_registro"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(100), nullable=False)
+    email = Column(String(150), nullable=True)
+    nombre = Column(String(150), nullable=True)
+    password_hash = Column(String(255), nullable=False)
+    estado = Column(String(20), nullable=False, default="pendiente")  # pendiente | aprobada | rechazada
+    creado_en = Column(DateTime, default=datetime.utcnow)
+
+
 class Administrador(Base):
     """Marca que un usuario puede aprobar/rechazar solicitudes de acceso.
     Tabla propia, no toca la estructura de la tabla usuarios compartida."""

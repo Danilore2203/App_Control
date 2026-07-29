@@ -7,9 +7,23 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, mo
 
 class UsuarioCreate(BaseModel):
     username: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.]{2,99}$")
-    password: str
+    password: str = Field(min_length=8)
     nombre: Optional[str] = None
     email: Optional[EmailStr] = None
+
+    @field_validator("password")
+    @classmethod
+    def validar_fortaleza(cls, valor: str) -> str:
+        if not re.search(r"\d", valor):
+            raise ValueError("La contrasena debe incluir al menos un numero")
+        if not re.search(r"[^A-Za-z0-9]", valor):
+            raise ValueError("La contrasena debe incluir al menos un simbolo")
+        return valor
+
+
+class MensajeOut(BaseModel):
+    ok: bool
+    mensaje: str
 
 
 class UsuarioOut(BaseModel):
@@ -69,6 +83,17 @@ class SolicitudAccesoOut(BaseModel):
 
     id: int
     email: str
+    nombre: Optional[str] = None
+    estado: str
+    creado_en: datetime
+
+
+class SolicitudRegistroOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    email: Optional[str] = None
     nombre: Optional[str] = None
     estado: str
     creado_en: datetime

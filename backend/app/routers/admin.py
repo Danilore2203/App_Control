@@ -77,3 +77,61 @@ def rechazar_solicitud(
     db.commit()
     db.refresh(solicitud)
     return solicitud
+
+
+@router.get("/solicitudes-registro", response_model=List[schemas.SolicitudRegistroOut])
+def listar_solicitudes_registro(
+    estado: str = "pendiente",
+    db: Session = Depends(get_db),
+    _admin: models.Usuario = Depends(auth.requerir_admin),
+):
+    query = db.query(models.SolicitudRegistro)
+    if estado != "todas":
+        query = query.filter(models.SolicitudRegistro.estado == estado)
+    return query.order_by(models.SolicitudRegistro.creado_en.desc()).all()
+
+
+@router.post("/solicitudes-registro/{solicitud_id}/aprobar", response_model=schemas.UsuarioOut)
+def aprobar_solicitud_registro(
+    solicitud_id: int,
+    db: Session = Depends(get_db),
+    _admin: models.Usuario = Depends(auth.requerir_admin),
+):
+    solicitud = db.get(models.SolicitudRegistro, solicitud_id)
+    if solicitud is None:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    if solicitud.estado != "pendiente":
+        raise HTTPException(status_code=400, detail="Esta solicitud ya fue resuelta")
+
+    existente = db.query(models.Usuario).filter(models.Usuario.username == solicitud.username).first()
+    if existente:
+        raise HTTPException(status_code=400, detail="Ya existe un usuario con ese nombre de usuario")
+
+    usuario = models.Usuario(
+        username=solicitud.username,
+        email=solicitud.email,
+        nombre=solicitud.nombre,
+        password_hash=solicitud.password_hash,
+        activo=True,
+    )
+    db.add(usuario)
+    solicitud.estado = "aprobada"
+    db.commit()
+    db.refresh(usuario)
+    return usuario
+
+
+@router.post("/solicitudes-registro/{solicitud_id}/rechazar", response_model=schemas.SolicitudRegistroOut)
+def rechazar_solicitud_registro(
+    solicitud_id: int,
+    db: Session = Depends(get_db),
+    _admin: models.Usuario = Depends(auth.requerir_admin),
+):
+    solicitud = db.get(models.SolicitudRegistro, solicitud_id)
+    if solicitud is None:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+
+    solicitud.estado = "rechazada"
+    db.commit()
+    db.refresh(solicitud)
+    return solicitud
