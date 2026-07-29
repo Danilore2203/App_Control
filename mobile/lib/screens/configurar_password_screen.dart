@@ -10,7 +10,14 @@ import "dashboard_screen.dart";
 /// configurada, o quieren cambiarla. Se valida la contraseña actual (contra
 /// AD/monitor, o contra la local si ya existia) antes de guardar la nueva.
 class ConfigurarPasswordScreen extends StatefulWidget {
-  const ConfigurarPasswordScreen({super.key});
+  final String? usuarioInicial;
+  final bool esPrimeraVez;
+
+  const ConfigurarPasswordScreen({
+    super.key,
+    this.usuarioInicial,
+    this.esPrimeraVez = false,
+  });
 
   @override
   State<ConfigurarPasswordScreen> createState() => _ConfigurarPasswordScreenState();
@@ -22,6 +29,7 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
 
   final _usuarioController = TextEditingController();
   final _actualController = TextEditingController();
+  final _correoController = TextEditingController();
   final _nuevaController = TextEditingController();
   final _confirmarController = TextEditingController();
 
@@ -38,12 +46,16 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
   void initState() {
     super.initState();
     _nuevaController.addListener(() => setState(() {}));
+    if (widget.usuarioInicial != null) {
+      _usuarioController.text = widget.usuarioInicial!;
+    }
   }
 
   @override
   void dispose() {
     _usuarioController.dispose();
     _actualController.dispose();
+    _correoController.dispose();
     _nuevaController.dispose();
     _confirmarController.dispose();
     super.dispose();
@@ -64,7 +76,8 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
     try {
       await _authService.configurarPassword(
         username: _usuarioController.text.trim(),
-        passwordActual: _actualController.text,
+        passwordActual: widget.esPrimeraVez ? null : _actualController.text,
+        correoVerificacion: widget.esPrimeraVez ? _correoController.text.trim() : null,
         passwordNueva: _nuevaController.text,
       );
       await NotificationService().inicializar();
@@ -126,7 +139,7 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          "Cambio de contraseña",
+                          widget.esPrimeraVez ? "¡Bienvenido!" : "Cambio de contraseña",
                           style: Theme.of(context)
                               .textTheme
                               .headlineSmall
@@ -135,8 +148,11 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          "Confirma tu usuario y contraseña habituales, y elige una "
-                          "contraseña nueva para esta app.",
+                          widget.esPrimeraVez
+                              ? "Tu cuenta es valida pero todavia no tiene contraseña para esta "
+                                  "app. Confirma tu correo de Nuevatel y registra una para continuar."
+                              : "Confirma tu usuario y contraseña habituales, y elige una "
+                                  "contraseña nueva para esta app.",
                           style: Theme.of(context)
                               .textTheme
                               .bodyMedium
@@ -175,21 +191,42 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                               (valor?.trim().isEmpty ?? true) ? "El usuario es obligatorio" : null,
                         ),
                         const SizedBox(height: 16),
-                        _EtiquetaCampo(texto: "CONTRASEÑA ACTUAL", colorScheme: colorScheme),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: _actualController,
-                          obscureText: _ocultarActual,
-                          decoration: InputDecoration(
-                            prefixIcon: const Icon(Icons.lock_outline),
-                            suffixIcon: IconButton(
-                              icon: Icon(_ocultarActual ? Icons.visibility_off : Icons.visibility),
-                              onPressed: () => setState(() => _ocultarActual = !_ocultarActual),
+                        if (widget.esPrimeraVez) ...[
+                          _EtiquetaCampo(texto: "CORREO NUEVATEL", colorScheme: colorScheme),
+                          const SizedBox(height: 6),
+                          TextFormField(
+                            controller: _correoController,
+                            keyboardType: TextInputType.emailAddress,
+                            decoration: const InputDecoration(
+                              hintText: "nombre.apellido@nuevatel.com",
+                              prefixIcon: Icon(Icons.alternate_email),
                             ),
+                            validator: (valor) {
+                              final texto = valor?.trim().toLowerCase() ?? "";
+                              if (texto.isEmpty) return "Ingresa tu correo de Nuevatel";
+                              if (!texto.endsWith("@nuevatel.com")) {
+                                return "Debe ser un correo @nuevatel.com";
+                              }
+                              return null;
+                            },
                           ),
-                          validator: (valor) =>
-                              (valor?.isEmpty ?? true) ? "Ingresa tu contraseña actual" : null,
-                        ),
+                        ] else ...[
+                          _EtiquetaCampo(texto: "CONTRASEÑA ACTUAL", colorScheme: colorScheme),
+                          const SizedBox(height: 6),
+                          TextFormField(
+                            controller: _actualController,
+                            obscureText: _ocultarActual,
+                            decoration: InputDecoration(
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                icon: Icon(_ocultarActual ? Icons.visibility_off : Icons.visibility),
+                                onPressed: () => setState(() => _ocultarActual = !_ocultarActual),
+                              ),
+                            ),
+                            validator: (valor) =>
+                                (valor?.isEmpty ?? true) ? "Ingresa tu contraseña actual" : null,
+                          ),
+                        ],
                         const SizedBox(height: 20),
                         Divider(color: colorScheme.outlineVariant),
                         const SizedBox(height: 20),
@@ -256,12 +293,12 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                                     height: 22,
                                     child: CircularProgressIndicator(strokeWidth: 2),
                                   )
-                                : const Row(
+                                : Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Text("Actualizar y entrar"),
-                                      SizedBox(width: 8),
-                                      Icon(Icons.arrow_forward, size: 18),
+                                      Text(widget.esPrimeraVez ? "Registrar y entrar" : "Actualizar y entrar"),
+                                      const SizedBox(width: 8),
+                                      const Icon(Icons.arrow_forward, size: 18),
                                     ],
                                   ),
                           ),

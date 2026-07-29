@@ -1,6 +1,6 @@
 const tecnologiasProceso = ["AIRFLOW", "DATASTAGE", "PENTAHO"];
 const tecnologiasTabla = ["QA_CONTROL", "PG_PROD"];
-const estadosProceso = ["ERROR"];
+const estadosProceso = ["ERROR", "DEMORADO"];
 const estadosTabla = ["VACIA", "DATOS_INCORRECTOS"];
 
 class BitacoraError {

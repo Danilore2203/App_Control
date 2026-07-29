@@ -1,3 +1,4 @@
+import "dart:async";
 import "dart:convert";
 
 import "package:http/http.dart" as http;
@@ -15,6 +16,20 @@ import "auth_service.dart";
 class InfraService {
   final _authService = AuthService();
 
+  static const _timeout = Duration(seconds: 15);
+  static const _timeoutMsg = "El monitor de infraestructura no respondió a tiempo. Probá de nuevo.";
+
+  /// El monitor OP a veces devuelve HTML (502/504) en vez de JSON cuando
+  /// "despierta" de estar dormido - sin esto, jsonDecode explota con un
+  /// FormatException poco claro para el usuario.
+  Map<String, dynamic> _decodificar(http.Response response) {
+    try {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw Exception("El monitor de infraestructura no está disponible ahora mismo.");
+    }
+  }
+
   Future<Map<String, String>> _headers() async {
     final token = await _authService.obtenerToken();
     final infraToken = await _authService.obtenerInfraToken();
@@ -31,11 +46,13 @@ class InfraService {
   }
 
   Future<Map<String, dynamic>> _get(String path) async {
-    final response = await http.get(
-      Uri.parse("${AppConfig.apiBaseUrl}/infra$path"),
-      headers: await _headers(),
-    );
-    final body = jsonDecode(response.body);
+    final response = await http
+        .get(
+          Uri.parse("${AppConfig.apiBaseUrl}/infra$path"),
+          headers: await _headers(),
+        )
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+    final body = _decodificar(response);
     if (response.statusCode != 200 || body["ok"] != true) {
       throw Exception(body["error"]?.toString() ??
           body["detail"]?.toString() ??
@@ -46,12 +63,14 @@ class InfraService {
 
   Future<Map<String, dynamic>> _post(
       String path, Map<String, dynamic> data) async {
-    final response = await http.post(
-      Uri.parse("${AppConfig.apiBaseUrl}/infra$path"),
-      headers: await _headers(),
-      body: jsonEncode(data),
-    );
-    final body = jsonDecode(response.body);
+    final response = await http
+        .post(
+          Uri.parse("${AppConfig.apiBaseUrl}/infra$path"),
+          headers: await _headers(),
+          body: jsonEncode(data),
+        )
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+    final body = _decodificar(response);
     if (body["ok"] != true) {
       throw Exception(body["error"]?.toString() ??
           body["detail"]?.toString() ??

@@ -5,6 +5,7 @@ import "../models/control.dart";
 import "../models/historial_falla.dart";
 import "../services/alarma_service.dart";
 import "../services/api_service.dart";
+import "../services/guardia_foreground_task.dart";
 import "../services/guardia_service.dart";
 import "../theme.dart";
 import "../widgets/detalle_proceso_sheet.dart";
@@ -49,6 +50,7 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
   final _alarmaService = AlarmaService();
 
   bool _cargandoPreferencias = true;
+  bool _probandoAlerta = false;
   bool _armado = false;
   String _horaInicio = "00:00";
   String _horaFin = "06:00";
@@ -66,18 +68,39 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
   }
 
   Future<void> _cargarPreferencias() async {
-    final armado = await _guardiaService.obtenerArmado();
-    final inicio = await _guardiaService.obtenerHoraInicio();
-    final fin = await _guardiaService.obtenerHoraFin();
-    final tono = await _guardiaService.obtenerTono();
-    if (!mounted) return;
-    setState(() {
-      _armado = armado;
-      _horaInicio = inicio;
-      _horaFin = fin;
-      _tono = tono;
-      _cargandoPreferencias = false;
-    });
+    // Si el almacenamiento seguro falla en algun dispositivo (p.ej. una clave
+    // de encriptacion huerfana tras desinstalar/reinstalar), no debe dejar la
+    // pantalla girando para siempre: se usan los valores por defecto y se
+    // sigue adelante igual.
+    const limite = Duration(seconds: 5);
+    try {
+      final armado = await _guardiaService
+          .obtenerArmado()
+          .timeout(limite, onTimeout: () => false);
+      final inicio = await _guardiaService
+          .obtenerHoraInicio()
+          .timeout(limite, onTimeout: () => "00:00");
+      final fin = await _guardiaService
+          .obtenerHoraFin()
+          .timeout(limite, onTimeout: () => "06:00");
+      final tono = await _guardiaService
+          .obtenerTono()
+          .timeout(limite, onTimeout: () => GuardiaService.tonosDisponibles.first);
+      if (!mounted) return;
+      setState(() {
+        _armado = armado;
+        _horaInicio = inicio;
+        _horaFin = fin;
+        _tono = tono;
+        _cargandoPreferencias = false;
+      });
+      // Si quedo armada de una sesion anterior pero el servicio no esta
+      // corriendo (p.ej. Android lo mato), se reconcilia aca.
+      if (armado) establecerGuardiaActiva(true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _cargandoPreferencias = false);
+    }
   }
 
   TimeOfDay _aTimeOfDay(String texto) {
@@ -102,6 +125,26 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
       }
     });
     await _guardiaService.guardarHorario(inicio: _horaInicio, fin: _horaFin);
+  }
+
+  Future<void> _probarAlerta() async {
+    setState(() => _probandoAlerta = true);
+    try {
+      await _apiService.probarAlerta();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Push de prueba enviada. Debería sonar en unos segundos."),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst("Exception: ", ""))),
+      );
+    } finally {
+      if (mounted) setState(() => _probandoAlerta = false);
+    }
   }
 
   @override
@@ -195,6 +238,7 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
                 onChanged: (valor) {
                   setState(() => _armado = valor);
                   _guardiaService.guardarArmado(valor);
+                  establecerGuardiaActiva(valor);
                   HapticFeedback.selectionClick();
                 },
               ),
@@ -247,6 +291,22 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: OutlinedButton.icon(
+              onPressed: _probandoAlerta ? null : _probarAlerta,
+              icon: _probandoAlerta
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.notifications_active_outlined, size: 18),
+              label: const Text("Probar alerta ahora"),
+            ),
           ),
         ],
       ),

@@ -34,10 +34,10 @@ class _SolicitudesScreenState extends State<SolicitudesScreen> {
   Future<void> _aprobar(SolicitudAcceso solicitud) async {
     setState(() => _procesando = "${solicitud.id}-aprobar");
     try {
-      await _apiService.aprobarSolicitud(solicitud.id);
+      await _apiService.aprobarSolicitud(solicitud);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("${solicitud.email} aprobado")),
+        SnackBar(content: Text("${solicitud.identificador} aprobado")),
       );
       await _recargar();
     } catch (e) {
@@ -51,12 +51,33 @@ class _SolicitudesScreenState extends State<SolicitudesScreen> {
   }
 
   Future<void> _rechazar(SolicitudAcceso solicitud) async {
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("¿Rechazar solicitud?"),
+        content: Text(
+          "Se rechaza la solicitud de ${solicitud.identificador}. Esta acción no se puede deshacer.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text("Cancelar"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text("Rechazar", style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        ],
+      ),
+    );
+    if (confirmado != true) return;
+
     setState(() => _procesando = "${solicitud.id}-rechazar");
     try {
-      await _apiService.rechazarSolicitud(solicitud.id);
+      await _apiService.rechazarSolicitud(solicitud);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("${solicitud.email} rechazado")),
+        SnackBar(content: Text("${solicitud.identificador} rechazado")),
       );
       await _recargar();
     } catch (e) {
@@ -120,7 +141,10 @@ class _SolicitudesScreenState extends State<SolicitudesScreen> {
                           children: [
                             CircleAvatar(
                               backgroundColor: colorScheme.primaryContainer,
-                              child: Icon(Icons.person_outline, color: colorScheme.onPrimaryContainer),
+                              child: Icon(
+                                solicitud.tipo == "registro" ? Icons.badge_outlined : Icons.g_mobiledata,
+                                color: colorScheme.onPrimaryContainer,
+                              ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
@@ -128,11 +152,15 @@ class _SolicitudesScreenState extends State<SolicitudesScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    solicitud.nombre ?? solicitud.email,
+                                    solicitud.identificador,
                                     style: const TextStyle(fontWeight: FontWeight.w600),
                                   ),
                                   Text(
-                                    solicitud.email,
+                                    [
+                                      solicitud.tipo == "registro" ? "Registro local" : "Google",
+                                      if (solicitud.email != null) solicitud.email!,
+                                      if (solicitud.username != null) "@${solicitud.username}",
+                                    ].join(" · "),
                                     style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
                                   ),
                                 ],

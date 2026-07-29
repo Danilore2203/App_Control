@@ -1,9 +1,13 @@
 class AppConfig {
-  // IP de esta PC en la red local (misma WiFi que el celular), para probar
-  // el APK instalado sin cable USB. Si esta PC cambia de IP (otra red,
-  // reinicio de router), hay que actualizar esto y volver a compilar.
-  // Cuando el backend tenga direccion final, cambiar por esa URL real.
-  static const String apiBaseUrl = "http://10.47.19.180:8000";
+  // Backend desplegado en Railway (prueba, dura mientras dure el trial).
+  // Se puede pisar sin recompilar el codigo (aunque si hay que generar un
+  // APK nuevo) pasando --dart-define=API_BASE_URL=https://otra-url al
+  // buildear, por si el trial se cae y hay que apuntar a otro lado rapido:
+  //   flutter build apk --release --dart-define=API_BASE_URL=https://...
+  static const String apiBaseUrl = String.fromEnvironment(
+    "API_BASE_URL",
+    defaultValue: "https://appcontrol-production.up.railway.app",
+  );
 
   // Web Client ID generado por Firebase al activar Google como proveedor de
   // Authentication (Firebase Console > Authentication > Sign-in method > Google).

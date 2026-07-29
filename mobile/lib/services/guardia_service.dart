@@ -9,6 +9,7 @@ class GuardiaService {
   static const _horaInicioKey = "guardia_hora_inicio";
   static const _horaFinKey = "guardia_hora_fin";
   static const _tonoKey = "guardia_tono";
+  static const _notificacionesKey = "notificaciones_habilitadas";
 
   static const tonosDisponibles = [
     "Sirena Nuclear H-9",
@@ -49,6 +50,16 @@ class GuardiaService {
 
   Future<void> guardarTono(String tono) =>
       _storage.write(key: _tonoKey, value: tono);
+
+  /// Por defecto las notificaciones estan habilitadas (no hay valor guardado
+  /// todavia la primera vez que se instala la app).
+  Future<bool> obtenerNotificacionesHabilitadas() async {
+    final valor = await _storage.read(key: _notificacionesKey);
+    return valor != "false";
+  }
+
+  Future<void> guardarNotificacionesHabilitadas(bool habilitadas) =>
+      _storage.write(key: _notificacionesKey, value: habilitadas.toString());
 
   int _minutos(String horaTexto) {
     final partes = horaTexto.split(":");

@@ -51,7 +51,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Cuenta creada. Ya puedes iniciar sesión.")),
+        const SnackBar(
+          content: Text(
+            "Solicitud enviada. Un administrador debe aprobarla antes de que puedas ingresar.",
+          ),
+          duration: Duration(seconds: 5),
+        ),
       );
       Navigator.of(context).pop();
     } catch (e) {
@@ -139,7 +144,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                       ),
                       validator: (valor) {
-                        if ((valor ?? "").length < 6) return "Mínimo 6 caracteres";
+                        final texto = valor ?? "";
+                        if (texto.length < 8) return "Mínimo 8 caracteres";
+                        if (!RegExp(r"\d").hasMatch(texto)) return "Debe incluir un número";
+                        if (!RegExp(r"[^A-Za-z0-9]").hasMatch(texto)) return "Debe incluir un símbolo";
                         return null;
                       },
                     ),

@@ -138,11 +138,23 @@ class _AlertasScreenState extends State<AlertasScreen> {
 
     if (fallando.isEmpty || !mounted) return;
 
-    final armado = await _guardiaService.obtenerArmado();
-    final inicio = await _guardiaService.obtenerHoraInicio();
-    final fin = await _guardiaService.obtenerHoraFin();
-    final dentroDeHorario =
-        _guardiaService.estaDentroDeHorario(DateTime.now(), inicio, fin);
+    // Si el almacenamiento seguro falla (ver mismo caso en
+    // ConfiguracionGuardiaScreen), no debe tragarse silenciosamente la alarma:
+    // se asume guardia armada con horario 24hs para no perder la alerta.
+    bool armado = true;
+    var dentroDeHorario = true;
+    try {
+      const limite = Duration(seconds: 5);
+      armado = await _guardiaService.obtenerArmado().timeout(limite, onTimeout: () => true);
+      final inicio = await _guardiaService
+          .obtenerHoraInicio()
+          .timeout(limite, onTimeout: () => "00:00");
+      final fin =
+          await _guardiaService.obtenerHoraFin().timeout(limite, onTimeout: () => "00:00");
+      dentroDeHorario = _guardiaService.estaDentroDeHorario(DateTime.now(), inicio, fin);
+    } catch (_) {
+      // valores por defecto de arriba: no interrumpir la alarma por esto.
+    }
 
     if (!mounted || !(armado && dentroDeHorario)) return;
 

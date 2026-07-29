@@ -1,8 +1,10 @@
 import "package:flutter/material.dart";
 
 import "../models/usuario.dart";
+import "../screens/ajustes_screen.dart";
 import "../screens/bitacora_screen.dart";
 import "../screens/configuracion_guardia_screen.dart";
+import "../screens/mi_cuenta_screen.dart";
 import "../screens/solicitudes_screen.dart";
 import "../services/auth_service.dart";
 import "../screens/login_screen.dart";
@@ -69,6 +71,16 @@ class AppDrawer extends StatelessWidget {
                     },
                   ),
                   ListTile(
+                    leading: const Icon(Icons.account_circle_outlined),
+                    title: const Text("Mi cuenta"),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const MiCuentaScreen()),
+                      );
+                    },
+                  ),
+                  ListTile(
                     leading: const Icon(Icons.shield_outlined),
                     title: const Text("Configuración de guardia"),
                     onTap: () {
@@ -87,6 +99,16 @@ class AppDrawer extends StatelessWidget {
                       Navigator.of(context).push(
                         MaterialPageRoute(
                             builder: (_) => const BitacoraScreen()),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.settings_outlined),
+                    title: const Text("Ajustes"),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const AjustesScreen()),
                       );
                     },
                   ),

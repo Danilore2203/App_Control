@@ -97,6 +97,16 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await _authService.login(_usuarioController.text.trim(), _passwordController.text);
       await _entrarADashboard();
+    } on RequiereConfigurarPasswordException catch (_) {
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ConfigurarPasswordScreen(
+            usuarioInicial: _usuarioController.text.trim(),
+            esPrimeraVez: true,
+          ),
+        ),
+      );
     } catch (e) {
       setState(() => _error = e.toString().replaceFirst("Exception: ", ""));
     } finally {
@@ -134,7 +144,12 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _irAConfigurarPassword() {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ConfigurarPasswordScreen()));
+    final usuario = _usuarioController.text.trim();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ConfigurarPasswordScreen(usuarioInicial: usuario.isEmpty ? null : usuario),
+      ),
+    );
   }
 
   @override

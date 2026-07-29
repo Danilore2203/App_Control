@@ -41,6 +41,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Timer? _vigiaBloqueosProd;
   int _bloqueadasProd = 0;
   bool _bannerBloqueosDescartado = false;
+  int _fallosConsecutivosBloqueos = 0;
 
   @override
   void initState() {
@@ -77,14 +78,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
           _bloqueadasProd = resultado.bloqueadas;
         });
+        _fallosConsecutivosBloqueos = 0;
       } catch (_) {
         // Sin infra_token o monitor no disponible: no interrumpe el resto de la app.
+        _fallosConsecutivosBloqueos++;
       }
+      if (!mounted) return;
+      // Si viene fallando seguido, espacia los reintentos (hasta 10 min) en
+      // vez de insistir cada 60s sin necesidad - ahorra batería/datos cuando
+      // no hay infra_token o el monitor esta caido por un rato largo.
+      final segundos = _fallosConsecutivosBloqueos == 0
+          ? 60
+          : (60 * (1 << _fallosConsecutivosBloqueos.clamp(0, 4))).clamp(60, 600);
+      _vigiaBloqueosProd = Timer(Duration(seconds: segundos), consultar);
     }
 
     consultar();
-    _vigiaBloqueosProd =
-        Timer.periodic(const Duration(seconds: 60), (_) => consultar());
   }
 
   Color _colorEstado(String color) {
@@ -251,6 +260,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icono: Icons.error_outline,
             mensaje: "No se pudieron cargar los controles.",
             colorIcono: colorScheme.error,
+            onReintentar: _recargarControles,
           );
         }
 

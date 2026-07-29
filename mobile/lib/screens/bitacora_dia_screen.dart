@@ -539,7 +539,8 @@ class _TarjetaFalloDia extends StatelessWidget {
               ),
             ],
           ),
-          if (entrada.fechaActualizacion != null &&
+          if (!resuelto &&
+              entrada.fechaActualizacion != null &&
               entrada.fechaActualizacion!
                       .difference(entrada.fechaHora)
                       .inMinutes

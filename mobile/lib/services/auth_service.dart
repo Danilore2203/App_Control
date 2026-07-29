@@ -1,3 +1,4 @@
+import "dart:async";
 import "dart:convert";
 
 import "package:flutter/foundation.dart";
@@ -6,11 +7,27 @@ import "package:google_sign_in/google_sign_in.dart";
 import "package:http/http.dart" as http;
 
 import "../config.dart";
+import "../models/usuario.dart";
+
+/// Se lanza cuando el login falla porque la cuenta (tipicamente AD) todavia
+/// no tiene una contrasena local configurada para la app.
+class RequiereConfigurarPasswordException implements Exception {
+  final String mensaje;
+
+  RequiereConfigurarPasswordException(this.mensaje);
+
+  @override
+  String toString() => mensaje;
+}
 
 class AuthService {
   static const _storage = FlutterSecureStorage();
   static const _tokenKey = "access_token";
   static const _infraTokenKey = "infra_token";
+  // Mas largo que en ApiService: el login ademas espera a que el backend
+  // consulte el monitor de AD, que puede tardar unos segundos.
+  static const _timeout = Duration(seconds: 20);
+  static const _timeoutMsg = "El servidor no respondió a tiempo. Probá de nuevo.";
 
   final _googleSignIn = kIsWeb
       ? GoogleSignIn(clientId: AppConfig.googleServerClientId, scopes: ["email"])
@@ -28,14 +45,34 @@ class AuthService {
     return mensajePorDefecto;
   }
 
+  Map<String, dynamic>? _detalleObjeto(http.Response response) {
+    try {
+      final cuerpo = jsonDecode(response.body);
+      if (cuerpo is Map && cuerpo["detail"] is Map) {
+        return Map<String, dynamic>.from(cuerpo["detail"] as Map);
+      }
+    } catch (_) {
+      // Si el cuerpo no es JSON valido, no hay detalle estructurado.
+    }
+    return null;
+  }
+
   Future<void> login(String username, String password) async {
-    final response = await http.post(
-      Uri.parse("${AppConfig.apiBaseUrl}/auth/login"),
-      headers: {"Content-Type": "application/x-www-form-urlencoded"},
-      body: {"username": username, "password": password},
-    );
+    final response = await http
+        .post(
+          Uri.parse("${AppConfig.apiBaseUrl}/auth/login"),
+          headers: {"Content-Type": "application/x-www-form-urlencoded"},
+          body: {"username": username, "password": password},
+        )
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
 
     if (response.statusCode != 200) {
+      final detalle = _detalleObjeto(response);
+      if (detalle?["codigo"] == "sin_password") {
+        throw RequiereConfigurarPasswordException(
+          detalle!["mensaje"] as String? ?? "Configura tu contraseña para continuar.",
+        );
+      }
       throw Exception(_extraerDetalle(response, "Usuario o contraseña incorrectos."));
     }
 
@@ -59,11 +96,13 @@ class AuthService {
     String? nombre,
     String? email,
   }) async {
-    final response = await http.post(
-      Uri.parse("${AppConfig.apiBaseUrl}/auth/register"),
-      headers: {"Content-Type": "application/json"},
-      body: jsonEncode({"username": username, "password": password, "nombre": nombre, "email": email}),
-    );
+    final response = await http
+        .post(
+          Uri.parse("${AppConfig.apiBaseUrl}/auth/register"),
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode({"username": username, "password": password, "nombre": nombre, "email": email}),
+        )
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
 
     if (response.statusCode != 200) {
       throw Exception(_extraerDetalle(response, "No se pudo crear la cuenta."));
@@ -72,18 +111,22 @@ class AuthService {
 
   Future<void> configurarPassword({
     required String username,
-    required String passwordActual,
+    String? passwordActual,
+    String? correoVerificacion,
     required String passwordNueva,
   }) async {
-    final response = await http.post(
-      Uri.parse("${AppConfig.apiBaseUrl}/auth/configurar-password"),
-      headers: {"Content-Type": "application/json"},
-      body: jsonEncode({
-        "username": username,
-        "password_actual": passwordActual,
-        "password_nueva": passwordNueva,
-      }),
-    );
+    final response = await http
+        .post(
+          Uri.parse("${AppConfig.apiBaseUrl}/auth/configurar-password"),
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode({
+            "username": username,
+            "password_actual": passwordActual,
+            "correo_verificacion": correoVerificacion,
+            "password_nueva": passwordNueva,
+          }),
+        )
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
 
     if (response.statusCode != 200) {
       throw Exception(_extraerDetalle(response, "No se pudo configurar la contraseña."));
@@ -105,11 +148,13 @@ class AuthService {
       throw Exception("No se pudo obtener el token de Google");
     }
 
-    final response = await http.post(
-      Uri.parse("${AppConfig.apiBaseUrl}/auth/login/google"),
-      headers: {"Content-Type": "application/json"},
-      body: jsonEncode({"id_token": idToken}),
-    );
+    final response = await http
+        .post(
+          Uri.parse("${AppConfig.apiBaseUrl}/auth/login/google"),
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode({"id_token": idToken}),
+        )
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
 
     if (response.statusCode != 200) {
       await _googleSignIn.signOut();
@@ -118,6 +163,59 @@ class AuthService {
 
     final data = jsonDecode(response.body);
     await _storage.write(key: _tokenKey, value: data["access_token"]);
+  }
+
+  /// Asocia una cuenta de Google (puede ser distinta a la del correo de AD)
+  /// al usuario ya autenticado en esta sesion. No requiere aprobacion de
+  /// admin: el usuario ya probo ser dueno de esta cuenta al iniciar sesion.
+  Future<Usuario> vincularGoogle() async {
+    final cuenta = await _googleSignIn.signIn();
+    if (cuenta == null) {
+      throw Exception("Vinculación con Google cancelada");
+    }
+
+    final autenticacion = await cuenta.authentication;
+    final idToken = autenticacion.idToken;
+    if (idToken == null) {
+      throw Exception("No se pudo obtener el token de Google");
+    }
+
+    final token = await obtenerToken();
+    final response = await http
+        .post(
+          Uri.parse("${AppConfig.apiBaseUrl}/auth/vincular-google"),
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer $token",
+          },
+          body: jsonEncode({"id_token": idToken}),
+        )
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+
+    if (response.statusCode != 200) {
+      throw Exception(_extraerDetalle(response, "No se pudo vincular la cuenta de Google."));
+    }
+
+    return Usuario.fromJson(jsonDecode(response.body));
+  }
+
+  Future<Usuario> desvincularGoogle() async {
+    final token = await obtenerToken();
+    final response = await http
+        .post(
+          Uri.parse("${AppConfig.apiBaseUrl}/auth/desvincular-google"),
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer $token",
+          },
+        )
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+
+    if (response.statusCode != 200) {
+      throw Exception(_extraerDetalle(response, "No se pudo desvincular la cuenta de Google."));
+    }
+
+    return Usuario.fromJson(jsonDecode(response.body));
   }
 
   Future<String?> obtenerToken() => _storage.read(key: _tokenKey);
