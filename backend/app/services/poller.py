@@ -172,6 +172,96 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
         )
 
 
+def resincronizar_episodios_abiertos(db: Session) -> int:
+    """Los `_actualizar_bitacora_*` de arriba solo corrigen un episodio
+    cuando llega una fila NUEVA para ese proceso/tabla (id > cursor del
+    poller). Si el origen tarda en generar una fila nueva para ese proceso
+    puntual, el episodio se queda con el estado congelado desde que se abrio
+    -por eso un proceso que paso de ERROR a DEMORADO podia seguir viendose
+    como ERROR indefinidamente. Esto revisa TODOS los episodios abiertos
+    contra el ultimo snapshot conocido (sin importar el cursor) y los
+    corrige. Se corre en cada ciclo del poller, ademas de (no en vez de) la
+    logica normal basada en filas nuevas."""
+
+    abiertos = (
+        db.query(models.BitacoraError)
+        .filter(models.BitacoraError.estado_fin == "ERROR")
+        .all()
+    )
+    corregidos = 0
+
+    for episodio in abiertos:
+        if episodio.tipo == "PROCESO":
+            ultimo = (
+                db.query(models.Control)
+                .filter(
+                    models.Control.nombre == episodio.nombre,
+                    models.Control.fuente == episodio.tecnologia,
+                )
+                .order_by(models.Control.id.desc())
+                .first()
+            )
+            if ultimo is None:
+                continue
+            color = color_efectivo(ultimo)
+            if color not in ("red", "green"):
+                continue
+            if color == "green":
+                episodio.estado_fin = "OK"
+                episodio.fecha_actualizacion = ultimo.snapshot_ts
+                duracion = _formatear_duracion(episodio.fecha_hora, ultimo.snapshot_ts)
+                episodio.descripcion += (
+                    f" Pasó a OK a las {ultimo.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+                )
+                corregidos += 1
+                continue
+            estado_actual = estado_efectivo(ultimo)
+            if episodio.estado != estado_actual:
+                frase = "demorado" if estado_actual == "DEMORADO" else f"en {estado_actual.lower()}"
+                episodio.descripcion += (
+                    f" Cambió a {frase} a las {ultimo.snapshot_ts.strftime('%H:%M')}."
+                )
+                episodio.estado = estado_actual
+                corregidos += 1
+            episodio.fecha_actualizacion = ultimo.snapshot_ts
+
+        elif episodio.tipo == "TABLA":
+            ultimo = (
+                db.query(models.Tabla)
+                .filter(
+                    models.Tabla.nombre == episodio.nombre,
+                    models.Tabla.fuente == episodio.tecnologia,
+                )
+                .order_by(models.Tabla.id.desc())
+                .first()
+            )
+            if ultimo is None:
+                continue
+            if ultimo.color not in ("red", "green"):
+                continue
+            if ultimo.color == "green":
+                episodio.estado_fin = "OK"
+                episodio.fecha_actualizacion = ultimo.snapshot_ts
+                duracion = _formatear_duracion(episodio.fecha_hora, ultimo.snapshot_ts)
+                episodio.descripcion += (
+                    f" Pasó a OK a las {ultimo.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+                )
+                corregidos += 1
+                continue
+            estado_normalizado = ESTADOS_TABLA_NORMALIZADOS.get(ultimo.estado.upper().strip(), "ERROR")
+            if episodio.estado != estado_normalizado:
+                episodio.descripcion += (
+                    f" Cambió a {estado_normalizado.lower()} a las {ultimo.snapshot_ts.strftime('%H:%M')}."
+                )
+                episodio.estado = estado_normalizado
+                corregidos += 1
+            episodio.fecha_actualizacion = ultimo.snapshot_ts
+
+    if corregidos:
+        db.commit()
+    return corregidos
+
+
 def _tablas_de_proceso(db: Session, proceso_nombre: str) -> list[str]:
     filas = (
         db.query(models.ProcesoTabla.tabla_nombre)

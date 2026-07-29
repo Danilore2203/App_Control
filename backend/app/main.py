@@ -15,7 +15,11 @@ from app.routers import auth as auth_router
 from app.routers import bitacora as bitacora_router
 from app.routers import controles as controles_router
 from app.routers import infra as infra_router
-from app.services.poller import revisar_procesos_nuevos, revisar_tablas_nuevas
+from app.services.poller import (
+    resincronizar_episodios_abiertos,
+    revisar_procesos_nuevos,
+    revisar_tablas_nuevas,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,6 +37,7 @@ def _ejecutar_poller():
     try:
         revisar_procesos_nuevos(db)
         revisar_tablas_nuevas(db)
+        resincronizar_episodios_abiertos(db)
     finally:
         db.close()
 
