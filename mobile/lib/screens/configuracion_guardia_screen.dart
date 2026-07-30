@@ -660,6 +660,7 @@ class _FilaProcesoVigilado extends StatelessWidget {
   const _FilaProcesoVigilado({required this.control, required this.onTap});
 
   Color _color(ColorScheme colorScheme) {
+    if (control.esDemorado) return StatusColors.advertencia;
     switch (control.color) {
       case "red":
         return StatusColors.critico;

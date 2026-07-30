@@ -48,6 +48,7 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
   Control get control => widget.control;
 
   Color _color(ColorScheme colorScheme) {
+    if (control.esDemorado) return StatusColors.advertencia;
     switch (control.color) {
       case "red":
         return StatusColors.critico;
@@ -219,7 +220,7 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                             child: _CasillaStat(
                               titulo: "FIN",
                               valor: horaFin ?? "—",
-                              color: control.color == "red"
+                              color: control.color == "red" && !control.esDemorado
                                   ? colorScheme.error
                                   : color,
                             ),

@@ -46,4 +46,10 @@ class Control {
       snapshotTs: DateTime.parse(json["snapshot_ts"]),
     );
   }
+
+  /// El backend reclasifica un DEMORADO (ya paso su hora_fin) como color
+  /// "red" para tratarlo como falla real -nunca llega un control con color
+  /// "orange" crudo-, asi que hay que distinguirlo por estado para no
+  /// mostrarlo visualmente igual que un error duro.
+  bool get esDemorado => color == "red" && estado.toUpperCase() == "DEMORADO";
 }

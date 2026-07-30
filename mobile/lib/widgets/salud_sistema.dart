@@ -13,19 +13,11 @@ class SaludSistema extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    // El backend reclasifica un DEMORADO (que ya paso su hora_fin) como
-    // color "red" -no queda ningun control con color "orange" crudo-, asi
-    // que contar por color solo hacia que "AVISOS" siempre diera 0 y
-    // "FALLIDOS" mezclara demorados con errores reales. Se distingue por el
-    // estado, mismo criterio que _bucketDe en dashboard_screen.dart.
-    bool esDemorado(Control c) =>
-        c.color == "red" && c.estado.toUpperCase() == "DEMORADO";
-
     final total = controles.length;
     final exitosos = controles.where((c) => c.color == "green").length;
     final fallidos =
-        controles.where((c) => c.color == "red" && !esDemorado(c)).length;
-    final avisos = controles.where(esDemorado).length;
+        controles.where((c) => c.color == "red" && !c.esDemorado).length;
+    final avisos = controles.where((c) => c.esDemorado).length;
     final porcentaje = total == 0 ? 0.0 : exitosos / total;
 
     final Color colorSalud;

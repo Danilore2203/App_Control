@@ -12,6 +12,7 @@ class TarjetaProceso extends StatelessWidget {
   const TarjetaProceso({super.key, required this.control, this.onTap});
 
   Color _color(BuildContext context) {
+    if (control.esDemorado) return StatusColors.advertencia;
     switch (control.color) {
       case "red":
         return StatusColors.critico;
@@ -27,6 +28,7 @@ class TarjetaProceso extends StatelessWidget {
   }
 
   IconData get _icono {
+    if (control.esDemorado) return Icons.schedule;
     switch (control.color) {
       case "red":
         return Icons.error_outline;

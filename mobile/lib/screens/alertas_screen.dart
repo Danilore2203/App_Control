@@ -336,9 +336,9 @@ class _TarjetaFallaCritica extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final color = control.color == "red"
-        ? StatusColors.critico
-        : StatusColors.advertencia;
+    final color = control.esDemorado
+        ? StatusColors.advertencia
+        : StatusColors.critico;
 
     return Container(
       padding: const EdgeInsets.all(14),

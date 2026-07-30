@@ -126,6 +126,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  String _bucketDe(Control c) => c.esDemorado ? "orange" : c.color;
+
   Future<void> _recargarControles() async {
     final future = _apiService.obtenerControles();
     setState(() {
@@ -140,7 +142,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildFiltros(List<Control> controles) {
     final conteos = <String, int>{};
     for (final control in controles) {
-      conteos[control.color] = (conteos[control.color] ?? 0) + 1;
+      final bucket = _bucketDe(control);
+      conteos[bucket] = (conteos[bucket] ?? 0) + 1;
     }
     // Orden fijo: primero lo urgente (rojo/naranja), despues el resto.
     // Siempre se muestran las 5 (aunque una este en 0), para que "Demorados"
@@ -281,7 +284,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         var controles = _filtroColor == null
             ? segunCore
-            : segunCore.where((c) => c.color == _filtroColor).toList();
+            : segunCore.where((c) => _bucketDe(c) == _filtroColor).toList();
         if (_busqueda.isNotEmpty) {
           controles = controles
               .where((c) =>
