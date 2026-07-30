@@ -1,13 +1,17 @@
 import "package:flutter_foreground_task/flutter_foreground_task.dart";
 
+import "../models/control.dart";
+import "../widgets/monitoreo_por_fuente.dart" show esCore;
 import "api_service.dart";
 import "guardia_service.dart";
+import "notification_service.dart";
 
 const String _idServicioGuardia = "guardia_activa_v1";
 const int _idNotificacionGuardia = 4001;
 
 const _claveContadorFallas = "guardia_contador_fallas";
 const _claveUltimoMensaje = "guardia_ultimo_mensaje";
+const _claveIdsAlarmados = "guardia_ids_alarmados";
 
 /// Llamado desde `_mostrarNotificacionDeAlarma` (notification_service.dart)
 /// cada vez que llega una alerta critica real, para que la proxima vez que
@@ -57,6 +61,7 @@ Future<void> establecerGuardiaActiva(bool activa) async {
     }
     await FlutterForegroundTask.removeData(key: _claveContadorFallas);
     await FlutterForegroundTask.removeData(key: _claveUltimoMensaje);
+    await FlutterForegroundTask.removeData(key: _claveIdsAlarmados);
     return;
   }
 
@@ -128,6 +133,8 @@ class _GuardiaTaskHandler extends TaskHandler {
       textoEstado = fallando == 0
           ? "Todo OK"
           : "$fallando proceso${fallando == 1 ? '' : 's'} con falla";
+
+      if (dentro) await _revisarAlarmaDeRespaldo(controles);
     } catch (_) {
       textoEstado = "No se pudo consultar el estado";
     }
@@ -146,5 +153,42 @@ class _GuardiaTaskHandler extends TaskHandler {
       notificationTitle: "Guardia activa",
       notificationText: partes.join(" · "),
     );
+  }
+
+  /// Via de respaldo, independiente del push de Firebase: este Foreground
+  /// Service ya esta corriendo cada 2 min de por si (con mucha mas
+  /// proteccion contra los bloqueos de bateria/autoarranque de fabrica que
+  /// revivir una app muerta via FCM), asi que aprovecha esa misma corrida
+  /// para detectar procesos core en falla EL MISMO y disparar la alarma
+  /// local directo, sin esperar a que llegue (o no) el push. Guarda que ids
+  /// ya alarmo para no repetir cada 2 min mientras siga la misma falla, y
+  /// los "olvida" apenas el proceso se recupera, para que si vuelve a
+  /// fallar despues se alarme de nuevo.
+  Future<void> _revisarAlarmaDeRespaldo(List<Control> controles) async {
+    final fallandoCore = controles
+        .where(esCore)
+        .where((c) => c.color == "red" || c.color == "orange")
+        .toList();
+
+    final previosTexto = await FlutterForegroundTask.getData<String>(key: _claveIdsAlarmados) ?? "";
+    final previos = previosTexto.isEmpty
+        ? <int>{}
+        : previosTexto.split(",").map(int.parse).toSet();
+
+    final actuales = fallandoCore.map((c) => c.id).toSet();
+    final nuevos = fallandoCore.where((c) => !previos.contains(c.id));
+
+    for (final control in nuevos) {
+      // fallandoCore ya viene filtrado por esCore: todos los que llegan aca
+      // son procesos core.
+      await mostrarAlarmaLocal(
+        id: control.id,
+        titulo: "Alerta de proceso CORE",
+        mensaje: "[${control.fuente}] ${control.nombre}: ${control.estado}",
+        esDemorado: control.esDemorado,
+      );
+    }
+
+    await FlutterForegroundTask.saveData(key: _claveIdsAlarmados, value: actuales.join(","));
   }
 }

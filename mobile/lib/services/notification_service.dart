@@ -65,13 +65,66 @@ Future<bool> _debeSonarComoAlarma() async {
   }
 }
 
-/// Construye y muestra la notificacion A MANO (en vez de dejar que FCM la
+/// Muestra la alarma de pantalla completa A MANO (en vez de dejar que FCM la
 /// muestre sola), porque solo asi se le puede pedir pantalla completa
 /// (`fullScreenIntent`): eso es lo que hace que Android la lance directo
-/// sobre la pantalla de bloqueo, como una alarma real. Funciona igual la
-/// llame el listener de primer plano o el manejador de segundo plano.
-/// Devuelve `true` si se mostro como alarma de pantalla completa (para que
-/// el llamador decida si conviene ademas navegar directo a esa pantalla).
+/// sobre la pantalla de bloqueo, como una alarma real. Publica (no privada)
+/// porque tambien la usa `guardia_foreground_task.dart` como via de
+/// respaldo: si Android mata la app y nunca llega a procesar el push (mas
+/// comun de lo que deberia en Xiaomi/Samsung/Huawei sin autoarranque), el
+/// Foreground Service -que tiene mucha mas proteccion contra esos mismos
+/// bloqueos- puede disparar esta misma alarma el mismo, sin depender de FCM.
+Future<void> mostrarAlarmaLocal({
+  required int id,
+  required String titulo,
+  required String mensaje,
+  required bool esDemorado,
+}) async {
+  await _plugin
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(canalAlarmas);
+
+  await _plugin.show(
+    id,
+    titulo,
+    mensaje,
+    NotificationDetails(
+      android: AndroidNotificationDetails(
+        _idCanalAlarmas,
+        "Alarmas de control",
+        channelDescription:
+            "Alertas criticas cuando falla un proceso monitoreado, dentro del horario de guardia",
+        importance: Importance.max,
+        priority: Priority.max,
+        sound: const RawResourceAndroidNotificationSound("alarma"),
+        audioAttributesUsage: AudioAttributesUsage.alarm,
+        category: AndroidNotificationCategory.alarm,
+        fullScreenIntent: true,
+        color: esDemorado ? StatusColors.advertencia : StatusColors.critico,
+        colorized: true,
+      ),
+      iOS: DarwinNotificationDetails(
+        sound: "alarma.caf",
+        interruptionLevel: InterruptionLevel.timeSensitive,
+      ),
+    ),
+    payload: jsonEncode({
+      "titulo": titulo,
+      "mensaje": mensaje,
+      "alarma": true,
+      "esDemorado": esDemorado,
+    }),
+  );
+
+  // Para que la notificacion persistente de guardia refleje esta falla
+  // apenas ocurre, sin esperar su proximo tick.
+  await registrarFallaParaNotificacionPersistente(mensaje);
+}
+
+/// Muestra la notificacion que llega por push A MANO. Devuelve `true` si se
+/// mostro como alarma de pantalla completa (para que el llamador decida si
+/// conviene ademas navegar directo a esa pantalla). Funciona igual la llame
+/// el listener de primer plano o el manejador de segundo plano.
 Future<bool> _mostrarNotificacionDeAlarma(RemoteMessage message) async {
   if (message.data["tipo"] != "alerta_critica") return false;
 
@@ -80,57 +133,43 @@ Future<bool> _mostrarNotificacionDeAlarma(RemoteMessage message) async {
   final esDemorado = message.data["esDemorado"] == "true";
   final esAlarma = await _debeSonarComoAlarma();
 
+  if (esAlarma) {
+    await mostrarAlarmaLocal(
+      id: message.hashCode,
+      titulo: titulo,
+      mensaje: cuerpo,
+      esDemorado: esDemorado,
+    );
+    return true;
+  }
+
   await _plugin
       .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(esAlarma ? canalAlarmas : canalNormal);
+      ?.createNotificationChannel(canalNormal);
 
   await _plugin.show(
     message.hashCode,
     titulo,
     cuerpo,
     NotificationDetails(
-      android: esAlarma
-          ? AndroidNotificationDetails(
-              _idCanalAlarmas,
-              "Alarmas de control",
-              channelDescription:
-                  "Alertas criticas cuando falla un proceso monitoreado, dentro del horario de guardia",
-              importance: Importance.max,
-              priority: Priority.max,
-              sound: const RawResourceAndroidNotificationSound("alarma"),
-              audioAttributesUsage: AudioAttributesUsage.alarm,
-              category: AndroidNotificationCategory.alarm,
-              fullScreenIntent: true,
-              color: esDemorado ? StatusColors.advertencia : StatusColors.critico,
-              colorized: true,
-            )
-          : AndroidNotificationDetails(
-              _idCanalNormal,
-              "Alertas",
-              channelDescription: "Avisos de procesos fuera del horario de guardia (o guardia desarmada)",
-              importance: Importance.high,
-              priority: Priority.high,
-            ),
-      iOS: DarwinNotificationDetails(
-        sound: esAlarma ? "alarma.caf" : null,
-        interruptionLevel: esAlarma ? InterruptionLevel.timeSensitive : InterruptionLevel.active,
+      android: AndroidNotificationDetails(
+        _idCanalNormal,
+        "Alertas",
+        channelDescription: "Avisos de procesos fuera del horario de guardia (o guardia desarmada)",
+        importance: Importance.high,
+        priority: Priority.high,
       ),
+      iOS: const DarwinNotificationDetails(interruptionLevel: InterruptionLevel.active),
     ),
     payload: jsonEncode({
       "titulo": titulo,
       "mensaje": cuerpo,
-      "alarma": esAlarma,
+      "alarma": false,
       "esDemorado": esDemorado,
     }),
   );
 
-  if (esAlarma) {
-    // Para que la notificacion persistente de guardia refleje esta falla
-    // apenas ocurre, sin esperar su proximo tick.
-    await registrarFallaParaNotificacionPersistente(cuerpo);
-  }
-
-  return esAlarma;
+  return false;
 }
 
 /// Manejador de mensajes con la app en segundo plano o cerrada del todo.
