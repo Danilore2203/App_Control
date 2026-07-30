@@ -191,10 +191,13 @@ class PollerState(Base):
 class EpisodioAlerta(Base):
     """Estado de alarma de un proceso (nombre+fuente), independiente de si el
     origen escribe filas nuevas o no. Mientras `abierto` sea true el proceso
-    sigue en rojo/naranja y no debe generarse una alarma nueva si `push_ok`
-    ya es true (evita duplicados); si `push_ok` es false se reintenta en el
-    proximo ciclo (el push previo fallo). Se cierra cuando el proceso vuelve
-    a verde y se reabre (como episodio nuevo) si vuelve a fallar despues."""
+    sigue en rojo/naranja. Se cierra cuando el proceso vuelve a verde y se
+    reabre (como episodio nuevo) si vuelve a fallar despues. Quien ya fue
+    notificado con exito para el tramo abierto actual se guarda aparte, en
+    EpisodioAlertaUsuario (no alcanza con un solo booleano por episodio: si
+    a un destinatario el push le fallo -token vencido- pero a otros les
+    llego bien, ese destinatario puntual tiene que seguir reintentando sin
+    volver a molestar a los que ya se enteraron)."""
 
     __tablename__ = "episodios_alerta"
     __table_args__ = (UniqueConstraint("nombre", "fuente", name="uq_episodio_alerta_nombre_fuente"),)
@@ -204,8 +207,28 @@ class EpisodioAlerta(Base):
     fuente = Column(String(20), nullable=False)
     color = Column(String(20), nullable=False)
     abierto = Column(Boolean, nullable=False, default=True)
-    push_ok = Column(Boolean, nullable=False, default=False)
     control_id_actual = Column(Integer, nullable=True)
     primera_deteccion = Column(DateTime, nullable=False, default=datetime.utcnow)
     ultima_alerta_en = Column(DateTime, nullable=True)
     cerrado_en = Column(DateTime, nullable=True)
+
+    notificados = relationship(
+        "EpisodioAlertaUsuario", cascade="all, delete-orphan", back_populates="episodio"
+    )
+
+
+class EpisodioAlertaUsuario(Base):
+    """Un usuario ya fue notificado (push exitoso) para el tramo ACTUALMENTE
+    abierto del episodio. Se borra cuando el episodio se cierra o se reabre,
+    para que la proxima vez que el proceso falle se le vuelva a avisar a
+    todos desde cero."""
+
+    __tablename__ = "episodios_alerta_usuarios"
+    __table_args__ = (UniqueConstraint("episodio_id", "usuario_id", name="uq_episodio_alerta_usuario"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    episodio_id = Column(Integer, ForeignKey("episodios_alerta.id"), nullable=False)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    notificado_en = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    episodio = relationship("EpisodioAlerta", back_populates="notificados")

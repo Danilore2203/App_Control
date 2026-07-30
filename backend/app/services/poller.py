@@ -533,10 +533,30 @@ def _obtener_episodio_alerta(db: Session, nombre: str, fuente: str) -> models.Ep
     )
 
 
+def _usuarios_notificados(db: Session, episodio_id: int) -> set[int]:
+    filas = (
+        db.query(models.EpisodioAlertaUsuario.usuario_id)
+        .filter(models.EpisodioAlertaUsuario.episodio_id == episodio_id)
+        .all()
+    )
+    return {fila[0] for fila in filas}
+
+
+def _limpiar_notificados(db: Session, episodio_id: int) -> None:
+    db.query(models.EpisodioAlertaUsuario).filter(
+        models.EpisodioAlertaUsuario.episodio_id == episodio_id
+    ).delete()
+
+
 def _disparar_alarma(db: Session, proceso: models.Control, episodio: models.EpisodioAlerta) -> bool:
-    """Envia el push a todos los destinatarios y devuelve True si al menos
-    uno lo recibio (con eso alcanza para marcar el episodio como avisado;
-    si TODOS fallan, se reintenta el proximo ciclo)."""
+    """Intenta avisar solo a los destinatarios que TODAVIA no fueron
+    notificados con exito para el tramo abierto actual de este episodio
+    (`EpisodioAlertaUsuario`). Antes se marcaba el episodio entero como
+    "ya avisado" apenas UN destinatario recibia el push -si a otro le
+    fallaba (token vencido), ese usuario en particular quedaba sin alarma
+    para siempre, aunque despues arreglara su token, porque el episodio ya
+    figuraba como avisado. Devuelve True si, despues de este intento, ya no
+    queda nadie pendiente."""
 
     color = color_efectivo(proceso)
     es_critica = color == "red"
@@ -555,23 +575,29 @@ def _disparar_alarma(db: Session, proceso: models.Control, episodio: models.Epis
         )
         return False
 
+    ya_notificados = _usuarios_notificados(db, episodio.id)
+    pendientes = [(usuario, token_row) for usuario, token_row in destinatarios if usuario.id not in ya_notificados]
+    if not pendientes:
+        return True
+
     logger.warning(
-        "Disparando alarma para %s [%s] (core=%s, color=%s) a %d destinatario(s)",
-        proceso.nombre, proceso.fuente, es_core(proceso), color, len(destinatarios),
+        "Disparando alarma para %s [%s] (core=%s, color=%s) a %d destinatario(s) pendiente(s) de %d",
+        proceso.nombre, proceso.fuente, es_core(proceso), color, len(pendientes), len(destinatarios),
     )
 
-    algun_envio_ok = False
-    for usuario, token_row in destinatarios:
+    for usuario, token_row in pendientes:
         if _intentar_push(db, usuario, token_row, proceso.id, mensaje, titulo, critica=es_critica):
-            algun_envio_ok = True
+            db.add(models.EpisodioAlertaUsuario(episodio_id=episodio.id, usuario_id=usuario.id))
 
-    return algun_envio_ok
+    return len(_usuarios_notificados(db, episodio.id)) >= len(destinatarios)
 
 
 def _revisar_alarma_de_proceso(db: Session, proceso: models.Control) -> bool:
     """Decide si hace falta (re)disparar la alarma para el estado ACTUAL de
     este proceso, sin importar si esta fila es nueva o ya se habia visto
-    antes. Devuelve True si se disparo (o reintento) un push exitoso."""
+    antes. Mientras el episodio siga abierto se revisa TODOS los ciclos
+    (no solo al abrirse) para poder alcanzar a quien le fallo el push la
+    primera vez. Devuelve True si ya no queda nadie pendiente de avisar."""
 
     color = color_efectivo(proceso)
     episodio = _obtener_episodio_alerta(db, proceso.nombre, proceso.fuente)
@@ -580,12 +606,12 @@ def _revisar_alarma_de_proceso(db: Session, proceso: models.Control) -> bool:
         if episodio is not None and episodio.abierto:
             episodio.abierto = False
             episodio.cerrado_en = proceso.snapshot_ts
+            _limpiar_notificados(db, episodio.id)
             logger.info("Alarma cerrada: %s [%s] volvio a %s", proceso.nombre, proceso.fuente, color)
         return False
 
     episodio_nuevo = episodio is None
     reabre = episodio is not None and not episodio.abierto
-    reintento_pendiente = episodio is not None and episodio.abierto and not episodio.push_ok
 
     if episodio_nuevo:
         episodio = models.EpisodioAlerta(
@@ -597,25 +623,19 @@ def _revisar_alarma_de_proceso(db: Session, proceso: models.Control) -> bool:
             primera_deteccion=proceso.snapshot_ts,
         )
         db.add(episodio)
+        db.flush()  # asigna episodio.id, lo necesita _disparar_alarma
         logger.warning("Nueva alarma detectada: %s [%s] en %s", proceso.nombre, proceso.fuente, estado_efectivo(proceso))
     elif reabre:
         episodio.abierto = True
-        episodio.push_ok = False
         episodio.primera_deteccion = proceso.snapshot_ts
         episodio.cerrado_en = None
+        _limpiar_notificados(db, episodio.id)
         logger.warning("Proceso %s [%s] volvio a fallar: reabre alarma", proceso.nombre, proceso.fuente)
-    elif reintento_pendiente:
-        logger.info("Reintentando alarma pendiente: %s [%s]", proceso.nombre, proceso.fuente)
 
     episodio.color = color
     episodio.control_id_actual = proceso.id
 
-    if not (episodio_nuevo or reabre or reintento_pendiente):
-        # Ya hay alarma activa y avisada para este episodio: no duplicar.
-        return False
-
     exito = _disparar_alarma(db, proceso, episodio)
-    episodio.push_ok = exito
     episodio.ultima_alerta_en = proceso.snapshot_ts
     return exito
 
