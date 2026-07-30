@@ -209,9 +209,15 @@ def resincronizar_episodios_abiertos(db: Session) -> int:
             if ultimo is None:
                 continue
             color = color_efectivo(ultimo)
-            if color not in ("red", "green"):
-                continue
-            if color == "green":
+            if color != "red":
+                # Ya no esta en rojo -verde, en ejecucion, o cualquier otro
+                # estado-: la falla vieja quedo atras (si vuelve a fallar,
+                # el proximo aviso abre un episodio nuevo). Antes esto solo
+                # cerraba si el color era exactamente "green", asi que un
+                # proceso que arrancaba una corrida nueva y quedaba "en
+                # ejecucion" (azul) dejaba el episodio viejo abierto para
+                # siempre -de ahi que bitacora acumulara episodios "abiertos"
+                # que la app ya no mostraba como fallando.
                 episodio.estado_fin = "OK"
                 episodio.fecha_actualizacion = ultimo.snapshot_ts
                 duracion = _formatear_duracion(episodio.fecha_hora, ultimo.snapshot_ts)
@@ -243,9 +249,7 @@ def resincronizar_episodios_abiertos(db: Session) -> int:
             if ultimo is None:
                 continue
             color_tabla = (ultimo.color or "").strip().lower()
-            if color_tabla not in ("red", "green"):
-                continue
-            if color_tabla == "green":
+            if color_tabla != "red":
                 episodio.estado_fin = "OK"
                 episodio.fecha_actualizacion = ultimo.snapshot_ts
                 duracion = _formatear_duracion(episodio.fecha_hora, ultimo.snapshot_ts)
