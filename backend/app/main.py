@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from sqlalchemy import text
+
 from app.database import Base, SessionLocal, engine
 from app.rate_limit import limiter
 from app.routers import admin as admin_router
@@ -29,6 +31,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
+
+
+def _migrar_columnas_legacy():
+    """create_all() crea tablas nuevas pero NUNCA altera una que ya existe.
+    La primera version de EpisodioAlerta tenia `push_ok` NOT NULL; se
+    reemplazo por EpisodioAlertaUsuario (aviso por usuario, no por episodio
+    entero) y el modelo actual ya no la escribe. Sin este parche, la
+    columna vieja seguia ahi con esa restriccion y CADA intento de abrir un
+    episodio de alarma NUEVO explotaba con NotNullViolation -la alarma
+    nunca llegaba a dispararse, para ningun proceso nuevo en falla. Se
+    corre una sola vez al arrancar, es idempotente: si la columna ya no
+    existe, `IF EXISTS` no hace nada."""
+    with engine.begin() as conn:
+        try:
+            conn.execute(text("ALTER TABLE episodios_alerta DROP COLUMN IF EXISTS push_ok"))
+        except Exception:
+            logger.exception("No se pudo correr la migracion de push_ok (revisar a mano si persiste)")
+
+
+_migrar_columnas_legacy()
 
 INTERVALO_POLLER_SEGUNDOS = 60
 
