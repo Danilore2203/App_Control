@@ -315,6 +315,7 @@ def _intentar_push(
     mensaje: str,
     titulo: str,
     critica: bool,
+    es_demorado: bool = False,
 ) -> bool:
     """Registra la Alerta y hace UN intento de push. Si Firebase dice que el
     token ya no esta registrado (app desinstalada/reinstalada, token
@@ -327,7 +328,9 @@ def _intentar_push(
     alerta = models.Alerta(control_id=control_id, usuario_id=usuario.id, mensaje=mensaje, nivel="critica" if critica else "normal")
     db.add(alerta)
     try:
-        enviar_alerta_push(token_row.fcm_token, titulo=titulo, cuerpo=mensaje, critica=critica)
+        enviar_alerta_push(
+            token_row.fcm_token, titulo=titulo, cuerpo=mensaje, critica=critica, es_demorado=es_demorado
+        )
         alerta.enviada = True
         return True
     except messaging.UnregisteredError:
@@ -564,6 +567,7 @@ def _disparar_alarma(db: Session, proceso: models.Control, episodio: models.Epis
 
     color = color_efectivo(proceso)
     es_critica = color == "red"
+    es_demorado = estado_efectivo(proceso) == "DEMORADO"
     mensaje = f"[{proceso.fuente}] {proceso.nombre}: {estado_efectivo(proceso)}"
     titulo = (
         "Alerta de proceso CORE" if es_core(proceso) and es_critica
@@ -590,7 +594,9 @@ def _disparar_alarma(db: Session, proceso: models.Control, episodio: models.Epis
     )
 
     for usuario, token_row in pendientes:
-        if _intentar_push(db, usuario, token_row, proceso.id, mensaje, titulo, critica=es_critica):
+        if _intentar_push(
+            db, usuario, token_row, proceso.id, mensaje, titulo, critica=es_critica, es_demorado=es_demorado
+        ):
             db.add(models.EpisodioAlertaUsuario(episodio_id=episodio.id, usuario_id=usuario.id))
 
     return len(_usuarios_notificados(db, episodio.id)) >= len(destinatarios)

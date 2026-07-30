@@ -12,8 +12,14 @@ import "../theme.dart";
 class AlarmaPushScreen extends StatefulWidget {
   final String titulo;
   final String mensaje;
+  final bool esDemorado;
 
-  const AlarmaPushScreen({super.key, required this.titulo, required this.mensaje});
+  const AlarmaPushScreen({
+    super.key,
+    required this.titulo,
+    required this.mensaje,
+    this.esDemorado = false,
+  });
 
   @override
   State<AlarmaPushScreen> createState() => _AlarmaPushScreenState();
@@ -50,7 +56,9 @@ class _AlarmaPushScreenState extends State<AlarmaPushScreen> with SingleTickerPr
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    const color = StatusColors.critico;
+    // Mismo sonido/urgencia para demorado y error, pero no es lo mismo un
+    // proceso que se demoro que uno que fallo de verdad: se pinta distinto.
+    final color = widget.esDemorado ? StatusColors.advertencia : StatusColors.critico;
 
     return PopScope(
       // No se cierra con el boton "atras" del celular: solo con el boton de
@@ -91,7 +99,7 @@ class _AlarmaPushScreenState extends State<AlarmaPushScreen> with SingleTickerPr
                               ),
                             ],
                           ),
-                          child: const Icon(Icons.notifications_active, color: color, size: 62),
+                          child: Icon(Icons.notifications_active, color: color, size: 62),
                         );
                       },
                     ),
@@ -101,7 +109,7 @@ class _AlarmaPushScreenState extends State<AlarmaPushScreen> with SingleTickerPr
                       decoration:
                           BoxDecoration(color: color, borderRadius: BorderRadius.circular(999)),
                       child: Text(
-                        "ALARMA CRÍTICA",
+                        widget.esDemorado ? "ALARMA · DEMORADO" : "ALARMA CRÍTICA",
                         style: AppTextStyles.tech(color: Colors.white, fontSize: 11),
                       ),
                     ),
@@ -109,7 +117,7 @@ class _AlarmaPushScreenState extends State<AlarmaPushScreen> with SingleTickerPr
                     Text(
                       widget.titulo,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: color,
                         fontWeight: FontWeight.bold,
                         fontSize: 24,

@@ -6,6 +6,7 @@ import "package:flutter/foundation.dart";
 import "package:flutter_local_notifications/flutter_local_notifications.dart";
 import "package:permission_handler/permission_handler.dart";
 
+import "../theme.dart";
 import "api_service.dart";
 import "guardia_foreground_task.dart";
 import "guardia_service.dart";
@@ -76,6 +77,7 @@ Future<bool> _mostrarNotificacionDeAlarma(RemoteMessage message) async {
 
   final titulo = message.data["titulo"] ?? "Alerta crítica";
   final cuerpo = message.data["mensaje"] ?? "Se detectó una falla.";
+  final esDemorado = message.data["esDemorado"] == "true";
   final esAlarma = await _debeSonarComoAlarma();
 
   await _plugin
@@ -99,6 +101,8 @@ Future<bool> _mostrarNotificacionDeAlarma(RemoteMessage message) async {
               audioAttributesUsage: AudioAttributesUsage.alarm,
               category: AndroidNotificationCategory.alarm,
               fullScreenIntent: true,
+              color: esDemorado ? StatusColors.advertencia : StatusColors.critico,
+              colorized: true,
             )
           : AndroidNotificationDetails(
               _idCanalNormal,
@@ -112,7 +116,12 @@ Future<bool> _mostrarNotificacionDeAlarma(RemoteMessage message) async {
         interruptionLevel: esAlarma ? InterruptionLevel.timeSensitive : InterruptionLevel.active,
       ),
     ),
-    payload: jsonEncode({"titulo": titulo, "mensaje": cuerpo, "alarma": esAlarma}),
+    payload: jsonEncode({
+      "titulo": titulo,
+      "mensaje": cuerpo,
+      "alarma": esAlarma,
+      "esDemorado": esDemorado,
+    }),
   );
 
   if (esAlarma) {
@@ -150,6 +159,7 @@ void _navegarAAlarmaDesdePayload(String? payload) {
     NavegacionService.mostrarAlarma(
       titulo: datos["titulo"] as String? ?? "Alerta crítica",
       mensaje: datos["mensaje"] as String? ?? "",
+      esDemorado: datos["esDemorado"] == true,
     );
   } catch (_) {
     // Payload viejo o invalido (p.ej. de una version anterior): se ignora.
@@ -196,6 +206,7 @@ class NotificationService {
         NavegacionService.mostrarAlarma(
           titulo: message.data["titulo"] ?? "Alerta crítica",
           mensaje: message.data["mensaje"] ?? "Se detectó una falla.",
+          esDemorado: message.data["esDemorado"] == "true",
         );
       }
     });

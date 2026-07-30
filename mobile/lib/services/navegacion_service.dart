@@ -10,13 +10,18 @@ import "../screens/login_screen.dart";
 class NavegacionService {
   static final navigatorKey = GlobalKey<NavigatorState>();
 
-  static void mostrarAlarma({required String titulo, required String mensaje}) {
+  static void mostrarAlarma({
+    required String titulo,
+    required String mensaje,
+    bool esDemorado = false,
+  }) {
     final estado = navigatorKey.currentState;
     if (estado == null) return;
     estado.push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (_) => AlarmaPushScreen(titulo: titulo, mensaje: mensaje),
+        builder: (_) =>
+            AlarmaPushScreen(titulo: titulo, mensaje: mensaje, esDemorado: esDemorado),
       ),
     );
   }

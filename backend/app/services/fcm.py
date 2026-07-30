@@ -19,7 +19,9 @@ def inicializar_firebase():
     return _firebase_app
 
 
-def enviar_alerta_push(fcm_token: str, titulo: str, cuerpo: str, critica: bool = True) -> str:
+def enviar_alerta_push(
+    fcm_token: str, titulo: str, cuerpo: str, critica: bool = True, es_demorado: bool = False
+) -> str:
     """Envia una alerta via FCM como mensaje de puros datos (sin `notification`),
     para que la app la reciba y construya ELLA MISMA la notificacion (con
     pantalla completa tipo alarma) en cualquier estado -primer plano, segundo
@@ -47,6 +49,11 @@ def enviar_alerta_push(fcm_token: str, titulo: str, cuerpo: str, critica: bool =
             "tipo": "alerta_critica",
             "titulo": titulo,
             "mensaje": cuerpo,
+            # La app decide el color de la pantalla de alarma con esto: mismo
+            # sonido/urgencia para demorado y error, pero demorado se pinta
+            # amarillo/naranja en vez de rojo (no es lo mismo un proceso que
+            # se demoro que uno que fallo de verdad).
+            "esDemorado": "true" if es_demorado else "false",
         },
         android=messaging.AndroidConfig(priority="high"),
         apns=messaging.APNSConfig(
