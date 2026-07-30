@@ -45,6 +45,35 @@ const AndroidNotificationChannel canalNormal = AndroidNotificationChannel(
 
 final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
 
+/// Ultimo recurso: si CUALQUIER cosa del camino normal de la alarma explota
+/// (canal roto, sonido roto, lo que sea), esto muestra una notificacion
+/// minima -sin sonido custom, sin fullScreenIntent, nada que pueda fallar
+/// a su vez- con el motivo real del error. Sin esto, una excepcion en un
+/// isolate de background moria en silencio total: no crasheaba nada
+/// visible, no dejaba log en ningun lado que el usuario pueda ver, y la
+/// alarma real simplemente no aparecia sin ninguna pista de por que.
+Future<void> _mostrarErrorDiagnostico(String detalle) async {
+  try {
+    await _plugin.show(
+      999999,
+      "No se pudo mostrar la alarma",
+      detalle,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          "diagnostico_errores_v1",
+          "Errores de la app",
+          channelDescription: "Avisa si la alarma no se pudo mostrar por algun error",
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+      ),
+    );
+  } catch (_) {
+    // Si hasta esto falla, ya no hay nada mas que la app pueda hacer del
+    // lado de Dart: el problema esta en el sistema, no en este codigo.
+  }
+}
+
 /// Solo debe sonar como alarma de pantalla completa si la guardia esta
 /// armada Y estamos dentro del horario configurado (mismo criterio que ya
 /// usa alertas_screen.dart para la alarma en primer plano). Si algo falla al
@@ -180,14 +209,19 @@ Future<bool> _mostrarNotificacionDeAlarma(RemoteMessage message) async {
 /// antes de poder mostrar nada, o `.show()` no hace nada.
 @pragma("vm:entry-point")
 Future<void> manejarMensajeEnSegundoPlano(RemoteMessage message) async {
-  await Firebase.initializeApp();
-  await _plugin.initialize(
-    const InitializationSettings(
-      android: AndroidInitializationSettings("@mipmap/ic_launcher"),
-      iOS: DarwinInitializationSettings(),
-    ),
-  );
-  await _mostrarNotificacionDeAlarma(message);
+  try {
+    await Firebase.initializeApp();
+    await _plugin.initialize(
+      const InitializationSettings(
+        android: AndroidInitializationSettings("@mipmap/ic_launcher"),
+        iOS: DarwinInitializationSettings(),
+      ),
+    );
+    await _mostrarNotificacionDeAlarma(message);
+  } catch (e, st) {
+    debugPrint("Fallo mostrando alarma en segundo plano: $e\n$st");
+    await _mostrarErrorDiagnostico("Segundo plano: $e");
+  }
 }
 
 void _navegarAAlarmaDesdePayload(String? payload) {
@@ -237,16 +271,21 @@ class NotificationService {
     FirebaseMessaging.onBackgroundMessage(manejarMensajeEnSegundoPlano);
 
     FirebaseMessaging.onMessage.listen((message) async {
-      final esAlarma = await _mostrarNotificacionDeAlarma(message);
-      if (esAlarma) {
-        // Ya estamos con la app abierta y dentro del horario de guardia: no
-        // hace falta esperar a que toquen la notificacion, se muestra la
-        // alarma directo.
-        NavegacionService.mostrarAlarma(
-          titulo: message.data["titulo"] ?? "Alerta crítica",
-          mensaje: message.data["mensaje"] ?? "Se detectó una falla.",
-          esDemorado: message.data["esDemorado"] == "true",
-        );
+      try {
+        final esAlarma = await _mostrarNotificacionDeAlarma(message);
+        if (esAlarma) {
+          // Ya estamos con la app abierta y dentro del horario de guardia: no
+          // hace falta esperar a que toquen la notificacion, se muestra la
+          // alarma directo.
+          NavegacionService.mostrarAlarma(
+            titulo: message.data["titulo"] ?? "Alerta crítica",
+            mensaje: message.data["mensaje"] ?? "Se detectó una falla.",
+            esDemorado: message.data["esDemorado"] == "true",
+          );
+        }
+      } catch (e, st) {
+        debugPrint("Fallo mostrando alarma en primer plano: $e\n$st");
+        await _mostrarErrorDiagnostico("Primer plano: $e");
       }
     });
   }
