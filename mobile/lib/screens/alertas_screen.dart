@@ -1,3 +1,5 @@
+import "dart:async";
+
 import "package:flutter/material.dart";
 
 import "../models/alerta.dart";
@@ -62,6 +64,7 @@ class _AlertasScreenState extends State<AlertasScreen> {
   late Future<List<Control>> _controlesFuture;
   List<BitacoraError> _incoherenciasHoy = [];
   bool _bannerDescartado = false;
+  Timer? _autoRefresco;
 
   @override
   void initState() {
@@ -69,6 +72,22 @@ class _AlertasScreenState extends State<AlertasScreen> {
     _alertasFuture = _apiService.obtenerAlertas();
     _controlesFuture = _apiService.obtenerControles();
     _cargarIncoherencias();
+    // Sin esto la pantalla quedaba con la foto de cuando se abrio hasta que
+    // el usuario la cerraba y volvia a entrar (mismo bug que en Controles).
+    _autoRefresco = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (!mounted) return;
+      setState(() {
+        _alertasFuture = _apiService.obtenerAlertas();
+        _controlesFuture = _apiService.obtenerControles();
+      });
+      _cargarIncoherencias();
+    });
+  }
+
+  @override
+  void dispose() {
+    _autoRefresco?.cancel();
+    super.dispose();
   }
 
   Future<void> _cargarIncoherencias() async {

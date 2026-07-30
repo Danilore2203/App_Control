@@ -1,3 +1,5 @@
+import "dart:async";
+
 import "package:flutter/material.dart";
 
 import "../models/bitacora_error.dart";
@@ -123,6 +125,7 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
   String? _filtroEstado; // null=todos, "ABIERTO", "RESUELTO" o "DEMORADO"
   String? _filtroTecnologia;
   late final AnimationController _pulseController;
+  Timer? _autoRefresco;
 
   @override
   void initState() {
@@ -132,12 +135,26 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
       vsync: this,
       duration: const Duration(seconds: 1),
     )..repeat(reverse: true);
+    // Esta pantalla llega con una foto fija (entradasIniciales) que se
+    // quedaba congelada hasta salir y volver a entrar. Se refresca sola
+    // cada 60s mientras el usuario la tenga abierta revisando el dia.
+    _autoRefresco = Timer.periodic(const Duration(seconds: 60), (_) async {
+      if (!mounted) return;
+      final nuevasEntradas =
+          await _apiService.obtenerBitacoraEntradas(widget.anio, mes: widget.mes);
+      if (!mounted) return;
+      setState(() {
+        _entradas =
+            nuevasEntradas.where((e) => e.fechaHora.day == widget.dia).toList();
+      });
+    });
   }
 
   @override
   void dispose() {
     _busquedaController.dispose();
     _pulseController.dispose();
+    _autoRefresco?.cancel();
     super.dispose();
   }
 
