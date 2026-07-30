@@ -4,13 +4,11 @@ import "../models/alerta.dart";
 import "../models/bitacora_error.dart";
 import "../models/control.dart";
 import "../services/api_service.dart";
-import "../services/guardia_service.dart";
 import "../theme.dart";
 import "../widgets/detalle_proceso_sheet.dart";
 import "../widgets/estado_badge.dart";
 import "../widgets/estado_vacio.dart";
 import "../widgets/monitoreo_por_fuente.dart" show esCore;
-import "alerta_critica_screen.dart";
 
 /// Reconstruye, a partir de una entrada de bitacora tipo INCOHERENCIA
 /// ("proceso -> tabla"), un Control sintetico con los datos reales del
@@ -60,11 +58,8 @@ class AlertasScreen extends StatefulWidget {
 
 class _AlertasScreenState extends State<AlertasScreen> {
   final _apiService = ApiService();
-  final _guardiaService = GuardiaService();
   late Future<List<Alerta>> _alertasFuture;
   late Future<List<Control>> _controlesFuture;
-  final Set<int> _idsYaAlertados = {};
-  final Set<int> _idsIncoherenciaYaAlertados = {};
   List<BitacoraError> _incoherenciasHoy = [];
   bool _bannerDescartado = false;
 
@@ -74,7 +69,6 @@ class _AlertasScreenState extends State<AlertasScreen> {
     _alertasFuture = _apiService.obtenerAlertas();
     _controlesFuture = _apiService.obtenerControles();
     _cargarIncoherencias();
-    _controlesFuture.then(_evaluarAlarmaCore);
   }
 
   Future<void> _cargarIncoherencias() async {
@@ -92,7 +86,6 @@ class _AlertasScreenState extends State<AlertasScreen> {
           .toList();
       if (mounted) {
         setState(() => _incoherenciasHoy = hoy);
-        _controlesFuture.then(_evaluarAlarmaCore);
       }
     } catch (_) {
       // Si falla, simplemente no se suman incoherencias este ciclo.
@@ -108,64 +101,7 @@ class _AlertasScreenState extends State<AlertasScreen> {
       _bannerDescartado = false;
     });
     _cargarIncoherencias();
-    futureControles.then(_evaluarAlarmaCore);
     await Future.wait([futureAlertas, futureControles]);
-  }
-
-  Future<void> _evaluarAlarmaCore(List<Control> controles) async {
-    final fallandoReal = controles
-        .where(esCore)
-        .where((c) => c.color == "red" || c.color == "orange")
-        .where((c) => !_idsYaAlertados.contains(c.id))
-        .toList();
-    for (final c in fallandoReal) {
-      _idsYaAlertados.add(c.id);
-    }
-
-    final entradasNuevas = _incoherenciasHoy
-        .where((e) => !_idsIncoherenciaYaAlertados.contains(e.id))
-        .toList();
-    for (final entrada in entradasNuevas) {
-      _idsIncoherenciaYaAlertados.add(entrada.id);
-    }
-    final incoherenciasNuevas = entradasNuevas
-        .map((e) => construirFallaDesdeIncoherencia(e, controles))
-        .whereType<Control>()
-        .toList();
-
-    final fallando = [...fallandoReal, ...incoherenciasNuevas]
-      ..sort((a, b) => a.color == "red" ? -1 : 1);
-
-    if (fallando.isEmpty || !mounted) return;
-
-    // Si el almacenamiento seguro falla (ver mismo caso en
-    // ConfiguracionGuardiaScreen), no debe tragarse silenciosamente la alarma:
-    // se asume guardia armada con horario 24hs para no perder la alerta.
-    bool armado = true;
-    var dentroDeHorario = true;
-    try {
-      const limite = Duration(seconds: 5);
-      armado = await _guardiaService.obtenerArmado().timeout(limite, onTimeout: () => true);
-      final inicio = await _guardiaService
-          .obtenerHoraInicio()
-          .timeout(limite, onTimeout: () => "00:00");
-      final fin =
-          await _guardiaService.obtenerHoraFin().timeout(limite, onTimeout: () => "00:00");
-      dentroDeHorario = _guardiaService.estaDentroDeHorario(DateTime.now(), inicio, fin);
-    } catch (_) {
-      // valores por defecto de arriba: no interrumpir la alarma por esto.
-    }
-
-    if (!mounted || !(armado && dentroDeHorario)) return;
-
-    // Fuera de horario de guardia (o guardia desarmada): no interrumpe con
-    // pantalla+sonido, la falla ya queda visible en la seccion de arriba.
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => AlertaCriticaScreen(controles: fallando),
-      ),
-    );
   }
 
   String _formatearFecha(DateTime fecha) {
