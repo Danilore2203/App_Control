@@ -2,7 +2,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app import auth, models, schemas
 from app.database import get_db
@@ -41,26 +41,28 @@ def listar_controles(
     """Estado actual de cada proceso en dataops_catalogo_procesos: un registro
     por (nombre, fuente), el de snapshot_ts mas reciente. La tabla guarda un
     historico de snapshots por dia, asi que no alcanza con tomar las ultimas N
-    filas por id: eso mezcla corridas de distintos dias y trunca procesos."""
+    filas por id: eso mezcla corridas de distintos dias y trunca procesos.
+
+    Se usa DISTINCT ON (especifico de Postgres) en vez de agrupar y despues
+    hacer join contra la tabla completa de nuevo: con el indice en (nombre,
+    fuente, snapshot_ts) esto resuelve en un solo recorrido, mientras que el
+    group-by-y-join anterior escaneaba la tabla historica dos veces y con
+    ella ya crecida superaba el statement_timeout de Postgres."""
     ultimo_por_proceso = (
-        db.query(
+        db.query(models.Control)
+        .distinct(models.Control.nombre, models.Control.fuente)
+        .order_by(
             models.Control.nombre,
             models.Control.fuente,
-            func.max(models.Control.snapshot_ts).label("ultimo_ts"),
+            models.Control.snapshot_ts.desc(),
         )
-        .group_by(models.Control.nombre, models.Control.fuente)
         .subquery()
     )
+    UltimoControl = aliased(models.Control, ultimo_por_proceso)
 
     controles = (
-        db.query(models.Control)
-        .join(
-            ultimo_por_proceso,
-            (models.Control.nombre == ultimo_por_proceso.c.nombre)
-            & (models.Control.fuente == ultimo_por_proceso.c.fuente)
-            & (models.Control.snapshot_ts == ultimo_por_proceso.c.ultimo_ts),
-        )
-        .order_by(models.Control.nombre)
+        db.query(UltimoControl)
+        .order_by(UltimoControl.nombre)
         .limit(limit)
         .all()
     )

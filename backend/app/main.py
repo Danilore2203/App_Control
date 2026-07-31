@@ -80,6 +80,9 @@ def _asegurar_indices():
                     "ON dataops_catalogo_procesos (nombre, fuente, snapshot_ts)"
                 )
             )
+            # Sin esto el planner puede tardar hasta el proximo autovacuum en
+            # darse cuenta de que el indice nuevo existe y conviene usarlo.
+            conn.execute(text("ANALYZE dataops_catalogo_procesos"))
         logger.info("Indice de dataops_catalogo_procesos listo")
     except Exception:
         logger.exception("No se pudo crear el indice de dataops_catalogo_procesos")
