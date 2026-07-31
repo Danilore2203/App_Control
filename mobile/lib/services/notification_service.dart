@@ -3,6 +3,7 @@ import "dart:convert";
 import "package:firebase_core/firebase_core.dart";
 import "package:firebase_messaging/firebase_messaging.dart";
 import "package:flutter/foundation.dart";
+import "package:flutter/services.dart";
 import "package:flutter_local_notifications/flutter_local_notifications.dart";
 import "package:permission_handler/permission_handler.dart";
 
@@ -13,7 +14,13 @@ import "guardia_service.dart";
 import "navegacion_service.dart";
 
 const String _idCanalAlarmas = "alarmas_criticas_v2";
+const String _idCanalAlarmasFallback = "alarmas_criticas_fallback_v1";
 const String _idCanalNormal = "alertas_normales_v1";
+
+// URI del sonido de alarma predeterminado del sistema (el mismo que usa el
+// reloj despertador de Android). Siempre existe en el dispositivo, a
+// diferencia del tono propio empaquetado como recurso raw.
+const String _uriSonidoAlarmaSistema = "content://settings/system/alarm_alert";
 
 // "_v2"/"_v1": el id de canal esta atado para siempre al sonido/audio
 // attributes que tenia la PRIMERA vez que Android lo creo (no se puede
@@ -31,6 +38,19 @@ const AndroidNotificationChannel canalAlarmas = AndroidNotificationChannel(
   // Trata el sonido como el de un despertador (volumen de alarma, no el de
   // notificaciones) para que suene tambien con el celular en silencio/Do Not
   // Disturb, igual que el reloj despertador del sistema.
+  audioAttributesUsage: AudioAttributesUsage.alarm,
+);
+
+const AndroidNotificationChannel canalAlarmasFallback = AndroidNotificationChannel(
+  _idCanalAlarmasFallback,
+  "Alarmas de control (sonido del sistema)",
+  description:
+      "Igual que Alarmas de control, pero con el sonido de alarma predeterminado del sistema "
+      "(se usa si el tono propio no se pudo cargar)",
+  importance: Importance.max,
+  playSound: true,
+  sound: UriAndroidNotificationSound(_uriSonidoAlarmaSistema),
+  enableVibration: true,
   audioAttributesUsage: AudioAttributesUsage.alarm,
 );
 
@@ -103,47 +123,74 @@ Future<bool> _debeSonarComoAlarma() async {
 /// comun de lo que deberia en Xiaomi/Samsung/Huawei sin autoarranque), el
 /// Foreground Service -que tiene mucha mas proteccion contra esos mismos
 /// bloqueos- puede disparar esta misma alarma el mismo, sin depender de FCM.
+NotificationDetails _detallesAlarma(bool esDemorado, {required bool conSonidoPropio}) {
+  return NotificationDetails(
+    android: AndroidNotificationDetails(
+      conSonidoPropio ? _idCanalAlarmas : _idCanalAlarmasFallback,
+      conSonidoPropio ? "Alarmas de control" : "Alarmas de control (sonido del sistema)",
+      channelDescription:
+          "Alertas criticas cuando falla un proceso monitoreado, dentro del horario de guardia",
+      importance: Importance.max,
+      priority: Priority.max,
+      sound: conSonidoPropio
+          ? const RawResourceAndroidNotificationSound("alarma")
+          : const UriAndroidNotificationSound(_uriSonidoAlarmaSistema),
+      playSound: true,
+      audioAttributesUsage: AudioAttributesUsage.alarm,
+      category: AndroidNotificationCategory.alarm,
+      fullScreenIntent: true,
+      color: esDemorado ? StatusColors.advertencia : StatusColors.critico,
+      colorized: true,
+    ),
+    iOS: DarwinNotificationDetails(
+      sound: conSonidoPropio ? "alarma.caf" : null,
+      interruptionLevel: InterruptionLevel.timeSensitive,
+    ),
+  );
+}
+
 Future<void> mostrarAlarmaLocal({
   required int id,
   required String titulo,
   required String mensaje,
   required bool esDemorado,
 }) async {
-  await _plugin
-      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(canalAlarmas);
+  final payload = jsonEncode({
+    "titulo": titulo,
+    "mensaje": mensaje,
+    "alarma": true,
+    "esDemorado": esDemorado,
+  });
 
-  await _plugin.show(
-    id,
-    titulo,
-    mensaje,
-    NotificationDetails(
-      android: AndroidNotificationDetails(
-        _idCanalAlarmas,
-        "Alarmas de control",
-        channelDescription:
-            "Alertas criticas cuando falla un proceso monitoreado, dentro del horario de guardia",
-        importance: Importance.max,
-        priority: Priority.max,
-        sound: const RawResourceAndroidNotificationSound("alarma"),
-        audioAttributesUsage: AudioAttributesUsage.alarm,
-        category: AndroidNotificationCategory.alarm,
-        fullScreenIntent: true,
-        color: esDemorado ? StatusColors.advertencia : StatusColors.critico,
-        colorized: true,
-      ),
-      iOS: DarwinNotificationDetails(
-        sound: "alarma.caf",
-        interruptionLevel: InterruptionLevel.timeSensitive,
-      ),
-    ),
-    payload: jsonEncode({
-      "titulo": titulo,
-      "mensaje": mensaje,
-      "alarma": true,
-      "esDemorado": esDemorado,
-    }),
-  );
+  try {
+    await _plugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(canalAlarmas);
+    await _plugin.show(
+      id,
+      titulo,
+      mensaje,
+      _detallesAlarma(esDemorado, conSonidoPropio: true),
+      payload: payload,
+    );
+  } on PlatformException catch (e) {
+    if (e.code != "invalid_sound") rethrow;
+    // El tono propio no se pudo resolver (instalacion vieja sin el recurso,
+    // resource shrinking, etc.). Se cae al sonido de alarma predeterminado
+    // del sistema -que siempre existe en el dispositivo- en un canal
+    // distinto: la alarma tiene que sonar si o si, aunque no sea con el tono
+    // propio.
+    await _plugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(canalAlarmasFallback);
+    await _plugin.show(
+      id,
+      titulo,
+      mensaje,
+      _detallesAlarma(esDemorado, conSonidoPropio: false),
+      payload: payload,
+    );
+  }
 
   // Para que la notificacion persistente de guardia refleje esta falla
   // apenas ocurre, sin esperar su proximo tick.
@@ -255,9 +302,16 @@ class NotificationService {
     if (kIsWeb || _localesListas) return;
     _localesListas = true;
 
-    await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(canalAlarmas);
+    try {
+      await _plugin
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(canalAlarmas);
+    } on PlatformException catch (e) {
+      // No dejar que un tono roto tumbe el arranque de la app: el canal se
+      // vuelve a intentar crear (y cae al de sonido del sistema si hace
+      // falta) recien cuando llegue una alarma real, en mostrarAlarmaLocal.
+      if (e.code != "invalid_sound") rethrow;
+    }
 
     await _plugin.initialize(
       const InitializationSettings(

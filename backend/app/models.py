@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -47,6 +47,18 @@ class Control(Base):
     (no se crea/altera aca, solo se lee). Cada fila es un snapshot historico de un proceso."""
 
     __tablename__ = "dataops_catalogo_procesos"
+    # Soporta la consulta de "ultimo snapshot por (nombre, fuente)" que hace
+    # listar_controles: sin este indice, Postgres tiene que escanear toda la
+    # tabla historica para agrupar y de nuevo para el join, y con la tabla ya
+    # crecida eso supera el statement_timeout.
+    __table_args__ = (
+        Index(
+            "ix_dataops_catalogo_procesos_nombre_fuente_snapshot_ts",
+            "nombre",
+            "fuente",
+            "snapshot_ts",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String(255), nullable=False)

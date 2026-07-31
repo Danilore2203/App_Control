@@ -52,6 +52,29 @@ def _migrar_columnas_legacy():
 
 _migrar_columnas_legacy()
 
+
+def _asegurar_indices():
+    """create_all() no agrega indices nuevos a una tabla que ya existe.
+    dataops_catalogo_procesos es una tabla historica (un snapshot por dia
+    por proceso) que crecio lo suficiente como para que listar_controles
+    -que agrupa por (nombre, fuente) buscando el ultimo snapshot_ts- empiece
+    a superar el statement_timeout de Postgres por hacer seq scan. Se corre
+    una sola vez al arrancar, es idempotente (`IF NOT EXISTS`)."""
+    with engine.begin() as conn:
+        try:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS "
+                    "ix_dataops_catalogo_procesos_nombre_fuente_snapshot_ts "
+                    "ON dataops_catalogo_procesos (nombre, fuente, snapshot_ts)"
+                )
+            )
+        except Exception:
+            logger.exception("No se pudo crear el indice de dataops_catalogo_procesos")
+
+
+_asegurar_indices()
+
 INTERVALO_POLLER_SEGUNDOS = 60
 
 
