@@ -58,10 +58,21 @@ def _asegurar_indices():
     dataops_catalogo_procesos es una tabla historica (un snapshot por dia
     por proceso) que crecio lo suficiente como para que listar_controles
     -que agrupa por (nombre, fuente) buscando el ultimo snapshot_ts- empiece
-    a superar el statement_timeout de Postgres por hacer seq scan. Se corre
-    una sola vez al arrancar, es idempotente (`IF NOT EXISTS`)."""
-    with engine.begin() as conn:
-        try:
+    a superar el statement_timeout de Postgres por hacer seq scan.
+
+    Se corre en background (ver lifespan), NUNCA bloqueando el arranque: en
+    una tabla grande, construir el indice puede tardar mas que la ventana
+    del healthcheck de Railway, y bloquear el arranque hasta que termine
+    tumba el deploy entero (paso una vez: el CREATE INDEX no llegaba a
+    terminar antes de que el healthcheck se diera por vencido). `SET LOCAL
+    statement_timeout` desactiva el limite que justamente causa el problema
+    que este indice viene a resolver -si no, el propio CREATE INDEX podria
+    cortarse por el mismo motivo que la consulta original. Es idempotente
+    (`IF NOT EXISTS`), así que si el proceso se reinicia a mitad de camino
+    simplemente lo vuelve a intentar."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("SET LOCAL statement_timeout = 0"))
             conn.execute(
                 text(
                     "CREATE INDEX IF NOT EXISTS "
@@ -69,11 +80,10 @@ def _asegurar_indices():
                     "ON dataops_catalogo_procesos (nombre, fuente, snapshot_ts)"
                 )
             )
-        except Exception:
-            logger.exception("No se pudo crear el indice de dataops_catalogo_procesos")
+        logger.info("Indice de dataops_catalogo_procesos listo")
+    except Exception:
+        logger.exception("No se pudo crear el indice de dataops_catalogo_procesos")
 
-
-_asegurar_indices()
 
 INTERVALO_POLLER_SEGUNDOS = 60
 
@@ -105,6 +115,10 @@ async def _loop_poller():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     tarea_poller = asyncio.create_task(_loop_poller())
+    # Sin await ni asyncio.to_thread aca: el healthcheck de Railway tiene que
+    # poder pasar apenas la app levanta, sin esperar a que termine de
+    # construirse el indice.
+    asyncio.create_task(asyncio.to_thread(_asegurar_indices))
     yield
     tarea_poller.cancel()
 
