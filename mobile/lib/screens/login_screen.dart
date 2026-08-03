@@ -56,12 +56,23 @@ class _LoginScreenState extends State<LoginScreen> {
       _verificandoSesion = false;
     });
 
-    if (_hayTokenGuardado && _biometriaDisponible) {
+    if (!_hayTokenGuardado) return;
+
+    // Ya entro hace poco (p.ej. cerro la app al apagar una alarma con el
+    // celular bloqueado y la volvio a abrir enseguida): pasa directo, sin
+    // volver a pedir la huella.
+    if (await _biometricService.ingresoRecienteVigente()) {
+      await _entrarADashboard();
+      return;
+    }
+
+    if (_biometriaDisponible) {
       _desbloquearConBiometria();
     }
   }
 
   Future<void> _entrarADashboard() async {
+    await _biometricService.registrarIngresoExitoso();
     await NotificationService().inicializar();
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
