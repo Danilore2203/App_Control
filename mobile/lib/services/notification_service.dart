@@ -101,6 +101,14 @@ Future<bool> _debeSonarComoAlarma() async {
   }
 }
 
+// Notification.FLAG_INSISTENT: repite sonido/vibracion en loop hasta que la
+// notificacion se cancele. Esto es lo que hace que la alarma suene sin parar
+// -con el sonido de alarma del propio sistema, no un archivo que reproduzca
+// la app- de forma nativa, sin depender de que el motor de Flutter este
+// corriendo para loopear un audio (por eso funciona igual con la app
+// cerrada). apagarAlarmaLocal() es lo que hay que llamar para que pare.
+const _flagInsistente = 4;
+
 /// Muestra la alarma de pantalla completa A MANO (en vez de dejar que FCM la
 /// muestre sola), porque solo asi se le puede pedir pantalla completa
 /// (`fullScreenIntent`): eso es lo que hace que Android la lance directo
@@ -124,6 +132,7 @@ NotificationDetails _detallesAlarma(bool esDemorado) {
       audioAttributesUsage: AudioAttributesUsage.alarm,
       category: AndroidNotificationCategory.alarm,
       fullScreenIntent: true,
+      additionalFlags: Int32List.fromList(<int>[_flagInsistente]),
       color: esDemorado ? StatusColors.advertencia : StatusColors.critico,
       colorized: true,
     ),
@@ -140,6 +149,7 @@ Future<void> mostrarAlarmaLocal({
   required bool esDemorado,
 }) async {
   final payload = jsonEncode({
+    "id": id,
     "titulo": titulo,
     "mensaje": mensaje,
     "alarma": true,
@@ -161,6 +171,12 @@ Future<void> mostrarAlarmaLocal({
   // apenas ocurre, sin esperar su proximo tick.
   await registrarFallaParaNotificacionPersistente(mensaje);
 }
+
+/// Cancela la notificacion insistente: sin esto, aunque el usuario cierre la
+/// pantalla de alarma, Android sigue repitiendo el sonido porque la
+/// notificacion (FLAG_INSISTENT) sigue activa. Se llama al tocar "APAGAR
+/// ALARMA" en AlarmaPushScreen.
+Future<void> apagarAlarmaLocal(int id) => _plugin.cancel(id);
 
 const int _idNotificacionResumenNoCore = 888888;
 
@@ -279,6 +295,7 @@ void _navegarAAlarmaDesdePayload(String? payload) {
     final datos = jsonDecode(payload) as Map<String, dynamic>;
     if (datos["alarma"] != true) return;
     NavegacionService.mostrarAlarma(
+      id: datos["id"] as int? ?? 0,
       titulo: datos["titulo"] as String? ?? "Alerta crítica",
       mensaje: datos["mensaje"] as String? ?? "",
       esDemorado: datos["esDemorado"] == true,
@@ -327,6 +344,7 @@ class NotificationService {
           // hace falta esperar a que toquen la notificacion, se muestra la
           // alarma directo.
           NavegacionService.mostrarAlarma(
+            id: message.hashCode,
             titulo: message.data["titulo"] ?? "Alerta crítica",
             mensaje: message.data["mensaje"] ?? "Se detectó una falla.",
             esDemorado: message.data["esDemorado"] == "true",

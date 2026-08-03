@@ -1,21 +1,26 @@
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 
-import "../services/alarma_service.dart";
-import "../services/guardia_service.dart";
+import "../services/notification_service.dart";
 import "../theme.dart";
 
 /// Pantalla de alarma tipo despertador: se abre sola cuando llega una alerta
 /// critica por push, sin importar si la app estaba minimizada, cerrada o el
 /// celular bloqueado (Android la lanza directo sobre la pantalla de bloqueo).
-/// Suena en loop hasta que el usuario la apaga a mano.
+/// El sonido lo repite Android mismo (notificacion FLAG_INSISTENT con el
+/// sonido de alarma del sistema, ver notification_service.dart) hasta que se
+/// cancela aca -no es un audio que loopee la app- para que sea el mismo
+/// sonido de alarma del celular y siga sonando aunque el motor de Flutter no
+/// este corriendo.
 class AlarmaPushScreen extends StatefulWidget {
+  final int id;
   final String titulo;
   final String mensaje;
   final bool esDemorado;
 
   const AlarmaPushScreen({
     super.key,
+    required this.id,
     required this.titulo,
     required this.mensaje,
     this.esDemorado = false,
@@ -27,8 +32,6 @@ class AlarmaPushScreen extends StatefulWidget {
 
 class _AlarmaPushScreenState extends State<AlarmaPushScreen> with SingleTickerProviderStateMixin {
   late final AnimationController _pulso;
-  final _alarmaService = AlarmaService();
-  final _guardiaService = GuardiaService();
 
   @override
   void initState() {
@@ -36,20 +39,16 @@ class _AlarmaPushScreenState extends State<AlarmaPushScreen> with SingleTickerPr
     _pulso = AnimationController(vsync: this, duration: const Duration(seconds: 2))
       ..repeat(reverse: true);
     HapticFeedback.heavyImpact();
-    _iniciarSonido();
   }
 
-  Future<void> _iniciarSonido() async {
-    final tono = await _guardiaService.obtenerTono();
-    if (!mounted) return;
-    _alarmaService.reproducirEnBucle(tono);
+  void _apagar() {
+    apagarAlarmaLocal(widget.id);
+    Navigator.of(context).pop();
   }
 
   @override
   void dispose() {
     _pulso.dispose();
-    _alarmaService.detener();
-    _alarmaService.dispose();
     super.dispose();
   }
 
@@ -140,7 +139,7 @@ class _AlarmaPushScreenState extends State<AlarmaPushScreen> with SingleTickerPr
                           foregroundColor: Colors.white,
                           shape: const StadiumBorder(),
                         ),
-                        onPressed: () => Navigator.of(context).pop(),
+                        onPressed: _apagar,
                         icon: const Icon(Icons.notifications_off_outlined),
                         label: const Text(
                           "APAGAR ALARMA",

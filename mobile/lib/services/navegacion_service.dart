@@ -11,6 +11,7 @@ class NavegacionService {
   static final navigatorKey = GlobalKey<NavigatorState>();
 
   static void mostrarAlarma({
+    required int id,
     required String titulo,
     required String mensaje,
     bool esDemorado = false,
@@ -20,8 +21,12 @@ class NavegacionService {
     estado.push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (_) =>
-            AlarmaPushScreen(titulo: titulo, mensaje: mensaje, esDemorado: esDemorado),
+        builder: (_) => AlarmaPushScreen(
+          id: id,
+          titulo: titulo,
+          mensaje: mensaje,
+          esDemorado: esDemorado,
+        ),
       ),
     );
   }
