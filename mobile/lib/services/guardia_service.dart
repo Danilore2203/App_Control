@@ -33,11 +33,16 @@ class GuardiaService {
         value: armado.toString(),
       );
 
+  // Default 00:00 a 00:00 = guardia las 24hs (ver estaDentroDeHorario): sin
+  // esto, activar "armado" sin tocar el horario dejaba la alarma en
+  // silencio total fuera de una ventana angosta (antes 00:00-06:00) sin
+  // ningun aviso de por que. Armar la guardia debe sonar siempre, salvo que
+  // el usuario acote el horario a mano.
   Future<String> obtenerHoraInicio() async =>
       await _storage.read(key: _horaInicioKey) ?? "00:00";
 
   Future<String> obtenerHoraFin() async =>
-      await _storage.read(key: _horaFinKey) ?? "06:00";
+      await _storage.read(key: _horaFinKey) ?? "00:00";
 
   Future<void> guardarHorario(
       {required String inicio, required String fin}) async {

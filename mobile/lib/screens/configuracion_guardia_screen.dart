@@ -53,7 +53,7 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
   bool _probandoAlerta = false;
   bool _armado = false;
   String _horaInicio = "00:00";
-  String _horaFin = "06:00";
+  String _horaFin = "00:00";
   String _tono = GuardiaService.tonosDisponibles.first;
 
   late Future<List<Control>> _controlesFuture;
@@ -82,7 +82,7 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
           .timeout(limite, onTimeout: () => "00:00");
       final fin = await _guardiaService
           .obtenerHoraFin()
-          .timeout(limite, onTimeout: () => "06:00");
+          .timeout(limite, onTimeout: () => "00:00");
       final tono = await _guardiaService
           .obtenerTono()
           .timeout(limite, onTimeout: () => GuardiaService.tonosDisponibles.first);
