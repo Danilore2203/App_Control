@@ -21,16 +21,35 @@ const _mesesAbrev = [
   "DIC",
 ];
 
-/// Bitacora de errores: registro manual de fallas de procesos (AIRFLOW,
-/// DATASTAGE, PENTAHO) y de tablas (QA_CONTROL, PG_PROD), agrupado por mes.
-class BitacoraScreen extends StatefulWidget {
+/// Version con AppBar propio, para abrir desde el menu lateral. El contenido
+/// vive en [BitacoraContenido] para poder reusarlo tambien como pestana.
+class BitacoraScreen extends StatelessWidget {
   const BitacoraScreen({super.key});
 
   @override
-  State<BitacoraScreen> createState() => _BitacoraScreenState();
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("BITÁCORA",
+            style:
+                AppTextStyles.tech(color: colorScheme.onSurface, fontSize: 14)),
+      ),
+      body: const BitacoraContenido(),
+    );
+  }
 }
 
-class _BitacoraScreenState extends State<BitacoraScreen> {
+/// Bitacora de errores: registro manual de fallas de procesos (AIRFLOW,
+/// DATASTAGE, PENTAHO) y de tablas (QA_CONTROL, PG_PROD), agrupado por mes.
+class BitacoraContenido extends StatefulWidget {
+  const BitacoraContenido({super.key});
+
+  @override
+  State<BitacoraContenido> createState() => _BitacoraContenidoState();
+}
+
+class _BitacoraContenidoState extends State<BitacoraContenido> {
   final _apiService = ApiService();
   late int _anio;
   late Future<BitacoraResumenAnio> _resumenFuture;
@@ -66,29 +85,23 @@ class _BitacoraScreenState extends State<BitacoraScreen> {
     final colorScheme = Theme.of(context).colorScheme;
     final ahora = DateTime.now();
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text("BITÁCORA",
-            style:
-                AppTextStyles.tech(color: colorScheme.onSurface, fontSize: 14)),
-      ),
-      body: FutureBuilder<BitacoraResumenAnio>(
-        future: _resumenFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return EstadoVacio(
-              icono: Icons.error_outline,
-              mensaje: "No se pudo cargar la bitácora.",
-              colorIcono: colorScheme.error,
-            );
-          }
+    return FutureBuilder<BitacoraResumenAnio>(
+      future: _resumenFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return EstadoVacio(
+            icono: Icons.error_outline,
+            mensaje: "No se pudo cargar la bitácora.",
+            colorIcono: colorScheme.error,
+          );
+        }
 
-          final resumen = snapshot.data!;
+        final resumen = snapshot.data!;
 
-          return ListView(
+        return ListView(
             padding: const EdgeInsets.all(16),
             children: [
               Row(
@@ -242,8 +255,7 @@ class _BitacoraScreenState extends State<BitacoraScreen> {
             ],
           );
         },
-      ),
-    );
+      );
   }
 }
 

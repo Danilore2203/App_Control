@@ -8,16 +8,36 @@ import "../widgets/estado_vacio.dart";
 import "../widgets/tarjeta_sesion_netezza.dart";
 import "../widgets/tarjeta_sesion_postgres.dart";
 
-/// Modulo de infraestructura: sesiones reales de Netezza y PostgreSQL
-/// DEV/PROD, hablando directo con el monitor OP existente (mismo AD).
-class InfraestructuraScreen extends StatefulWidget {
+/// Version con AppBar propio, para abrir desde el drawer o el banner de
+/// bloqueos Postgres (ya no es una pestana del menu inferior). El contenido
+/// vive en [InfraestructuraContenido] para poder reusarlo en otro lado.
+class InfraestructuraScreen extends StatelessWidget {
   const InfraestructuraScreen({super.key});
 
   @override
-  State<InfraestructuraScreen> createState() => _InfraestructuraScreenState();
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("INFRAESTRUCTURA",
+            style:
+                AppTextStyles.tech(color: colorScheme.onSurface, fontSize: 14)),
+      ),
+      body: const InfraestructuraContenido(),
+    );
+  }
 }
 
-class _InfraestructuraScreenState extends State<InfraestructuraScreen> {
+/// Modulo de infraestructura: sesiones reales de Netezza y PostgreSQL
+/// DEV/PROD, hablando directo con el monitor OP existente (mismo AD).
+class InfraestructuraContenido extends StatefulWidget {
+  const InfraestructuraContenido({super.key});
+
+  @override
+  State<InfraestructuraContenido> createState() => _InfraestructuraContenidoState();
+}
+
+class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
   final _infraService = InfraService();
   int _escena = 0;
 

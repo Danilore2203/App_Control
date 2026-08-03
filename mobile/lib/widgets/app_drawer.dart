@@ -2,8 +2,8 @@ import "package:flutter/material.dart";
 
 import "../models/usuario.dart";
 import "../screens/ajustes_screen.dart";
-import "../screens/bitacora_screen.dart";
 import "../screens/configuracion_guardia_screen.dart";
+import "../screens/infraestructura_screen.dart";
 import "../screens/mi_cuenta_screen.dart";
 import "../screens/solicitudes_screen.dart";
 import "../services/auth_service.dart";
@@ -94,11 +94,22 @@ class AppDrawer extends StatelessWidget {
                   ListTile(
                     leading: const Icon(Icons.menu_book_outlined),
                     title: const Text("Bitácora de errores"),
+                    selected: tabActual == 3,
+                    selectedTileColor:
+                        colorScheme.primaryContainer.withValues(alpha: 0.4),
+                    onTap: () {
+                      onSeleccionarTab(3);
+                      Navigator.of(context).pop();
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.dns_outlined),
+                    title: const Text("Infraestructura"),
                     onTap: () {
                       Navigator.of(context).pop();
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                            builder: (_) => const BitacoraScreen()),
+                            builder: (_) => const InfraestructuraScreen()),
                       );
                     },
                   ),

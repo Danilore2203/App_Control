@@ -7,6 +7,7 @@ import "../models/usuario.dart";
 import "../services/api_service.dart";
 import "../services/infra_service.dart";
 import "../theme.dart";
+import "bitacora_screen.dart";
 import "configuracion_guardia_screen.dart";
 import "infraestructura_screen.dart";
 import "../widgets/alerta_banner.dart";
@@ -369,7 +370,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _buildControles(),
       const AlertasScreen(),
       const GuardiaContenido(),
-      const InfraestructuraScreen(),
+      const BitacoraContenido(),
     ];
     final inicial = (_usuario?.nombre ?? _usuario?.username ?? "?").trim();
 
@@ -396,7 +397,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 0 => "MONITOR DE PROCESOS",
                 1 => "CENTRO DE ALERTAS",
                 2 => "CONFIGURACIÓN DE GUARDIA",
-                _ => "INFRAESTRUCTURA",
+                _ => "BITÁCORA",
               },
               style: AppTextStyles.tech(
                 color: colorScheme.primary,
@@ -457,7 +458,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (_bloqueadasProd > 0 && !_bannerBloqueosDescartado)
             _BannerBloqueosProd(
               cantidad: _bloqueadasProd,
-              onVerDetalle: () => setState(() => _tabActual = 3),
+              onVerDetalle: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const InfraestructuraScreen()),
+              ),
               onCerrar: () => setState(() => _bannerBloqueosDescartado = true),
             ),
           Expanded(child: vistas[_tabActual]),
@@ -473,7 +476,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               icon: Icon(Icons.notifications_active), label: "Alertas"),
           NavigationDestination(
               icon: Icon(Icons.shield_outlined), label: "Guardia"),
-          NavigationDestination(icon: Icon(Icons.dns_outlined), label: "Infra"),
+          NavigationDestination(
+              icon: Icon(Icons.menu_book_outlined), label: "Bitácora"),
         ],
       ),
     );
