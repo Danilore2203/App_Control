@@ -8,20 +8,8 @@ class GuardiaService {
   static const _armadoKey = "guardia_armado";
   static const _horaInicioKey = "guardia_hora_inicio";
   static const _horaFinKey = "guardia_hora_fin";
-  static const _tonoKey = "guardia_tono";
+  static const _tonoUriKey = "guardia_tono_uri";
   static const _notificacionesKey = "notificaciones_habilitadas";
-
-  static const tonosDisponibles = [
-    "Sirena Nuclear H-9",
-    "Alerta de Fallos Críticos",
-    "Pulsos de Emergencia",
-  ];
-
-  static const archivosPorTono = {
-    "Sirena Nuclear H-9": "sounds/alarma_sirena.wav",
-    "Alerta de Fallos Críticos": "sounds/alarma_beeps.wav",
-    "Pulsos de Emergencia": "sounds/alarma_pulsos.wav",
-  };
 
   Future<bool> obtenerArmado() async {
     final valor = await _storage.read(key: _armadoKey);
@@ -50,11 +38,13 @@ class GuardiaService {
     await _storage.write(key: _horaFinKey, value: fin);
   }
 
-  Future<String> obtenerTono() async =>
-      await _storage.read(key: _tonoKey) ?? tonosDisponibles.first;
+  /// URI del tono de alarma elegido del selector nativo de Android. Null =
+  /// usar el tono de alarma predeterminado del sistema.
+  Future<String?> obtenerTonoUri() => _storage.read(key: _tonoUriKey);
 
-  Future<void> guardarTono(String tono) =>
-      _storage.write(key: _tonoKey, value: tono);
+  Future<void> guardarTonoUri(String? uri) => uri == null
+      ? _storage.delete(key: _tonoUriKey)
+      : _storage.write(key: _tonoUriKey, value: uri);
 
   /// Por defecto las notificaciones estan habilitadas (no hay valor guardado
   /// todavia la primera vez que se instala la app).

@@ -195,22 +195,30 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final busquedaLimpia = _busqueda.trim().toLowerCase();
-    final abiertos =
-        _entradas.where((e) => _bucketEstado(e) == "ABIERTO").length;
-    final resueltos =
-        _entradas.where((e) => _bucketEstado(e) == "RESUELTO").length;
-    final demorados =
-        _entradas.where((e) => _bucketEstado(e) == "DEMORADO").length;
-    final entradasFiltradas = _entradas.where((e) {
+    // Base para los contadores y la lista: busqueda + tecnologia ya
+    // aplicadas. El filtro de ESTADO (chips Todos/Abiertos/Resueltos/
+    // Demorado) se aplica despues, aparte, porque son las opciones entre las
+    // que el usuario esta eligiendo - no tendria sentido que se filtraran a
+    // si mismas. Antes los contadores de estos chips se calculaban sobre
+    // _entradas sin filtrar, asi que elegir una tecnologia cambiaba la lista
+    // de abajo pero no los numeros de los chips.
+    final entradasVisibles = _entradas.where((e) {
       final coincideBusqueda = busquedaLimpia.isEmpty ||
           e.nombre.toLowerCase().contains(busquedaLimpia) ||
           e.tecnologia.toLowerCase().contains(busquedaLimpia);
-      final coincideEstado =
-          _filtroEstado == null || _bucketEstado(e) == _filtroEstado;
       final coincideTecnologia =
           _filtroTecnologia == null || e.tecnologia == _filtroTecnologia;
-      return coincideBusqueda && coincideEstado && coincideTecnologia;
+      return coincideBusqueda && coincideTecnologia;
     }).toList();
+    final abiertos =
+        entradasVisibles.where((e) => _bucketEstado(e) == "ABIERTO").length;
+    final resueltos =
+        entradasVisibles.where((e) => _bucketEstado(e) == "RESUELTO").length;
+    final demorados =
+        entradasVisibles.where((e) => _bucketEstado(e) == "DEMORADO").length;
+    final entradasFiltradas = entradasVisibles
+        .where((e) => _filtroEstado == null || _bucketEstado(e) == _filtroEstado)
+        .toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -336,7 +344,7 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
               children: [
                 _ChipEstado(
                   etiqueta: "TODOS",
-                  cantidad: _entradas.length,
+                  cantidad: entradasVisibles.length,
                   color: colorScheme.primary,
                   seleccionado: _filtroEstado == null,
                   onTap: () => setState(() => _filtroEstado = null),

@@ -3,10 +3,10 @@ import "package:flutter/services.dart";
 
 import "../models/control.dart";
 import "../models/historial_falla.dart";
-import "../services/alarma_service.dart";
 import "../services/api_service.dart";
 import "../services/guardia_foreground_task.dart";
 import "../services/guardia_service.dart";
+import "../services/tono_alarma_service.dart";
 import "../theme.dart";
 import "../widgets/detalle_proceso_sheet.dart";
 import "../widgets/monitoreo_por_fuente.dart" show esCore;
@@ -47,14 +47,15 @@ class GuardiaContenido extends StatefulWidget {
 class _GuardiaContenidoState extends State<GuardiaContenido> {
   final _apiService = ApiService();
   final _guardiaService = GuardiaService();
-  final _alarmaService = AlarmaService();
 
   bool _cargandoPreferencias = true;
   bool _probandoAlerta = false;
+  bool _cambiandoTono = false;
   bool _armado = false;
   String _horaInicio = "00:00";
   String _horaFin = "00:00";
-  String _tono = GuardiaService.tonosDisponibles.first;
+  String? _tonoUri;
+  String? _nombreTono;
 
   late Future<List<Control>> _controlesFuture;
   late Future<List<HistorialFalla>> _historialFuture;
@@ -83,23 +84,51 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
       final fin = await _guardiaService
           .obtenerHoraFin()
           .timeout(limite, onTimeout: () => "00:00");
-      final tono = await _guardiaService
-          .obtenerTono()
-          .timeout(limite, onTimeout: () => GuardiaService.tonosDisponibles.first);
+      final tonoUri = await _guardiaService
+          .obtenerTonoUri()
+          .timeout(limite, onTimeout: () => null);
       if (!mounted) return;
       setState(() {
         _armado = armado;
         _horaInicio = inicio;
         _horaFin = fin;
-        _tono = tono;
+        _tonoUri = tonoUri;
         _cargandoPreferencias = false;
       });
       // Si quedo armada de una sesion anterior pero el servicio no esta
       // corriendo (p.ej. Android lo mato), se reconcilia aca.
       if (armado) establecerGuardiaActiva(true);
+      _cargarNombreTono();
     } catch (_) {
       if (!mounted) return;
       setState(() => _cargandoPreferencias = false);
+    }
+  }
+
+  Future<void> _cargarNombreTono() async {
+    if (_tonoUri == null) {
+      setState(() => _nombreTono = null);
+      return;
+    }
+    final nombre = await nombreTonoAlarma(_tonoUri);
+    if (!mounted) return;
+    setState(() => _nombreTono = nombre);
+  }
+
+  Future<void> _elegirTono() async {
+    setState(() => _cambiandoTono = true);
+    try {
+      final elegido = await elegirTonoAlarmaDelSistema(uriActual: _tonoUri);
+      // null = el usuario cancelo el selector, no que haya elegido "Ninguno"
+      // (Android no distingue eso en el resultado); si cancela se deja el
+      // tono como estaba.
+      if (elegido == null) return;
+      await _guardiaService.guardarTonoUri(elegido);
+      if (!mounted) return;
+      setState(() => _tonoUri = elegido);
+      await _cargarNombreTono();
+    } finally {
+      if (mounted) setState(() => _cambiandoTono = false);
     }
   }
 
@@ -147,11 +176,6 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
     }
   }
 
-  @override
-  void dispose() {
-    _alarmaService.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -386,25 +410,54 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
 
   Widget _tarjetaTono(ColorScheme colorScheme) {
     return Container(
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Column(
+      child: Row(
         children: [
-          for (final tono in GuardiaService.tonosDisponibles)
-            _FilaTono(
-              texto: tono,
-              seleccionado: tono == _tono,
-              onSeleccionar: () {
-                setState(() => _tono = tono);
-                _guardiaService.guardarTono(tono);
-              },
-              onProbar: () {
-                HapticFeedback.mediumImpact();
-                _alarmaService.reproducirUnaVez(tono);
-              },
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
             ),
+            child: Icon(Icons.music_note_outlined, color: colorScheme.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _nombreTono ?? "Predeterminado del sistema",
+                  style: TextStyle(
+                      color: colorScheme.onSurface, fontWeight: FontWeight.w600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  "Uno de los tonos de alarma ya instalados en el celular",
+                  style: TextStyle(
+                      color: colorScheme.onSurfaceVariant, fontSize: 11.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          _cambiandoTono
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : TextButton(
+                  onPressed: _elegirTono,
+                  child: const Text("Cambiar"),
+                ),
         ],
       ),
     );
@@ -582,75 +635,6 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
 
   String _fechaCorta(DateTime fecha) =>
       "${fecha.day.toString().padLeft(2, '0')}/${fecha.month.toString().padLeft(2, '0')}";
-}
-
-class _FilaTono extends StatelessWidget {
-  final String texto;
-  final bool seleccionado;
-  final VoidCallback onSeleccionar;
-  final VoidCallback onProbar;
-
-  const _FilaTono({
-    required this.texto,
-    required this.seleccionado,
-    required this.onSeleccionar,
-    required this.onProbar,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onSeleccionar,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color:
-              seleccionado ? colorScheme.primary.withValues(alpha: 0.08) : null,
-          border: Border(
-              bottom: BorderSide(
-                  color: colorScheme.outlineVariant.withValues(alpha: 0.2))),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              seleccionado ? Icons.volume_up : Icons.music_note_outlined,
-              color: seleccionado
-                  ? colorScheme.primary
-                  : colorScheme.onSurfaceVariant,
-              size: 20,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                texto,
-                style: TextStyle(
-                  color: seleccionado
-                      ? colorScheme.primary
-                      : colorScheme.onSurface,
-                  fontWeight: seleccionado ? FontWeight.w600 : FontWeight.w400,
-                ),
-              ),
-            ),
-            IconButton(
-              onPressed: onProbar,
-              icon: Icon(Icons.play_circle_outline,
-                  color: colorScheme.onSurfaceVariant, size: 20),
-            ),
-            Icon(
-              seleccionado
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_unchecked,
-              color: seleccionado
-                  ? colorScheme.primary
-                  : colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
-              size: 18,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 class _FilaProcesoVigilado extends StatelessWidget {

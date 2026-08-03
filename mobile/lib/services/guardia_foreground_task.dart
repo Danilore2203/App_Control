@@ -62,6 +62,10 @@ Future<void> establecerGuardiaActiva(bool activa) async {
     await FlutterForegroundTask.removeData(key: _claveContadorFallas);
     await FlutterForegroundTask.removeData(key: _claveUltimoMensaje);
     await FlutterForegroundTask.removeData(key: _claveIdsAlarmados);
+    // Si una alarma ya estaba sonando (insistente) cuando el usuario
+    // desarma la guardia, apagar guardia debe cortarla de una en vez de
+    // dejarla sonando hasta que la apague a mano desde su propia pantalla.
+    await apagarTodasLasAlarmasActivas();
     return;
   }
 

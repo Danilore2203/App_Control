@@ -12,7 +12,6 @@ import "guardia_foreground_task.dart";
 import "guardia_service.dart";
 import "navegacion_service.dart";
 
-const String _idCanalAlarmas = "alarmas_criticas_v3";
 const String _idCanalNormal = "alertas_normales_v1";
 
 // Sonido de alarma predeterminado del sistema (el mismo que usa el reloj
@@ -20,26 +19,36 @@ const String _idCanalNormal = "alertas_normales_v1";
 // instale, a diferencia de un tono propio empaquetado como recurso raw (que
 // puede faltar en una instalacion vieja, un resource shrinking agresivo,
 // etc. - la fuente del error "invalid_sound" que rompia la alarma entera).
+// Se usa si el usuario no elige un tono propio del selector nativo (ver
+// tono_alarma_service.dart) en Configuracion de Guardia.
 const String _uriSonidoAlarmaSistema = "content://settings/system/alarm_alert";
 
-// "_v3"/"_v2"/"_v1": el id de canal esta atado para siempre al sonido/audio
-// attributes que tenia la PRIMERA vez que Android lo creo (no se puede
-// reconfigurar despues). Cada vez que se cambie el sonido o el tipo de audio
-// hay que subir este numero para que se cree un canal nuevo en vez de
-// heredar la config vieja de instalaciones anteriores.
-const AndroidNotificationChannel canalAlarmas = AndroidNotificationChannel(
-  _idCanalAlarmas,
-  "Alarmas de control",
-  description: "Alertas criticas cuando falla un proceso monitoreado, dentro del horario de guardia",
-  importance: Importance.max,
-  playSound: true,
-  sound: UriAndroidNotificationSound(_uriSonidoAlarmaSistema),
-  enableVibration: true,
-  // Trata el sonido como el de un despertador (volumen de alarma, no el de
-  // notificaciones) para que suene tambien con el celular en silencio/Do Not
-  // Disturb, igual que el reloj despertador del sistema.
-  audioAttributesUsage: AudioAttributesUsage.alarm,
-);
+// El id de canal esta atado para siempre al sonido/audio attributes que
+// tenia la PRIMERA vez que Android lo creo (no se puede reconfigurar
+// despues). Como el usuario puede elegir su propio tono, el id se deriva
+// del sonido actual: cada tono distinto cae en un canal nuevo en vez de
+// heredar el sonido de otro tono elegido antes (o de una version vieja de
+// la app).
+String _idCanalAlarmas(String sonidoUri) =>
+    "alarmas_criticas_v4_${sonidoUri.hashCode.toRadixString(16)}";
+
+AndroidNotificationChannel _canalAlarmas(String sonidoUri) => AndroidNotificationChannel(
+      _idCanalAlarmas(sonidoUri),
+      "Alarmas de control",
+      description:
+          "Alertas criticas cuando falla un proceso monitoreado, dentro del horario de guardia",
+      importance: Importance.max,
+      playSound: true,
+      sound: UriAndroidNotificationSound(sonidoUri),
+      enableVibration: true,
+      // Trata el sonido como el de un despertador (volumen de alarma, no el
+      // de notificaciones) para que suene tambien con el celular en
+      // silencio/Do Not Disturb, igual que el reloj despertador del sistema.
+      audioAttributesUsage: AudioAttributesUsage.alarm,
+    );
+
+Future<String> _sonidoAlarmaActual() async =>
+    await GuardiaService().obtenerTonoUri() ?? _uriSonidoAlarmaSistema;
 
 const AndroidNotificationChannel canalNormal = AndroidNotificationChannel(
   _idCanalNormal,
@@ -118,16 +127,16 @@ const _flagInsistente = 4;
 /// comun de lo que deberia en Xiaomi/Samsung/Huawei sin autoarranque), el
 /// Foreground Service -que tiene mucha mas proteccion contra esos mismos
 /// bloqueos- puede disparar esta misma alarma el mismo, sin depender de FCM.
-NotificationDetails _detallesAlarma(bool esDemorado) {
+NotificationDetails _detallesAlarma(bool esDemorado, String sonidoUri) {
   return NotificationDetails(
     android: AndroidNotificationDetails(
-      _idCanalAlarmas,
+      _idCanalAlarmas(sonidoUri),
       "Alarmas de control",
       channelDescription:
           "Alertas criticas cuando falla un proceso monitoreado, dentro del horario de guardia",
       importance: Importance.max,
       priority: Priority.max,
-      sound: const UriAndroidNotificationSound(_uriSonidoAlarmaSistema),
+      sound: UriAndroidNotificationSound(sonidoUri),
       playSound: true,
       audioAttributesUsage: AudioAttributesUsage.alarm,
       category: AndroidNotificationCategory.alarm,
@@ -156,14 +165,15 @@ Future<void> mostrarAlarmaLocal({
     "esDemorado": esDemorado,
   });
 
+  final sonidoUri = await _sonidoAlarmaActual();
   await _plugin
       .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(canalAlarmas);
+      ?.createNotificationChannel(_canalAlarmas(sonidoUri));
   await _plugin.show(
     id,
     titulo,
     mensaje,
-    _detallesAlarma(esDemorado),
+    _detallesAlarma(esDemorado, sonidoUri),
     payload: payload,
   );
 
@@ -171,6 +181,13 @@ Future<void> mostrarAlarmaLocal({
   // apenas ocurre, sin esperar su proximo tick.
   await registrarFallaParaNotificacionPersistente(mensaje);
 }
+
+/// Cancela cualquier alarma activa en este momento (todas las notificaciones
+/// de esta app, no solo una por id): se usa al desarmar la guardia, para que
+/// si una alarma ya estaba sonando insistente, apagar guardia la corte al
+/// toque en vez de dejarla sonando hasta que alguien la apague a mano desde
+/// la pantalla de alarma.
+Future<void> apagarTodasLasAlarmasActivas() => _plugin.cancelAll();
 
 /// Cancela la notificacion insistente: sin esto, aunque el usuario cierre la
 /// pantalla de alarma, Android sigue repitiendo el sonido porque la
@@ -321,9 +338,10 @@ class NotificationService {
     if (kIsWeb || _localesListas) return;
     _localesListas = true;
 
+    final sonidoUri = await _sonidoAlarmaActual();
     await _plugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(canalAlarmas);
+        ?.createNotificationChannel(_canalAlarmas(sonidoUri));
 
     await _plugin.initialize(
       const InitializationSettings(
