@@ -5,7 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models
-from app.services.fcm import enviar_alerta_push
+from app.services.fcm import enviar_alerta_push, enviar_resumen_push
 from app.services.procesos import color_efectivo, es_core, estado_efectivo
 
 logger = logging.getLogger(__name__)
@@ -565,15 +565,12 @@ def _disparar_alarma(db: Session, proceso: models.Control, episodio: models.Epis
     figuraba como avisado. Devuelve True si, despues de este intento, ya no
     queda nadie pendiente."""
 
-    color = color_efectivo(proceso)
-    es_critica = color == "red"
     es_demorado = estado_efectivo(proceso) == "DEMORADO"
+    es_critica = not es_demorado
     mensaje = f"[{proceso.fuente}] {proceso.nombre}: {estado_efectivo(proceso)}"
-    titulo = (
-        "Alerta de proceso CORE" if es_core(proceso) and es_critica
-        else "Alerta de proceso" if es_critica
-        else "Proceso demorado"
-    )
+    # Esta funcion ya solo se llama para procesos core (ver
+    # _revisar_alarma_de_proceso): los no-core nunca llegan aca.
+    titulo = "Alerta de proceso CORE" if es_critica else "Proceso CORE demorado"
 
     destinatarios = _obtener_destinatarios(db)
     if not destinatarios:
@@ -589,8 +586,8 @@ def _disparar_alarma(db: Session, proceso: models.Control, episodio: models.Epis
         return True
 
     logger.warning(
-        "Disparando alarma para %s [%s] (core=%s, color=%s) a %d destinatario(s) pendiente(s) de %d",
-        proceso.nombre, proceso.fuente, es_core(proceso), color, len(pendientes), len(destinatarios),
+        "Disparando alarma CORE para %s [%s] (demorado=%s) a %d destinatario(s) pendiente(s) de %d",
+        proceso.nombre, proceso.fuente, es_demorado, len(pendientes), len(destinatarios),
     )
 
     for usuario, token_row in pendientes:
@@ -607,7 +604,14 @@ def _revisar_alarma_de_proceso(db: Session, proceso: models.Control) -> bool:
     este proceso, sin importar si esta fila es nueva o ya se habia visto
     antes. Mientras el episodio siga abierto se revisa TODOS los ciclos
     (no solo al abrirse) para poder alcanzar a quien le fallo el push la
-    primera vez. Devuelve True si ya no queda nadie pendiente de avisar."""
+    primera vez. Devuelve True si ya no queda nadie pendiente de avisar.
+
+    Los procesos NO core no pasan por aca: generan demasiado ruido como
+    para alarmar individualmente por cada uno (ver revisar_resumen_no_core,
+    que los cuenta y avisa con un solo push agregado)."""
+
+    if not es_core(proceso):
+        return False
 
     color = color_efectivo(proceso)
     episodio = _obtener_episodio_alerta(db, proceso.nombre, proceso.fuente)
@@ -673,6 +677,60 @@ def revisar_alarmas_activas(db: Session) -> int:
                 proceso.nombre, proceso.fuente,
             )
     return disparadas
+
+
+# Ultimo (errores, demorados) de no-core que se avisaron por resumen. En
+# memoria (no en la base): en el peor caso, si el proceso se reinicia se
+# manda un resumen de mas (no de menos), que es el lado seguro para no
+# perder un aviso real.
+_ultimo_resumen_no_core: tuple[int, int] | None = None
+
+
+def revisar_resumen_no_core(db: Session) -> bool:
+    """Los procesos NO core en error/demorado no alarman individualmente
+    (ver _revisar_alarma_de_proceso): en vez de un push por cada uno, se
+    manda UN resumen agregado ("20 procesos en error y 15 demorados")
+    cuando la cuenta cambia respecto del ultimo resumen avisado. Devuelve
+    True si mando un resumen nuevo."""
+    global _ultimo_resumen_no_core
+
+    no_core_alertables = [
+        p for p in _estado_actual_procesos(db)
+        if not es_core(p) and color_efectivo(p) in COLORES_ALERTABLES
+    ]
+    demorados = sum(1 for p in no_core_alertables if estado_efectivo(p) == "DEMORADO")
+    errores = len(no_core_alertables) - demorados
+
+    conteo_actual = (errores, demorados)
+    if conteo_actual == _ultimo_resumen_no_core:
+        return False
+    _ultimo_resumen_no_core = conteo_actual
+
+    if errores == 0 and demorados == 0:
+        return False
+
+    partes = []
+    if errores:
+        partes.append(f"{errores} proceso{'s' if errores != 1 else ''} en error")
+    if demorados:
+        partes.append(f"{demorados} demorado{'s' if demorados != 1 else ''}")
+    mensaje = " y ".join(partes)
+
+    logger.warning("Resumen de no-core: %s", mensaje)
+
+    for usuario, token_row in _obtener_destinatarios(db):
+        try:
+            enviar_resumen_push(token_row.fcm_token, titulo="Procesos no-core", cuerpo=mensaje)
+        except messaging.UnregisteredError:
+            logger.warning(
+                "Token FCM de usuario %s ya no esta registrado en Firebase: se elimina",
+                usuario.id,
+            )
+            db.delete(token_row)
+        except Exception:
+            logger.exception("Fallo al enviar resumen de no-core a usuario %s", usuario.id)
+    db.commit()
+    return True
 
 
 def revisar_tablas_nuevas(db: Session) -> int:

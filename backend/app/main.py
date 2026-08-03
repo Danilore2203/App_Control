@@ -21,6 +21,7 @@ from app.services.poller import (
     resincronizar_episodios_abiertos,
     revisar_alarmas_activas,
     revisar_procesos_nuevos,
+    revisar_resumen_no_core,
     revisar_tablas_nuevas,
 )
 
@@ -99,6 +100,7 @@ def _ejecutar_poller():
         # bitacora, para que una falla en esas otras dos nunca le cueste una
         # alarma real al usuario.
         revisar_alarmas_activas(db)
+        revisar_resumen_no_core(db)
         revisar_procesos_nuevos(db)
         revisar_tablas_nuevas(db)
         resincronizar_episodios_abiertos(db)

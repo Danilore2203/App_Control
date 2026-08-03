@@ -69,3 +69,32 @@ def enviar_alerta_push(
         ),
     )
     return messaging.send(mensaje)
+
+
+def enviar_resumen_push(fcm_token: str, titulo: str, cuerpo: str) -> str:
+    """Resumen agregado de procesos NO core en error/demorado (ver
+    revisar_resumen_no_core en poller.py): a diferencia de enviar_alerta_push,
+    no dispara pantalla completa ni sonido de alarma en el celular -es solo
+    informativa, como cualquier notificacion normal de la app."""
+
+    inicializar_firebase()
+
+    mensaje = messaging.Message(
+        token=fcm_token,
+        data={
+            "tipo": "resumen_no_core",
+            "titulo": titulo,
+            "mensaje": cuerpo,
+        },
+        android=messaging.AndroidConfig(priority="high"),
+        apns=messaging.APNSConfig(
+            headers={"apns-priority": "5"},
+            payload=messaging.APNSPayload(
+                aps=messaging.Aps(
+                    alert=messaging.ApsAlert(title=titulo, body=cuerpo),
+                    content_available=True,
+                )
+            ),
+        ),
+    )
+    return messaging.send(mensaje)

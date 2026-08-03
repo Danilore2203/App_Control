@@ -197,12 +197,68 @@ Future<void> mostrarAlarmaLocal({
   await registrarFallaParaNotificacionPersistente(mensaje);
 }
 
+const int _idNotificacionResumenNoCore = 888888;
+
+/// Notificacion sin sonido de alarma ni pantalla completa: la de un proceso
+/// core fuera del horario/armado de guardia, o el resumen agregado de
+/// procesos no-core (ver revisar_resumen_no_core en el backend).
+Future<void> _mostrarNotificacionNormal({
+  required int id,
+  required String titulo,
+  required String cuerpo,
+  required bool esDemorado,
+  required bool esAlarma,
+}) async {
+  await _plugin
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(canalNormal);
+
+  await _plugin.show(
+    id,
+    titulo,
+    cuerpo,
+    NotificationDetails(
+      android: AndroidNotificationDetails(
+        _idCanalNormal,
+        "Alertas",
+        channelDescription: "Avisos de procesos fuera del horario de guardia (o guardia desarmada)",
+        importance: Importance.high,
+        priority: Priority.high,
+      ),
+      iOS: const DarwinNotificationDetails(interruptionLevel: InterruptionLevel.active),
+    ),
+    payload: jsonEncode({
+      "titulo": titulo,
+      "mensaje": cuerpo,
+      "alarma": esAlarma,
+      "esDemorado": esDemorado,
+    }),
+  );
+}
+
 /// Muestra la notificacion que llega por push A MANO. Devuelve `true` si se
 /// mostro como alarma de pantalla completa (para que el llamador decida si
 /// conviene ademas navegar directo a esa pantalla). Funciona igual la llame
 /// el listener de primer plano o el manejador de segundo plano.
 Future<bool> _mostrarNotificacionDeAlarma(RemoteMessage message) async {
-  if (message.data["tipo"] != "alerta_critica") return false;
+  final tipo = message.data["tipo"];
+
+  if (tipo == "resumen_no_core") {
+    // Agregado de procesos NO core: nunca es alarma de pantalla completa,
+    // sin importar horario/armado de guardia -es solo informativo. Id fijo
+    // para que cada resumen nuevo REEMPLACE al anterior en la bandeja en vez
+    // de acumularse.
+    await _mostrarNotificacionNormal(
+      id: _idNotificacionResumenNoCore,
+      titulo: message.data["titulo"] ?? "Procesos no-core",
+      cuerpo: message.data["mensaje"] ?? "",
+      esDemorado: false,
+      esAlarma: false,
+    );
+    return false;
+  }
+
+  if (tipo != "alerta_critica") return false;
 
   final titulo = message.data["titulo"] ?? "Alerta crítica";
   final cuerpo = message.data["mensaje"] ?? "Se detectó una falla.";
@@ -219,32 +275,13 @@ Future<bool> _mostrarNotificacionDeAlarma(RemoteMessage message) async {
     return true;
   }
 
-  await _plugin
-      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(canalNormal);
-
-  await _plugin.show(
-    message.hashCode,
-    titulo,
-    cuerpo,
-    NotificationDetails(
-      android: AndroidNotificationDetails(
-        _idCanalNormal,
-        "Alertas",
-        channelDescription: "Avisos de procesos fuera del horario de guardia (o guardia desarmada)",
-        importance: Importance.high,
-        priority: Priority.high,
-      ),
-      iOS: const DarwinNotificationDetails(interruptionLevel: InterruptionLevel.active),
-    ),
-    payload: jsonEncode({
-      "titulo": titulo,
-      "mensaje": cuerpo,
-      "alarma": false,
-      "esDemorado": esDemorado,
-    }),
+  await _mostrarNotificacionNormal(
+    id: message.hashCode,
+    titulo: titulo,
+    cuerpo: cuerpo,
+    esDemorado: esDemorado,
+    esAlarma: false,
   );
-
   return false;
 }
 
