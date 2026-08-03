@@ -49,7 +49,19 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
     """Un episodio de error = una fila mientras el proceso siga sin volver a
     verde (se relee cada 5 min), sin cortar por dia calendario. Si el color de
     origen no es ninguno de los conocidos (red/orange/green), se registra
-    igual como ADVERTENCIA en vez de perderse en silencio."""
+    igual como ADVERTENCIA en vez de perderse en silencio.
+
+    Termina con un flush (no un commit: eso lo sigue haciendo el que llama,
+    una sola vez para todo el lote) para que, si el MISMO proceso aparece
+    mas de una vez en el mismo lote de "nuevos" (p.ej. reintenta rapido y
+    cambia de estado mas de una vez entre un ciclo del poller y el otro),
+    la proxima llamada a _episodio_abierto() vea el episodio recien
+    creado/cerrado en vez de una foto vieja de la base. SessionLocal usa
+    autoflush=False, asi que sin esto una fila nueva quedaba sin guardar en
+    la base hasta el commit final del lote entero, y la siguiente vez que
+    este mismo proceso volvia a cambiar de estado en el mismo lote, la
+    consulta no la encontraba -perdiendo o duplicando el episodio segun el
+    orden exacto de los cambios."""
 
     color = color_efectivo(proceso)
     conocido = color in ("red", "green")
@@ -74,6 +86,7 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
                     ),
                 )
             )
+        db.flush()
         return
 
     if color == "red":
@@ -111,12 +124,18 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
             f" Solucionado - Estado OK a las {proceso.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
         )
 
+    db.flush()
+
 
 def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
     """Misma logica de episodio que _actualizar_bitacora_proceso, mirando
     dataops_catalogo_tablas en vez de dataops_catalogo_procesos. El color se
     normaliza (strip + lower) por la misma razon que en procesos.py: el
-    origen no siempre lo escribe con la misma capitalizacion."""
+    origen no siempre lo escribe con la misma capitalizacion.
+
+    Mismo flush final que _actualizar_bitacora_proceso, y por la misma
+    razon: sin el, dos filas nuevas de la MISMA tabla en el mismo lote no se
+    ven entre si (SessionLocal usa autoflush=False)."""
 
     color_tabla = (tabla.color or "").strip().lower()
     conocido = color_tabla in ("red", "green")
@@ -141,6 +160,7 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
                     ),
                 )
             )
+        db.flush()
         return
 
     if color_tabla == "red":
@@ -175,6 +195,8 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
         episodio_abierto.descripcion += (
             f" Solucionado - Estado OK a las {tabla.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
         )
+
+    db.flush()
 
 
 def resincronizar_episodios_abiertos(db: Session) -> int:
@@ -372,6 +394,7 @@ def _registrar_incoherencia(
     ya_registrada = _episodio_abierto(db, nombre_compuesto, proceso_fuente)
     if ya_registrada:
         ya_registrada.fecha_actualizacion = ts
+        db.flush()
         return
 
     mensaje = (
@@ -392,6 +415,7 @@ def _registrar_incoherencia(
         )
     )
     _alertar_a_destinatarios(db, proceso_id, mensaje, titulo="Fallo silencioso detectado")
+    db.flush()
 
 
 def _cerrar_incoherencia_si_existe(
@@ -410,6 +434,7 @@ def _cerrar_incoherencia_si_existe(
     abierta.estado_fin = "OK"
     duracion = _formatear_duracion(abierta.fecha_hora, ts)
     abierta.descripcion += f" Solucionado - Estado OK a las {ts.strftime('%H:%M')}. Duración: {duracion}."
+    db.flush()
 
 
 def _revisar_incoherencia_desde_proceso(db: Session, proceso: models.Control) -> None:
