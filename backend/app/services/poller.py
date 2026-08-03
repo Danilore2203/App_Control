@@ -515,18 +515,38 @@ def revisar_procesos_nuevos(db: Session) -> int:
     procesos_procesados = 0
 
     for proceso in nuevos:
-        color = color_efectivo(proceso)
+        try:
+            color = color_efectivo(proceso)
 
-        if proceso.fuente in TECNOLOGIAS_PROCESO_VALIDAS:
-            _actualizar_bitacora_proceso(db, proceso)
+            if proceso.fuente in TECNOLOGIAS_PROCESO_VALIDAS:
+                _actualizar_bitacora_proceso(db, proceso)
 
-        if color == "green" and es_core(proceso):
-            _revisar_incoherencia_desde_proceso(db, proceso)
+            if color == "green" and es_core(proceso):
+                _revisar_incoherencia_desde_proceso(db, proceso)
 
-        procesos_procesados += 1
+            estado_poller.ultimo_id_revisado = proceso.id
+            db.commit()
+            procesos_procesados += 1
+        except Exception:
+            # Sin esto, un dato puntual que rompe UN proceso (nombre/estado
+            # raro, lo que sea) frenaba el cursor ahi mismo para siempre: cada
+            # ciclo siguiente volvia a intentar la misma fila, volvia a
+            # explotar antes de llegar al commit, y TODO lo que estaba
+            # despues en la cola (de cualquier otro proceso) se quedaba sin
+            # sincronizar a la bitacora indefinidamente, mientras Controles
+            # (que lee el estado en vivo, sin pasar por este cursor) seguia
+            # mostrando todo bien. Se commitea proceso por proceso (no una
+            # sola vez al final) para que el rollback de una fila rota no se
+            # lleve puesto el trabajo ya bueno de las filas anteriores del
+            # mismo lote.
+            db.rollback()
+            logger.exception(
+                "Fallo actualizando bitacora/incoherencia para %s [%s] (id %s); se salta y se sigue",
+                proceso.nombre, proceso.fuente, proceso.id,
+            )
+            estado_poller.ultimo_id_revisado = proceso.id
+            db.commit()
 
-    estado_poller.ultimo_id_revisado = nuevos[-1].id
-    db.commit()
     return procesos_procesados
 
 
@@ -774,13 +794,30 @@ def revisar_tablas_nuevas(db: Session) -> int:
     if not nuevas:
         return 0
 
+    procesadas = 0
+
     for tabla in nuevas:
-        if tabla.fuente in TECNOLOGIAS_TABLA_VALIDAS:
-            _actualizar_bitacora_tabla(db, tabla)
+        try:
+            if tabla.fuente in TECNOLOGIAS_TABLA_VALIDAS:
+                _actualizar_bitacora_tabla(db, tabla)
 
-        if (tabla.color or "").strip().lower() == "red":
-            _revisar_incoherencia_desde_tabla(db, tabla)
+            if (tabla.color or "").strip().lower() == "red":
+                _revisar_incoherencia_desde_tabla(db, tabla)
 
-    estado_poller.ultimo_id_tablas_revisado = nuevas[-1].id
-    db.commit()
-    return len(nuevas)
+            estado_poller.ultimo_id_tablas_revisado = tabla.id
+            db.commit()
+            procesadas += 1
+        except Exception:
+            # Mismo motivo que en revisar_procesos_nuevos: commitear una
+            # tabla a la vez para que una fila rota no trabe el cursor (ni
+            # se lleve puesto el trabajo ya bueno de las tablas anteriores
+            # del mismo lote al hacer rollback).
+            db.rollback()
+            logger.exception(
+                "Fallo actualizando bitacora/incoherencia para tabla %s [%s] (id %s); se salta y se sigue",
+                tabla.nombre, tabla.fuente, tabla.id,
+            )
+            estado_poller.ultimo_id_tablas_revisado = tabla.id
+            db.commit()
+
+    return procesadas
