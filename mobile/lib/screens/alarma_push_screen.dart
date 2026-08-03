@@ -17,6 +17,14 @@ class AlarmaPushScreen extends StatefulWidget {
   final String titulo;
   final String mensaje;
   final bool esDemorado;
+  // true cuando esta pantalla es lo primero que se ve (la app se abrio
+  // SOLA por la alarma - notificacion tocada o fullScreenIntent con el
+  // celular bloqueado), no cuando ya estaba abierta y la alarma la
+  // interrumpio. En ese caso hay que cerrar la app entera al apagar, no
+  // solo esta pantalla: si no, "apagar" revela el dashboard atras -la app
+  // real- en vez de devolver al celular a la pantalla de bloqueo de donde
+  // vino.
+  final bool esLanzamiento;
 
   const AlarmaPushScreen({
     super.key,
@@ -24,6 +32,7 @@ class AlarmaPushScreen extends StatefulWidget {
     required this.titulo,
     required this.mensaje,
     this.esDemorado = false,
+    this.esLanzamiento = false,
   });
 
   @override
@@ -43,7 +52,14 @@ class _AlarmaPushScreenState extends State<AlarmaPushScreen> with SingleTickerPr
 
   void _apagar() {
     apagarAlarmaLocal(widget.id);
-    Navigator.of(context).pop();
+    if (widget.esLanzamiento) {
+      // Cierra la app entera (no solo esta pantalla): con el celular
+      // bloqueado, esto devuelve a la pantalla de bloqueo real en vez de
+      // dejar ver el dashboard de la app atras.
+      SystemNavigator.pop();
+    } else {
+      Navigator.of(context).pop();
+    }
   }
 
   @override

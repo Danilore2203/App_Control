@@ -15,6 +15,7 @@ class NavegacionService {
     required String titulo,
     required String mensaje,
     bool esDemorado = false,
+    bool esLanzamiento = false,
   }) {
     final estado = navigatorKey.currentState;
     if (estado == null) return;
@@ -26,6 +27,7 @@ class NavegacionService {
           titulo: titulo,
           mensaje: mensaje,
           esDemorado: esDemorado,
+          esLanzamiento: esLanzamiento,
         ),
       ),
     );

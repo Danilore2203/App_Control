@@ -1,3 +1,5 @@
+import "dart:async";
+
 import "package:flutter_foreground_task/flutter_foreground_task.dart";
 
 import "../models/control.dart";
@@ -54,18 +56,25 @@ void inicializarForegroundTask() {
 /// mismo switch "armado" de Configuración de Guardia (ver plan: usar el
 /// horario para el contenido, no para programar el arranque exacto, que es
 /// mucho menos confiable en Android).
+Future<void> _detenerServicioSiCorre() async {
+  if (await FlutterForegroundTask.isRunningService) {
+    await FlutterForegroundTask.stopService();
+  }
+}
+
 Future<void> establecerGuardiaActiva(bool activa) async {
   if (!activa) {
-    if (await FlutterForegroundTask.isRunningService) {
-      await FlutterForegroundTask.stopService();
-    }
-    await FlutterForegroundTask.removeData(key: _claveContadorFallas);
-    await FlutterForegroundTask.removeData(key: _claveUltimoMensaje);
-    await FlutterForegroundTask.removeData(key: _claveIdsAlarmados);
-    // Si una alarma ya estaba sonando (insistente) cuando el usuario
-    // desarma la guardia, apagar guardia debe cortarla de una en vez de
-    // dejarla sonando hasta que la apague a mano desde su propia pantalla.
-    await apagarTodasLasAlarmasActivas();
+    // Primero lo mas urgente/perceptible (cortar sonido si algo esta
+    // sonando), sin esperar a las tareas mas lentas del apagado del
+    // servicio -antes se hacia al final y en secuencia, sumando el retraso
+    // de cada paso antes de que el usuario notara ALGO cambiar.
+    unawaited(apagarTodasLasAlarmasActivas());
+    await Future.wait<void>([
+      _detenerServicioSiCorre(),
+      FlutterForegroundTask.removeData(key: _claveContadorFallas),
+      FlutterForegroundTask.removeData(key: _claveUltimoMensaje),
+      FlutterForegroundTask.removeData(key: _claveIdsAlarmados),
+    ]);
     return;
   }
 

@@ -316,6 +316,10 @@ void _navegarAAlarmaDesdePayload(String? payload) {
       titulo: datos["titulo"] as String? ?? "Alerta crítica",
       mensaje: datos["mensaje"] as String? ?? "",
       esDemorado: datos["esDemorado"] == true,
+      // Se llega aca por tocar la notificacion o porque Android lanzo la
+      // app solo (fullScreenIntent con el celular bloqueado) - nunca porque
+      // la app ya estaba abierta y la alarma la interrumpio.
+      esLanzamiento: true,
     );
   } catch (_) {
     // Payload viejo o invalido (p.ej. de una version anterior): se ignora.
