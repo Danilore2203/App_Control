@@ -20,13 +20,24 @@ def inicializar_firebase():
 
 
 def enviar_alerta_push(
-    fcm_token: str, titulo: str, cuerpo: str, critica: bool = True, es_demorado: bool = False
+    fcm_token: str,
+    titulo: str,
+    cuerpo: str,
+    critica: bool = True,
+    es_demorado: bool = False,
+    tipo: str = "alerta_critica",
 ) -> str:
     """Envia una alerta via FCM como mensaje de puros datos (sin `notification`),
     para que la app la reciba y construya ELLA MISMA la notificacion (con
     pantalla completa tipo alarma) en cualquier estado -primer plano, segundo
     plano o con la app cerrada-, en vez de depender de que Android la muestre
     sola (lo cual no permite pantalla completa).
+
+    `tipo` es lo que la app usa para decidir COMO mostrarla ("alerta_critica"
+    dispara pantalla completa si la guardia esta armada y en horario;
+    "alerta_normal" es siempre una notificacion comun, sin importar guardia
+    -para avisos que no ameritan alarma, como el fallo silencioso de
+    incoherencia proceso/tabla).
 
     Si `critica` y CRITICAL_ALERTS_ENABLED estan activos, intenta usar el nivel
     Critical Alert de iOS (requiere el entitlement aprobado por Apple).
@@ -46,7 +57,7 @@ def enviar_alerta_push(
     mensaje = messaging.Message(
         token=fcm_token,
         data={
-            "tipo": "alerta_critica",
+            "tipo": tipo,
             "titulo": titulo,
             "mensaje": cuerpo,
             # La app decide el color de la pantalla de alarma con esto: mismo

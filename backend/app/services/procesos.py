@@ -31,3 +31,12 @@ def color_efectivo(proceso) -> str:
 
 def estado_efectivo(proceso) -> str:
     return "DEMORADO" if _demorado(proceso) else proceso.estado
+
+
+def recuperado_confirmado(proceso) -> bool:
+    """No alcanza con el color para dar un proceso por resuelto: si la fuente
+    manda color=green pero el estado crudo no confirma "OK", es una
+    inconsistencia de los datos de origen (no llegaron bien), no un exito
+    real. Mejor seguir alertando de mas que cerrar un fallo que en realidad
+    sigue."""
+    return color_efectivo(proceso) == "green" and (proceso.estado or "").strip().upper() == "OK"

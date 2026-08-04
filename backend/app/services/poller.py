@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta, timezone
 
 from firebase_admin import messaging
 from sqlalchemy import func
@@ -6,11 +7,12 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.services.fcm import enviar_alerta_push, enviar_resumen_push
-from app.services.procesos import color_efectivo, es_core, estado_efectivo
+from app.services.procesos import color_efectivo, es_core, estado_efectivo, recuperado_confirmado
 
 logger = logging.getLogger(__name__)
 
 COLORES_ALERTABLES = {"red", "orange"}
+BOLIVIA_TZ = timezone(timedelta(hours=-4))
 TECNOLOGIAS_PROCESO_VALIDAS = {"AIRFLOW", "DATASTAGE", "PENTAHO"}
 TECNOLOGIAS_TABLA_VALIDAS = {"QA_CONTROL", "PG_PROD"}
 ESTADOS_TABLA_NORMALIZADOS = {
@@ -18,6 +20,8 @@ ESTADOS_TABLA_NORMALIZADOS = {
     "VACIA": "VACIA",
     "VACÍA": "VACIA",
 }
+# Tabla todavia cargando: ni error ni exito, no se registra ni se alerta.
+ESTADOS_TABLA_TRANSITORIOS = {"EN PROCESO"}
 
 
 def _formatear_duracion(inicio, fin) -> str:
@@ -117,12 +121,24 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
                 )
             )
     elif episodio_abierto:
-        episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
-        episodio_abierto.estado_fin = "OK"
-        duracion = _formatear_duracion(episodio_abierto.fecha_hora, proceso.snapshot_ts)
-        episodio_abierto.descripcion += (
-            f" Solucionado - Estado OK a las {proceso.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
-        )
+        if recuperado_confirmado(proceso):
+            episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
+            episodio_abierto.estado_fin = "OK"
+            duracion = _formatear_duracion(episodio_abierto.fecha_hora, proceso.snapshot_ts)
+            episodio_abierto.descripcion += (
+                f" Solucionado - Estado OK a las {proceso.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+            )
+        else:
+            # Color dice verde pero el estado crudo no confirma "OK": no
+            # llegaron bien los datos de origen. No se cierra a ciegas -mejor
+            # de mas que perder de vista un fallo que en realidad sigue.
+            episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
+            if episodio_abierto.estado != "INCONSISTENTE":
+                episodio_abierto.descripcion += (
+                    f" Color verde pero estado '{proceso.estado}' no confirma OK a las "
+                    f"{proceso.snapshot_ts.strftime('%H:%M')}: no se cierra por inconsistencia de datos."
+                )
+                episodio_abierto.estado = "INCONSISTENTE"
 
     db.flush()
 
@@ -138,6 +154,10 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
     ven entre si (SessionLocal usa autoflush=False)."""
 
     color_tabla = (tabla.color or "").strip().lower()
+    estado_tabla = (tabla.estado or "").strip().upper()
+    if estado_tabla in ESTADOS_TABLA_TRANSITORIOS:
+        return
+
     conocido = color_tabla in ("red", "green")
     episodio_abierto = _episodio_abierto(db, tabla.nombre, tabla.fuente)
 
@@ -338,6 +358,7 @@ def _intentar_push(
     titulo: str,
     critica: bool,
     es_demorado: bool = False,
+    tipo: str = "alerta_critica",
 ) -> bool:
     """Registra la Alerta y hace UN intento de push. Si Firebase dice que el
     token ya no esta registrado (app desinstalada/reinstalada, token
@@ -351,7 +372,8 @@ def _intentar_push(
     db.add(alerta)
     try:
         enviar_alerta_push(
-            token_row.fcm_token, titulo=titulo, cuerpo=mensaje, critica=critica, es_demorado=es_demorado
+            token_row.fcm_token, titulo=titulo, cuerpo=mensaje, critica=critica, es_demorado=es_demorado,
+            tipo=tipo,
         )
         alerta.enviada = True
         return True
@@ -370,8 +392,15 @@ def _intentar_push(
 
 
 def _alertar_a_destinatarios(db: Session, control_id: int, mensaje: str, titulo: str) -> None:
+    """Usado solo por el fallo silencioso (incoherencia proceso/tabla, ver
+    _registrar_incoherencia): a diferencia de una alarma real de proceso
+    CORE, esto es un aviso de inconsistencia de datos, no algo que amerite
+    sonido de alarma ni pantalla completa -por eso va como notificacion
+    normal ("alerta_normal"), no critica."""
     for usuario, token_row in _obtener_destinatarios(db):
-        _intentar_push(db, usuario, token_row, control_id, mensaje, titulo, critica=True)
+        _intentar_push(
+            db, usuario, token_row, control_id, mensaje, titulo, critica=False, tipo="alerta_normal"
+        )
 
 
 def _registrar_incoherencia(
@@ -448,6 +477,11 @@ def _revisar_incoherencia_desde_proceso(db: Session, proceso: models.Control) ->
             .order_by(models.Tabla.id.desc())
             .first()
         )
+        if tabla and (tabla.estado or "").strip().upper() in ESTADOS_TABLA_TRANSITORIOS:
+            # Todavia esta cargando: ni se abre incoherencia nueva ni se
+            # cierra una existente con este snapshot a medio camino.
+            continue
+
         if tabla and (tabla.color or "").strip().lower() == "red":
             _registrar_incoherencia(
                 db, proceso.id, proceso.nombre, proceso.fuente, tabla.nombre, tabla.estado,
@@ -470,7 +504,7 @@ def _revisar_incoherencia_desde_tabla(db: Session, tabla: models.Tabla) -> None:
             .order_by(models.Control.id.desc())
             .first()
         )
-        if proceso and color_efectivo(proceso) == "green" and es_core(proceso):
+        if proceso and recuperado_confirmado(proceso) and es_core(proceso):
             _registrar_incoherencia(
                 db, proceso.id, proceso.nombre, proceso.fuente, tabla.nombre, tabla.estado,
                 tabla.snapshot_ts,
@@ -661,12 +695,32 @@ def _revisar_alarma_de_proceso(db: Session, proceso: models.Control) -> bool:
     color = color_efectivo(proceso)
     episodio = _obtener_episodio_alerta(db, proceso.nombre, proceso.fuente)
 
-    if color not in COLORES_ALERTABLES:
+    if color == "green":
+        if not recuperado_confirmado(proceso):
+            # Color dice verde pero el estado crudo no confirma "OK": no se
+            # cierra la alarma a ciegas por una inconsistencia de datos de
+            # origen. Se deja el episodio (si hay) intacto, igual que un
+            # color transitorio, hasta que el estado confirme el cierre real.
+            logger.warning(
+                "Color verde sin confirmar por estado ('%s') en %s [%s]: no se cierra la alarma",
+                proceso.estado, proceso.nombre, proceso.fuente,
+            )
+            return False
         if episodio is not None and episodio.abierto:
             episodio.abierto = False
             episodio.cerrado_en = proceso.snapshot_ts
             _limpiar_notificados(db, episodio.id)
-            logger.info("Alarma cerrada: %s [%s] volvio a %s", proceso.nombre, proceso.fuente, color)
+            logger.info("Alarma cerrada: %s [%s] volvio a verde", proceso.nombre, proceso.fuente)
+        return False
+
+    if color not in COLORES_ALERTABLES:
+        # Color transitorio (p.ej. "blue"/en ejecucion durante un reintento
+        # del origen): no es una falla, pero tampoco es el exito real que
+        # cierra el episodio. Si se tratara como cierre (como antes), cada
+        # reintento borraba la lista de notificados y la siguiente vuelta a
+        # rojo reabria el episodio como si fuera una falla nueva -avisando
+        # de nuevo a todos por la MISMA falla que nunca se resolvio. Se deja
+        # el episodio (si hay) intacto, y no se abre uno nuevo por esto.
         return False
 
     episodio_nuevo = episodio is None
@@ -724,44 +778,45 @@ def revisar_alarmas_activas(db: Session) -> int:
     return disparadas
 
 
-# Ultimo (errores, demorados) de no-core que se avisaron por resumen. En
-# memoria (no en la base): en el peor caso, si el proceso se reinicia se
-# manda un resumen de mas (no de menos), que es el lado seguro para no
-# perder un aviso real.
-_ultimo_resumen_no_core: tuple[int, int] | None = None
+# Ultima hora Bolivia (0-23) en que se mando el resumen de no-core. En
+# memoria (no en la base): en el peor caso, si el proceso se reinicia justo
+# en el limite de una hora se manda un resumen de mas (no de menos), que es
+# el lado seguro para no perder un aviso real.
+_ultima_hora_resumen_no_core: int | None = None
 
 
 def revisar_resumen_no_core(db: Session) -> bool:
-    """Los procesos NO core en error/demorado no alarman individualmente
-    (ver _revisar_alarma_de_proceso): en vez de un push por cada uno, se
-    manda UN resumen agregado ("20 procesos en error y 15 demorados")
-    cuando la cuenta cambia respecto del ultimo resumen avisado. Devuelve
-    True si mando un resumen nuevo."""
-    global _ultimo_resumen_no_core
+    """Los procesos NO core no alarman individualmente (ver
+    _revisar_alarma_de_proceso): en vez de un push por cada uno, se manda UN
+    resumen agregado ("20 procesos en error, 15 demorados y 8 en tiempo") una
+    sola vez por hora en punto (hora Bolivia, UTC-4), no cada vez que cambia
+    la cuenta -asi el usuario recibe un estado global cada hora en vez de una
+    notificacion por cada fluctuacion. Devuelve True si mando un resumen
+    nuevo."""
+    global _ultima_hora_resumen_no_core
 
-    no_core_alertables = [
-        p for p in _estado_actual_procesos(db)
-        if not es_core(p) and color_efectivo(p) in COLORES_ALERTABLES
-    ]
-    demorados = sum(1 for p in no_core_alertables if estado_efectivo(p) == "DEMORADO")
-    errores = len(no_core_alertables) - demorados
-
-    conteo_actual = (errores, demorados)
-    if conteo_actual == _ultimo_resumen_no_core:
+    hora_actual = datetime.now(BOLIVIA_TZ).hour
+    if hora_actual == _ultima_hora_resumen_no_core:
         return False
-    _ultimo_resumen_no_core = conteo_actual
+    _ultima_hora_resumen_no_core = hora_actual
 
-    if errores == 0 and demorados == 0:
+    no_core = [p for p in _estado_actual_procesos(db) if not es_core(p)]
+    if not no_core:
         return False
 
-    partes = []
-    if errores:
-        partes.append(f"{errores} proceso{'s' if errores != 1 else ''} en error")
-    if demorados:
-        partes.append(f"{demorados} demorado{'s' if demorados != 1 else ''}")
-    mensaje = " y ".join(partes)
+    demorados = sum(1 for p in no_core if estado_efectivo(p) == "DEMORADO")
+    errores = sum(
+        1 for p in no_core if color_efectivo(p) in COLORES_ALERTABLES
+    ) - demorados
+    en_tiempo = sum(1 for p in no_core if color_efectivo(p) == "green")
 
-    logger.warning("Resumen de no-core: %s", mensaje)
+    mensaje = (
+        f"{errores} proceso{'s' if errores != 1 else ''} en error, "
+        f"{demorados} demorado{'s' if demorados != 1 else ''} y "
+        f"{en_tiempo} en tiempo"
+    )
+
+    logger.warning("Resumen de no-core (hora %02d): %s", hora_actual, mensaje)
 
     for usuario, token_row in _obtener_destinatarios(db):
         try:
@@ -801,7 +856,21 @@ def revisar_tablas_nuevas(db: Session) -> int:
             if tabla.fuente in TECNOLOGIAS_TABLA_VALIDAS:
                 _actualizar_bitacora_tabla(db, tabla)
 
-            if (tabla.color or "").strip().lower() == "red":
+            es_de_hoy = tabla.snapshot_fecha == datetime.now(BOLIVIA_TZ).date()
+            estado_tabla = (tabla.estado or "").strip().upper()
+            if (
+                (tabla.color or "").strip().lower() == "red"
+                and estado_tabla not in ESTADOS_TABLA_TRANSITORIOS
+                and es_de_hoy
+            ):
+                # Si el snapshot es de un dia anterior (p.ej. la carga de
+                # ayer que llego tarde o quedo colgada, y hoy todavia no se
+                # actualizo), el proceso de hoy ni siquiera corrio aun: no es
+                # un fallo silencioso nuevo, es una fila vieja. Alertar aca
+                # seria un falso positivo -se espera a que llegue un
+                # snapshot con fecha de hoy. Tampoco alerta si la tabla
+                # sigue "EN PROCESO": todavia esta cargando, el rojo es
+                # transitorio, no un fallo.
                 _revisar_incoherencia_desde_tabla(db, tabla)
 
             estado_poller.ultimo_id_tablas_revisado = tabla.id
