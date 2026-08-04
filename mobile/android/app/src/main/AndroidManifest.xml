@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <application
-        android:label="app_controles"
+        android:label="Centinela DWH"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
