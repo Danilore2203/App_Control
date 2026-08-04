@@ -124,6 +124,12 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
   String _busqueda = "";
   String? _filtroEstado; // null=todos, "ABIERTO", "RESUELTO" o "DEMORADO"
   String? _filtroTecnologia;
+  bool _soloCore = false;
+  // Nombres de procesos CORE segun el estado ACTUAL de /controles (no se
+  // guarda ese dato en la bitacora): cruzado por nombre contra cada entrada.
+  // Aproximado a proposito -si un proceso cambio de nombre o ya no existe en
+  // /controles, no va a matchear- para no tocar la tabla de bitacora.
+  Set<String> _nombresCoreActuales = {};
   late final AnimationController _pulseController;
   Timer? _autoRefresco;
 
@@ -131,6 +137,7 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
   void initState() {
     super.initState();
     _entradas = widget.entradasIniciales;
+    _cargarNombresCoreActuales();
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 1),
@@ -179,6 +186,30 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
     }
   }
 
+  Future<void> _cargarNombresCoreActuales() async {
+    try {
+      final controles = await _apiService.obtenerControles();
+      if (!mounted) return;
+      setState(() {
+        _nombresCoreActuales = controles
+            .where((c) => (c.core ?? "").trim().toUpperCase() == "SI")
+            .map((c) => c.nombre)
+            .toSet();
+      });
+    } catch (_) {
+      // Sin esto no se puede filtrar por core, pero no vale la pena romper
+      // toda la pantalla de bitacora por un fallo de red puntual: el chip
+      // CORE simplemente no encuentra coincidencias hasta el proximo intento.
+    }
+  }
+
+  /// Una incoherencia (proceso -> tabla) tiene nombre compuesto: para saber
+  /// si es de un proceso CORE hay que comparar solo la parte del proceso.
+  String _nombreProcesoDe(BitacoraError e) {
+    final indice = e.nombre.indexOf(" -> ");
+    return indice == -1 ? e.nombre : e.nombre.substring(0, indice);
+  }
+
   List<String> get _tecnologiasAfectadas =>
       _entradas.map((e) => e.tecnologia).toSet().toList();
 
@@ -208,7 +239,9 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
           e.tecnologia.toLowerCase().contains(busquedaLimpia);
       final coincideTecnologia =
           _filtroTecnologia == null || e.tecnologia == _filtroTecnologia;
-      return coincideBusqueda && coincideTecnologia;
+      final coincideCore =
+          !_soloCore || _nombresCoreActuales.contains(_nombreProcesoDe(e));
+      return coincideBusqueda && coincideTecnologia && coincideCore;
     }).toList();
     final abiertos =
         entradasVisibles.where((e) => _bucketEstado(e) == "ABIERTO").length;
@@ -382,6 +415,11 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: [
+                _ChipCore(
+                  seleccionado: _soloCore,
+                  onTap: () => setState(() => _soloCore = !_soloCore),
+                ),
+                const SizedBox(width: 8),
                 for (final tecnologia in _todasLasTecnologias) ...[
                   _ChipTecnologia(
                     tecnologia: tecnologia,
@@ -461,6 +499,46 @@ class _ChipEstado extends StatelessWidget {
                     color: (seleccionado ? colorScheme.onPrimary : color)
                         .withValues(alpha: 0.8),
                     fontSize: 10)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Filtra solo entradas de procesos CORE, cruzando por nombre contra el
+/// estado ACTUAL de /controles (ver _nombresCoreActuales): la bitacora no
+/// guarda ese dato. Entradas de TABLA, o de un proceso que ya no figura en
+/// /controles (renombrado, eliminado), quedan afuera mientras este chip este
+/// activo -no se muestran como "no core", simplemente no matchean.
+class _ChipCore extends StatelessWidget {
+  final bool seleccionado;
+  final VoidCallback onTap;
+
+  const _ChipCore({required this.seleccionado, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    const color = StatusColors.critico;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: seleccionado ? 0.9 : 0.1),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.verified_outlined,
+                size: 14, color: seleccionado ? Colors.white : color),
+            const SizedBox(width: 6),
+            Text("CORE",
+                style: AppTextStyles.tech(
+                    color: seleccionado ? Colors.white : color,
+                    fontSize: 9)),
           ],
         ),
       ),

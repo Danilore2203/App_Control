@@ -1,4 +1,5 @@
 import "dart:async";
+import "dart:convert";
 
 import "package:flutter_foreground_task/flutter_foreground_task.dart";
 
@@ -13,7 +14,15 @@ const int _idNotificacionGuardia = 4001;
 
 const _claveContadorFallas = "guardia_contador_fallas";
 const _claveUltimoMensaje = "guardia_ultimo_mensaje";
-const _claveIdsAlarmados = "guardia_ids_alarmados";
+const _claveEstadoAlarmas = "guardia_estado_alarmas";
+const _claveIdsReconocidos = "guardia_ids_reconocidos";
+
+// La alarma sonora se repite mientras el proceso siga en error, pero no en
+// cada corrida (cada 2 min seria insoportable): solo al detectarlo y despues
+// cada vez que pase esta duracion. El recordatorio silencioso es mas
+// frecuente porque no interrumpe con sonido.
+const _duracionEntreAlarmas = Duration(hours: 1);
+const _duracionEntreRecordatorios = Duration(minutes: 30);
 
 /// Llamado desde `_mostrarNotificacionDeAlarma` (notification_service.dart)
 /// cada vez que llega una alerta critica real, para que la proxima vez que
@@ -23,6 +32,21 @@ Future<void> registrarFallaParaNotificacionPersistente(String mensaje) async {
   final actual = await FlutterForegroundTask.getData<int>(key: _claveContadorFallas) ?? 0;
   await FlutterForegroundTask.saveData(key: _claveContadorFallas, value: actual + 1);
   await FlutterForegroundTask.saveData(key: _claveUltimoMensaje, value: mensaje);
+}
+
+/// Llamado desde el boton "Error corregido" en AlarmaPushScreen: el usuario
+/// confirma a mano que ya se solucino, asi que se deja de alarmar/recordar
+/// para este proceso aunque el origen todavia no reporte verde -algunos
+/// tardan en reflejarlo. Se "olvida" el reconocimiento apenas el proceso
+/// realmente vuelve a verde (ver _revisarAlarmaDeRespaldo), para que si
+/// vuelve a fallar despues se alarme de nuevo como falla nueva.
+Future<void> marcarErrorCorregido(int controlId) async {
+  final reconocidosTexto = await FlutterForegroundTask.getData<String>(key: _claveIdsReconocidos) ?? "";
+  final reconocidos = reconocidosTexto.isEmpty
+      ? <int>{}
+      : reconocidosTexto.split(",").map(int.parse).toSet();
+  reconocidos.add(controlId);
+  await FlutterForegroundTask.saveData(key: _claveIdsReconocidos, value: reconocidos.join(","));
 }
 
 /// Se llama una sola vez, apenas arranca la app (igual que
@@ -73,7 +97,8 @@ Future<void> establecerGuardiaActiva(bool activa) async {
       _detenerServicioSiCorre(),
       FlutterForegroundTask.removeData(key: _claveContadorFallas),
       FlutterForegroundTask.removeData(key: _claveUltimoMensaje),
-      FlutterForegroundTask.removeData(key: _claveIdsAlarmados),
+      FlutterForegroundTask.removeData(key: _claveEstadoAlarmas),
+      FlutterForegroundTask.removeData(key: _claveIdsReconocidos),
     ]);
     return;
   }
@@ -173,35 +198,97 @@ class _GuardiaTaskHandler extends TaskHandler {
   /// proteccion contra los bloqueos de bateria/autoarranque de fabrica que
   /// revivir una app muerta via FCM), asi que aprovecha esa misma corrida
   /// para detectar procesos core en falla EL MISMO y disparar la alarma
-  /// local directo, sin esperar a que llegue (o no) el push. Guarda que ids
-  /// ya alarmo para no repetir cada 2 min mientras siga la misma falla, y
-  /// los "olvida" apenas el proceso se recupera, para que si vuelve a
-  /// fallar despues se alarme de nuevo.
+  /// local directo, sin esperar a que llegue (o no) el push.
+  ///
+  /// La alarma sonora no se repite cada 2 min mientras siga la misma falla
+  /// (seria insoportable): suena al detectarla y, si sigue en error, otra
+  /// vez cada _duracionEntreAlarmas. Aparte, cada _duracionEntreRecordatorios
+  /// se manda un recordatorio silencioso (sin sonido de alarma) para que
+  /// quede visible que sigue sin resolverse. Todo esto se "olvida" recien
+  /// cuando el proceso vuelve a verde (exito real) o el usuario confirma a
+  /// mano "Error corregido" (ver marcarErrorCorregido), para que si vuelve a
+  /// fallar despues se trate como falla nueva.
   Future<void> _revisarAlarmaDeRespaldo(List<Control> controles) async {
-    final fallandoCore = controles
-        .where(esCore)
-        .where((c) => c.color == "red" || c.color == "orange")
-        .toList();
+    final coreControles = controles.where(esCore).toList();
+    final fallandoCore = coreControles.where((c) => c.color == "red" || c.color == "orange");
+    // No alcanza con el color: si la fuente manda color verde pero el
+    // estado crudo no confirma "OK", es una inconsistencia de los datos de
+    // origen, no un exito real -se sigue alertando hasta que el estado
+    // tambien confirme (mismo criterio que recuperado_confirmado en el
+    // backend, poller.py).
+    final recuperados = coreControles
+        .where((c) => c.color == "green" && c.estado.trim().toUpperCase() == "OK")
+        .map((c) => c.id)
+        .toSet();
 
-    final previosTexto = await FlutterForegroundTask.getData<String>(key: _claveIdsAlarmados) ?? "";
-    final previos = previosTexto.isEmpty
+    final estadoTexto = await FlutterForegroundTask.getData<String>(key: _claveEstadoAlarmas) ?? "{}";
+    final estado = Map<String, dynamic>.from(jsonDecode(estadoTexto) as Map);
+
+    final reconocidosTexto = await FlutterForegroundTask.getData<String>(key: _claveIdsReconocidos) ?? "";
+    final reconocidos = reconocidosTexto.isEmpty
         ? <int>{}
-        : previosTexto.split(",").map(int.parse).toSet();
+        : reconocidosTexto.split(",").map(int.parse).toSet();
 
-    final actuales = fallandoCore.map((c) => c.id).toSet();
-    final nuevos = fallandoCore.where((c) => !previos.contains(c.id));
+    final ahora = DateTime.now();
 
-    for (final control in nuevos) {
+    for (final control in fallandoCore) {
       // fallandoCore ya viene filtrado por esCore: todos los que llegan aca
       // son procesos core.
-      await mostrarAlarmaLocal(
-        id: control.id,
-        titulo: "Alerta de proceso CORE",
-        mensaje: "[${control.fuente}] ${control.nombre}: ${control.estado}",
-        esDemorado: control.esDemorado,
-      );
+      if (reconocidos.contains(control.id)) continue;
+
+      final clave = control.id.toString();
+      final registro = estado[clave] as Map<String, dynamic>?;
+
+      if (registro == null) {
+        await mostrarAlarmaLocal(
+          id: control.id,
+          titulo: "Alerta de proceso CORE",
+          mensaje: "[${control.fuente}] ${control.nombre}: ${control.estado}",
+          esDemorado: control.esDemorado,
+        );
+        estado[clave] = {
+          "ultimaAlarma": ahora.toIso8601String(),
+          "ultimoRecordatorio": ahora.toIso8601String(),
+        };
+        continue;
+      }
+
+      final ultimaAlarma = DateTime.parse(registro["ultimaAlarma"] as String);
+      if (ahora.difference(ultimaAlarma) >= _duracionEntreAlarmas) {
+        await mostrarAlarmaLocal(
+          id: control.id,
+          titulo: "Alerta de proceso CORE",
+          mensaje: "[${control.fuente}] ${control.nombre}: ${control.estado}",
+          esDemorado: control.esDemorado,
+        );
+        registro["ultimaAlarma"] = ahora.toIso8601String();
+        registro["ultimoRecordatorio"] = ahora.toIso8601String();
+        continue;
+      }
+
+      final ultimoRecordatorio = DateTime.parse(registro["ultimoRecordatorio"] as String);
+      if (ahora.difference(ultimoRecordatorio) >= _duracionEntreRecordatorios) {
+        await mostrarRecordatorioDeError(
+          id: control.id,
+          titulo: "Proceso CORE sigue en error",
+          mensaje: "[${control.fuente}] ${control.nombre}: ${control.estado}",
+          esDemorado: control.esDemorado,
+        );
+        registro["ultimoRecordatorio"] = ahora.toIso8601String();
+      }
     }
 
-    await FlutterForegroundTask.saveData(key: _claveIdsAlarmados, value: actuales.join(","));
+    // No se toca el registro de un control con color transitorio (p.ej.
+    // "blue"/en ejecucion durante un reintento del origen): no es
+    // rojo/naranja, pero tampoco es el exito real que debe "perdonarlo".
+    // Solo se olvida (estado + reconocimiento manual) cuando aparece
+    // explicitamente en verde.
+    for (final id in recuperados) {
+      estado.remove(id.toString());
+      reconocidos.remove(id);
+    }
+
+    await FlutterForegroundTask.saveData(key: _claveEstadoAlarmas, value: jsonEncode(estado));
+    await FlutterForegroundTask.saveData(key: _claveIdsReconocidos, value: reconocidos.join(","));
   }
 }

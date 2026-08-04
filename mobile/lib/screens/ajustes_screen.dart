@@ -54,6 +54,10 @@ class _AjustesScreenState extends State<AjustesScreen> {
     HapticFeedback.selectionClick();
 
     try {
+      // Se guarda primero: inicializar() lee esta misma preferencia antes
+      // de registrar el token, asi que si se guardara despues, activar el
+      // switch leeria todavia el valor viejo (false) y no registraria nada.
+      await _guardiaService.guardarNotificacionesHabilitadas(habilitadas);
       if (habilitadas) {
         // Vuelve a pedir permisos/token y lo registra en el backend.
         await NotificationService().inicializar();
@@ -63,7 +67,6 @@ class _AjustesScreenState extends State<AjustesScreen> {
         // del cliente).
         await _apiService.eliminarFcmToken();
       }
-      await _guardiaService.guardarNotificacionesHabilitadas(habilitadas);
       if (!mounted) return;
       setState(() => _notificacionesHabilitadas = habilitadas);
     } catch (e) {

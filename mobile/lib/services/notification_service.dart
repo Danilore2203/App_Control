@@ -234,6 +234,28 @@ Future<void> _mostrarNotificacionNormal({
   );
 }
 
+/// Recordatorio de que un proceso CORE sigue en error, sin sonido de alarma
+/// (ver `_revisarAlarmaDeRespaldo` en guardia_foreground_task.dart: la alarma
+/// sonora se limita a la deteccion y despues cada hora que siga fallando;
+/// este recordatorio aparte se manda cada 30 min para que quede visible sin
+/// hacer sonar la alarma esa cantidad de veces). Usa un id de notificacion
+/// distinto al de la alarma del mismo proceso -si compartieran id, mostrar
+/// esta reemplazaria la notificacion insistente de la alarma sonora y la
+/// cortaria de golpe.
+Future<void> mostrarRecordatorioDeError({
+  required int id,
+  required String titulo,
+  required String mensaje,
+  required bool esDemorado,
+}) =>
+    _mostrarNotificacionNormal(
+      id: id + 1000000,
+      titulo: titulo,
+      cuerpo: mensaje,
+      esDemorado: esDemorado,
+      esAlarma: false,
+    );
+
 /// Muestra la notificacion que llega por push A MANO. Devuelve `true` si se
 /// mostro como alarma de pantalla completa (para que el llamador decida si
 /// conviene ademas navegar directo a esa pantalla). Funciona igual la llame
@@ -249,6 +271,20 @@ Future<bool> _mostrarNotificacionDeAlarma(RemoteMessage message) async {
     await _mostrarNotificacionNormal(
       id: _idNotificacionResumenNoCore,
       titulo: message.data["titulo"] ?? "Procesos no-core",
+      cuerpo: message.data["mensaje"] ?? "",
+      esDemorado: false,
+      esAlarma: false,
+    );
+    return false;
+  }
+
+  if (tipo == "alerta_normal") {
+    // Aviso que no amerita alarma (p.ej. fallo silencioso de incoherencia
+    // proceso/tabla): siempre notificacion comun, sin importar horario ni
+    // armado de guardia.
+    await _mostrarNotificacionNormal(
+      id: message.hashCode,
+      titulo: message.data["titulo"] ?? "Alerta",
       cuerpo: message.data["mensaje"] ?? "",
       esDemorado: false,
       esAlarma: false,
@@ -395,6 +431,15 @@ class NotificationService {
     if (kIsWeb) return;
 
     await inicializarTemprano();
+
+    // inicializar() se llama sin condicion en cada login (login_screen,
+    // configurar_password_screen): sin este chequeo, un usuario que apago
+    // notificaciones desde Ajustes las recibia de nuevo apenas volvia a
+    // entrar, porque este metodo pedia permiso y re-registraba el token en
+    // el servidor sin mirar la preferencia guardada. La alarma local de
+    // Guardia no se ve afectada: ya quedo lista arriba, en
+    // inicializarTemprano().
+    if (!await GuardiaService().obtenerNotificacionesHabilitadas()) return;
 
     final messaging = _messaging ??= FirebaseMessaging.instance;
 

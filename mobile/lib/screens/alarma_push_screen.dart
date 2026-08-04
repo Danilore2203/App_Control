@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 
+import "../services/guardia_foreground_task.dart";
 import "../services/notification_service.dart";
 import "../theme.dart";
 
@@ -60,6 +61,15 @@ class _AlarmaPushScreenState extends State<AlarmaPushScreen> with SingleTickerPr
     } else {
       Navigator.of(context).pop();
     }
+  }
+
+  /// A diferencia de "Apagar alarma" (que solo corta el sonido de esta
+  /// vez), esto confirma que el proceso ya se solucino: no vuelve a
+  /// alarmar/recordar por esta misma falla aunque el origen todavia no
+  /// reporte verde (ver marcarErrorCorregido).
+  void _marcarCorregido() {
+    marcarErrorCorregido(widget.id);
+    _apagar();
   }
 
   @override
@@ -159,6 +169,24 @@ class _AlarmaPushScreenState extends State<AlarmaPushScreen> with SingleTickerPr
                         icon: const Icon(Icons.notifications_off_outlined),
                         label: const Text(
                           "APAGAR ALARMA",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: color,
+                          side: BorderSide(color: color),
+                          shape: const StadiumBorder(),
+                        ),
+                        onPressed: _marcarCorregido,
+                        icon: const Icon(Icons.check_circle_outline),
+                        label: const Text(
+                          "ERROR CORREGIDO",
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
