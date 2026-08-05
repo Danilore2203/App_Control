@@ -35,6 +35,17 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
+	<!-- REVERSED_CLIENT_ID de GoogleService-Info.plist: google_sign_in lo
+	     necesita para que Google pueda volver a la app tras el login. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.983197006246-jgtfjaimbog0jae19olc3vt38fdv03dc</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
