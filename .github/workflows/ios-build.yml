@@ -1,0 +1,39 @@
+name: iOS build (sin firma)
+
+# Compila el lado iOS en un runner macOS de GitHub (no hace falta Mac propia).
+# Todavia no firma ni genera IPA -eso necesita certificados de Apple
+# Developer que el proyecto no tiene cargados como secrets. Este workflow
+# sirve para validar que el codigo Dart/Swift compila para iOS en cada
+# cambio, antes de invertir en signing/TestFlight.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/ios-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - run: flutter pub get
+
+      - name: Build iOS (sin firmar)
+        run: flutter build ios --release --no-codesign
+
+      - name: Subir el .app compilado
+        uses: actions/upload-artifact@v4
+        with:
+          name: Runner-app
+          path: mobile/build/ios/iphoneos/Runner.app
