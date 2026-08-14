@@ -549,16 +549,24 @@ def revisar_procesos_nuevos(db: Session) -> int:
     procesos_procesados = 0
 
     for proceso in nuevos:
+        # Se leen ANTES del try y se guardan en variables planas: el commit
+        # de la vuelta anterior expira todos los objetos Control que todavia
+        # quedan en `nuevos` (expire_on_commit por defecto), asi que si la
+        # fila de origen se borra entre el fetch inicial y esta vuelta,
+        # tocar proceso.* en el except (despues del rollback, que vuelve a
+        # expirar todo) dispara un SEGUNDO ObjectDeletedError -esta vez sin
+        # try que lo atrape- y tira abajo el ciclo entero del poller.
+        proceso_id, proceso_nombre, proceso_fuente = proceso.id, proceso.nombre, proceso.fuente
         try:
             color = color_efectivo(proceso)
 
-            if proceso.fuente in TECNOLOGIAS_PROCESO_VALIDAS:
+            if proceso_fuente in TECNOLOGIAS_PROCESO_VALIDAS:
                 _actualizar_bitacora_proceso(db, proceso)
 
             if color == "green" and es_core(proceso):
                 _revisar_incoherencia_desde_proceso(db, proceso)
 
-            estado_poller.ultimo_id_revisado = proceso.id
+            estado_poller.ultimo_id_revisado = proceso_id
             db.commit()
             procesos_procesados += 1
         except Exception:
@@ -576,9 +584,9 @@ def revisar_procesos_nuevos(db: Session) -> int:
             db.rollback()
             logger.exception(
                 "Fallo actualizando bitacora/incoherencia para %s [%s] (id %s); se salta y se sigue",
-                proceso.nombre, proceso.fuente, proceso.id,
+                proceso_nombre, proceso_fuente, proceso_id,
             )
-            estado_poller.ultimo_id_revisado = proceso.id
+            estado_poller.ultimo_id_revisado = proceso_id
             db.commit()
 
     return procesos_procesados

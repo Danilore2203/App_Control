@@ -91,21 +91,48 @@ def _asegurar_indices():
 
 INTERVALO_POLLER_SEGUNDOS = 60
 
+# Clave arbitraria para el advisory lock de Postgres (pg_try_advisory_lock usa
+# un bigint como namespace propio, no colisiona con nada mas de la base).
+_POLLER_LOCK_KEY = 892375100
+
 
 def _ejecutar_poller():
-    db = SessionLocal()
+    # Advisory lock a nivel de sesion: si Railway solapa dos instancias
+    # durante un redeploy (la vieja se apaga mientras la nueva ya arranco su
+    # propio _loop_poller), sin esto ambas leen el mismo cursor de
+    # PollerState, ninguna ve el episodio que la otra esta por insertar, y
+    # cada una crea su propia fila para el mismo proceso -bitacora queda con
+    # el mismo fallo duplicado. Con el lock, la instancia que no lo consigue
+    # simplemente se salta este ciclo (el que sigue, 60s despues, ya encuentra
+    # el cursor actualizado por la que si corrio).
+    conn = engine.connect()
     try:
-        # Va primero y no depende de las otras dos: decide la alarma mirando
-        # el estado ACTUAL de cada proceso, no filas nuevas ni el cursor de
-        # bitacora, para que una falla en esas otras dos nunca le cueste una
-        # alarma real al usuario.
-        revisar_alarmas_activas(db)
-        revisar_resumen_no_core(db)
-        revisar_procesos_nuevos(db)
-        revisar_tablas_nuevas(db)
-        resincronizar_episodios_abiertos(db)
+        adquirido = conn.execute(
+            text("SELECT pg_try_advisory_lock(:clave)"), {"clave": _POLLER_LOCK_KEY}
+        ).scalar()
+        if not adquirido:
+            logger.info("Otra instancia ya tiene el poller corriendo; se salta este ciclo")
+            return
+
+        db = SessionLocal()
+        try:
+            # Va primero y no depende de las otras dos: decide la alarma mirando
+            # el estado ACTUAL de cada proceso, no filas nuevas ni el cursor de
+            # bitacora, para que una falla en esas otras dos nunca le cueste una
+            # alarma real al usuario.
+            revisar_alarmas_activas(db)
+            revisar_resumen_no_core(db)
+            revisar_procesos_nuevos(db)
+            revisar_tablas_nuevas(db)
+            resincronizar_episodios_abiertos(db)
+        finally:
+            db.close()
     finally:
-        db.close()
+        try:
+            conn.execute(text("SELECT pg_advisory_unlock(:clave)"), {"clave": _POLLER_LOCK_KEY})
+        except Exception:
+            pass
+        conn.close()
 
 
 async def _loop_poller():
