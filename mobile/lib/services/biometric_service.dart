@@ -47,7 +47,10 @@ class BiometricService {
     try {
       return await _auth.authenticate(
         localizedReason: "Confirma tu identidad para entrar a Controles",
-        options: const AuthenticationOptions(stickyAuth: true),
+        // biometricOnly: sin esto, Android puede ofrecer el PIN/patron del
+        // celular como alternativa si la huella falla -cualquiera que sepa
+        // ese codigo entraria igual, sin haber usado nunca el sensor.
+        options: const AuthenticationOptions(stickyAuth: true, biometricOnly: true),
       );
     } catch (_) {
       return false;
