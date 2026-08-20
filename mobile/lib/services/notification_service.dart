@@ -461,10 +461,37 @@ class NotificationService {
       await Permission.ignoreBatteryOptimizations.request();
     }
 
-    final token = await messaging.getToken();
+    final token = await _obtenerTokenConReintentos(messaging);
     if (token != null) {
-      await _apiService.registrarFcmToken(token);
+      try {
+        await _apiService.registrarFcmToken(token);
+        await GuardiaService().guardarDiagnosticoFcm("ok");
+      } catch (e) {
+        await GuardiaService().guardarDiagnosticoFcm("Token obtenido pero el backend lo rechazo: $e");
+      }
     }
     messaging.onTokenRefresh.listen(_apiService.registrarFcmToken);
+  }
+
+  /// getToken() puede devolver null o tirar una excepcion transitoria justo
+  /// despues de instalar/actualizar la app (Play Services todavia
+  /// terminando de registrarse). Sin este reintento, esa primera falla
+  /// quedaba silenciosa para siempre hasta el proximo login. Si tras los 3
+  /// intentos sigue sin token, el motivo real (el de la ultima excepcion, o
+  /// "getToken devolvio null") queda guardado para poder verlo en Ajustes.
+  Future<String?> _obtenerTokenConReintentos(FirebaseMessaging messaging) async {
+    Object? ultimoError;
+    for (var intento = 0; intento < 3; intento++) {
+      try {
+        final token = await messaging.getToken();
+        if (token != null) return token;
+        ultimoError = "getToken() devolvio null";
+      } catch (e) {
+        ultimoError = e;
+      }
+      if (intento < 2) await Future.delayed(Duration(seconds: 3 * (intento + 1)));
+    }
+    await GuardiaService().guardarDiagnosticoFcm("No se pudo obtener el token FCM: $ultimoError");
+    return null;
   }
 }

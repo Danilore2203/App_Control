@@ -10,6 +10,16 @@ class GuardiaService {
   static const _horaFinKey = "guardia_hora_fin";
   static const _tonoUriKey = "guardia_tono_uri";
   static const _notificacionesKey = "notificaciones_habilitadas";
+  static const _fcmDiagnosticoKey = "fcm_ultimo_diagnostico";
+
+  /// Ultimo error real (o "ok") de intentar registrar el token de FCM en el
+  /// backend. Sin acceso a los logs del dispositivo (adb, Play Console),
+  /// esto es la unica forma de ver POR QUE getToken()/el registro fallo en
+  /// vez de asumirlo a ciegas.
+  Future<String?> obtenerDiagnosticoFcm() => _storage.read(key: _fcmDiagnosticoKey);
+
+  Future<void> guardarDiagnosticoFcm(String detalle) =>
+      _storage.write(key: _fcmDiagnosticoKey, value: detalle);
 
   Future<bool> obtenerArmado() async {
     final valor = await _storage.read(key: _armadoKey);

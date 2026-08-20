@@ -23,6 +23,7 @@ class _AjustesScreenState extends State<AjustesScreen> {
   bool _notificacionesHabilitadas = true;
   bool _actualizandoNotificaciones = false;
   String? _error;
+  String? _diagnosticoFcm;
 
   @override
   void initState() {
@@ -35,9 +36,11 @@ class _AjustesScreenState extends State<AjustesScreen> {
       final habilitadas = await _guardiaService
           .obtenerNotificacionesHabilitadas()
           .timeout(const Duration(seconds: 5), onTimeout: () => true);
+      final diagnostico = await _guardiaService.obtenerDiagnosticoFcm();
       if (!mounted) return;
       setState(() {
         _notificacionesHabilitadas = habilitadas;
+        _diagnosticoFcm = diagnostico;
         _cargando = false;
       });
     } catch (_) {
@@ -67,8 +70,12 @@ class _AjustesScreenState extends State<AjustesScreen> {
         // del cliente).
         await _apiService.eliminarFcmToken();
       }
+      final diagnostico = await _guardiaService.obtenerDiagnosticoFcm();
       if (!mounted) return;
-      setState(() => _notificacionesHabilitadas = habilitadas);
+      setState(() {
+        _notificacionesHabilitadas = habilitadas;
+        _diagnosticoFcm = diagnostico;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString().replaceFirst("Exception: ", ""));
@@ -157,6 +164,13 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     ],
                   ),
                 ),
+                if (_diagnosticoFcm != null && _diagnosticoFcm != "ok") ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    "Diagnóstico de notificaciones: $_diagnosticoFcm",
+                    style: TextStyle(color: colorScheme.error, fontSize: 11.5),
+                  ),
+                ],
               ],
             ),
     );
