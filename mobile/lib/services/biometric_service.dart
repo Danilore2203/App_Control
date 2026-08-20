@@ -2,12 +2,7 @@ import "package:flutter/foundation.dart";
 import "package:flutter_secure_storage/flutter_secure_storage.dart";
 import "package:local_auth/local_auth.dart";
 
-/// Si el usuario ya entro hace poco (p.ej. cerro la app al apagar una
-/// alarma con el celular bloqueado -eso cierra la app entera, ver
-/// AlarmaPushScreen- y la vuelve a abrir enseguida), pedirle la huella de
-/// nuevo es pura friccion sin aportar seguridad real. Recien se vuelve a
-/// pedir pasado este tiempo desde el ultimo ingreso exitoso.
-const ventanaDeGraciaBiometria = Duration(minutes: 5);
+import "guardia_service.dart";
 
 class BiometricService {
   static const _storage = FlutterSecureStorage();
@@ -33,12 +28,19 @@ class BiometricService {
         value: DateTime.now().toIso8601String(),
       );
 
+  /// Si el usuario ya entro hace poco (p.ej. cerro la app al apagar una
+  /// alarma con el celular bloqueado -eso cierra la app entera, ver
+  /// AlarmaPushScreen- y la vuelve a abrir enseguida), pedirle la huella de
+  /// nuevo es pura friccion sin aportar seguridad real. Recien se vuelve a
+  /// pedir pasado este tiempo desde el ultimo ingreso exitoso (configurable
+  /// en Ajustes, ver GuardiaService.obtenerVentanaGraciaBiometriaMinutos).
   Future<bool> ingresoRecienteVigente() async {
     final guardado = await _storage.read(key: _ultimoIngresoKey);
     if (guardado == null) return false;
     final ultimo = DateTime.tryParse(guardado);
     if (ultimo == null) return false;
-    return DateTime.now().difference(ultimo) < ventanaDeGraciaBiometria;
+    final minutos = await GuardiaService().obtenerVentanaGraciaBiometriaMinutos();
+    return DateTime.now().difference(ultimo) < Duration(minutes: minutos);
   }
 
   Future<bool> autenticar() async {

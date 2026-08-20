@@ -11,6 +11,19 @@ class GuardiaService {
   static const _tonoUriKey = "guardia_tono_uri";
   static const _notificacionesKey = "notificaciones_habilitadas";
   static const _fcmDiagnosticoKey = "fcm_ultimo_diagnostico";
+  static const _ventanaGraciaBiometriaKey = "ventana_gracia_biometria_minutos";
+
+  /// Minutos que pasan antes de volver a pedir huella al reabrir la app
+  /// (ver ingresoRecienteVigente en biometric_service.dart). Configurable
+  /// desde Ajustes porque una ventana fija le quedaba muy larga a algunos
+  /// usuarios (entraba sin pedir huella con el celular en otras manos).
+  Future<int> obtenerVentanaGraciaBiometriaMinutos() async {
+    final valor = await _storage.read(key: _ventanaGraciaBiometriaKey);
+    return int.tryParse(valor ?? "") ?? 5;
+  }
+
+  Future<void> guardarVentanaGraciaBiometriaMinutos(int minutos) =>
+      _storage.write(key: _ventanaGraciaBiometriaKey, value: minutos.toString());
 
   /// Ultimo error real (o "ok") de intentar registrar el token de FCM en el
   /// backend. Sin acceso a los logs del dispositivo (adb, Play Console),

@@ -19,11 +19,14 @@ class _AjustesScreenState extends State<AjustesScreen> {
   final _guardiaService = GuardiaService();
   final _apiService = ApiService();
 
+  static const _opcionesVentanaGracia = [0, 1, 5, 10, 15, 30];
+
   bool _cargando = true;
   bool _notificacionesHabilitadas = true;
   bool _actualizandoNotificaciones = false;
   String? _error;
   String? _diagnosticoFcm;
+  int _ventanaGraciaMinutos = 5;
 
   @override
   void initState() {
@@ -37,16 +40,26 @@ class _AjustesScreenState extends State<AjustesScreen> {
           .obtenerNotificacionesHabilitadas()
           .timeout(const Duration(seconds: 5), onTimeout: () => true);
       final diagnostico = await _guardiaService.obtenerDiagnosticoFcm();
+      final ventanaGracia = await _guardiaService.obtenerVentanaGraciaBiometriaMinutos();
       if (!mounted) return;
       setState(() {
         _notificacionesHabilitadas = habilitadas;
         _diagnosticoFcm = diagnostico;
+        _ventanaGraciaMinutos = ventanaGracia;
         _cargando = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() => _cargando = false);
     }
+  }
+
+  Future<void> _cambiarVentanaGracia(int? minutos) async {
+    if (minutos == null) return;
+    HapticFeedback.selectionClick();
+    await _guardiaService.guardarVentanaGraciaBiometriaMinutos(minutos);
+    if (!mounted) return;
+    setState(() => _ventanaGraciaMinutos = minutos);
   }
 
   Future<void> _cambiarNotificaciones(bool habilitadas) async {
@@ -171,6 +184,53 @@ class _AjustesScreenState extends State<AjustesScreen> {
                     style: TextStyle(color: colorScheme.error, fontSize: 11.5),
                   ),
                 ],
+                const SizedBox(height: 24),
+                Text(
+                  "SEGURIDAD",
+                  style: AppTextStyles.tech(color: colorScheme.onSurfaceVariant, fontSize: 10),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Volver a pedir huella después de",
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              "Si reabrís la app dentro de este tiempo desde el último "
+                              "ingreso, no vuelve a pedir huella. \"Siempre\" la pide cada vez.",
+                              style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12.5),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      DropdownButton<int>(
+                        value: _ventanaGraciaMinutos,
+                        onChanged: _cambiarVentanaGracia,
+                        items: _opcionesVentanaGracia
+                            .map((minutos) => DropdownMenuItem(
+                                  value: minutos,
+                                  child: Text(minutos == 0 ? "Siempre" : "$minutos min"),
+                                ))
+                            .toList(),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
     );
