@@ -6,7 +6,7 @@ class AppConfig {
   //   flutter build apk --release --dart-define=API_BASE_URL=https://...
   static const String apiBaseUrl = String.fromEnvironment(
     "API_BASE_URL",
-    defaultValue: "https://appcontrol-production.up.railway.app",
+    defaultValue: "https://appcontrol-production-268f.up.railway.app",
   );
 
   // Web Client ID generado por Firebase al activar Google como proveedor de
