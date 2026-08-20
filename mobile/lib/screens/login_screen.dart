@@ -58,10 +58,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (!_hayTokenGuardado) return;
 
-    // Ya entro hace poco (p.ej. cerro la app al apagar una alarma con el
-    // celular bloqueado y la volvio a abrir enseguida): pasa directo, sin
-    // volver a pedir la huella.
-    if (await _biometricService.ingresoRecienteVigente()) {
+    // Si el proceso de la app se reinicio de cero (la cerraste del todo:
+    // swipe desde recientes, o Android la mato) SIEMPRE hay que pedir
+    // huella, sin importar la ventana de gracia configurada en Ajustes -
+    // por eso ni se llama a ingresoRecienteVigente() en ese caso. Esa
+    // ventana solo tiene sentido si el proceso seguia vivo (la app nunca
+    // se cerro del todo, solo paso a segundo plano un momento).
+    final esArranqueNuevo = _biometricService.esArranqueNuevoDelProceso;
+    if (!esArranqueNuevo && await _biometricService.ingresoRecienteVigente()) {
       await _entrarADashboard();
       return;
     }

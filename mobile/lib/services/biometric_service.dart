@@ -8,7 +8,25 @@ class BiometricService {
   static const _storage = FlutterSecureStorage();
   static const _ultimoIngresoKey = "biometria_ultimo_ingreso_exitoso";
 
+  /// Vive solo en memoria (a diferencia de _ultimoIngresoKey, que es
+  /// persistido a proposito). Si Android mata el proceso -swipe desde
+  /// recientes, o el sistema lo mata por memoria- este flag vuelve a false
+  /// porque el isolate de Dart entero arranca de cero: no hay forma de que
+  /// sobreviva a un proceso muerto. Eso es exactamente lo que se necesita
+  /// para distinguir "la app seguia viva en memoria" (aplica la ventana de
+  /// gracia) de "esto es un arranque nuevo" (pedir huella siempre, sin
+  /// importar la ventana configurada en Ajustes).
+  static bool _procesoYaArranco = false;
+
   final _auth = LocalAuthentication();
+
+  /// true la primera vez que se llama en la vida de este proceso; false en
+  /// cualquier llamada posterior mientras el proceso siga vivo.
+  bool get esArranqueNuevoDelProceso {
+    if (_procesoYaArranco) return false;
+    _procesoYaArranco = true;
+    return true;
+  }
 
   Future<bool> disponible() async {
     if (kIsWeb) return false;
