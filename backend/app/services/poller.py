@@ -773,6 +773,13 @@ def revisar_alarmas_activas(db: Session) -> int:
 
     disparadas = 0
     for proceso in _estado_actual_procesos(db):
+        # Se guardan antes del try: cada db.commit() vence los objetos ya
+        # cargados, y si otro proceso (p.ej. la purga de snapshots viejos)
+        # borro esta fila justo en el medio, leer proceso.nombre/fuente
+        # DESPUES (para loguear el error) vuelve a tocar la fila borrada y
+        # tira un segundo ObjectDeletedError que tapa el primero y aborta
+        # todo el ciclo en vez de saltear solo este proceso.
+        nombre, fuente = proceso.nombre, proceso.fuente
         try:
             if _revisar_alarma_de_proceso(db, proceso):
                 disparadas += 1
@@ -781,7 +788,7 @@ def revisar_alarmas_activas(db: Session) -> int:
             db.rollback()
             logger.exception(
                 "Fallo revisando alarma de %s [%s]; se reintenta el proximo ciclo",
-                proceso.nombre, proceso.fuente,
+                nombre, fuente,
             )
     return disparadas
 
