@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
+from app.services.solicitudes import aprobar_solicitud_registro as _aprobar_solicitud_registro
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -97,28 +98,7 @@ def aprobar_solicitud_registro(
     db: Session = Depends(get_db),
     _admin: models.Usuario = Depends(auth.requerir_admin),
 ):
-    solicitud = db.get(models.SolicitudRegistro, solicitud_id)
-    if solicitud is None:
-        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
-    if solicitud.estado != "pendiente":
-        raise HTTPException(status_code=400, detail="Esta solicitud ya fue resuelta")
-
-    existente = db.query(models.Usuario).filter(models.Usuario.username == solicitud.username).first()
-    if existente:
-        raise HTTPException(status_code=400, detail="Ya existe un usuario con ese nombre de usuario")
-
-    usuario = models.Usuario(
-        username=solicitud.username,
-        email=solicitud.email,
-        nombre=solicitud.nombre,
-        password_hash=solicitud.password_hash,
-        activo=True,
-    )
-    db.add(usuario)
-    solicitud.estado = "aprobada"
-    db.commit()
-    db.refresh(usuario)
-    return usuario
+    return _aprobar_solicitud_registro(db, solicitud_id)
 
 
 @router.post("/solicitudes-registro/{solicitud_id}/rechazar", response_model=schemas.SolicitudRegistroOut)

@@ -17,6 +17,7 @@ from app.routers import auth as auth_router
 from app.routers import bitacora as bitacora_router
 from app.routers import controles as controles_router
 from app.routers import infra as infra_router
+from app.routers import internal as internal_router
 from app.services.poller import (
     resincronizar_episodios_abiertos,
     revisar_alarmas_activas,
@@ -176,6 +177,7 @@ app.include_router(controles_router.router)
 app.include_router(alertas_router.router)
 app.include_router(admin_router.router)
 app.include_router(infra_router.router)
+app.include_router(internal_router.router)
 app.include_router(bitacora_router.router)
 
 

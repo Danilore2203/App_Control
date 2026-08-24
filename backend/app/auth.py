@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import httpx
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
@@ -290,3 +290,11 @@ def requerir_admin(
     if not es_administrador(usuario_actual, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Requiere permisos de administrador")
     return usuario_actual
+
+
+def verificar_internal_key(x_internal_key: str = Header(default="")) -> None:
+    """Autentica llamadas servidor-a-servidor (p.ej. op_prod resolviendo una
+    solicitud de registro) con una clave compartida en vez de un JWT de admin,
+    porque quien llama no es un usuario humano logueado en la app."""
+    if not settings.internal_api_key or x_internal_key != settings.internal_api_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Clave interna invalida")

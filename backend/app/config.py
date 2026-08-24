@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     critical_alerts_enabled: bool = False
     monitor_auth_url: str = ""
     google_oauth_client_id: str = ""
+    internal_api_key: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
