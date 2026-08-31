@@ -2,8 +2,9 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from firebase_admin import messaging
-from sqlalchemy import func
+from sqlalchemy import func, inspect
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import ObjectDeletedError
 
 from app import models
 from app.services.fcm import enviar_alerta_push, enviar_resumen_push
@@ -31,6 +32,26 @@ def _formatear_duracion(inicio, fin) -> str:
     if horas:
         return f"{horas}h {minutos}m"
     return f"{minutos}m"
+
+
+DESCRIPCION_MAX_LEN = 1000  # debe calzar con BitacoraError.descripcion = String(1000)
+_DESCRIPCION_TRUNCADO_PREFIJO = "[...] "
+
+
+def _agregar_a_descripcion(episodio: "models.BitacoraError", fragmento: str) -> None:
+    """Agrega texto a la descripcion de un episodio sin superar el limite de
+    la columna (String(1000)): un episodio "flapping" (varios ciclos
+    cambiando de estado) puede acumular texto indefinidamente, y un UPDATE
+    que excede el limite lo rechaza Postgres, abortando la transaccion
+    completa del lote (todos los episodios de ese ciclo, no solo este).
+    Si no entra, se recorta el principio y se antepone un marcador -se
+    prioriza conservar el historial mas reciente."""
+
+    nueva = (episodio.descripcion or "") + fragmento
+    if len(nueva) > DESCRIPCION_MAX_LEN:
+        recorte = DESCRIPCION_MAX_LEN - len(_DESCRIPCION_TRUNCADO_PREFIJO)
+        nueva = _DESCRIPCION_TRUNCADO_PREFIJO + nueva[-recorte:]
+    episodio.descripcion = nueva
 
 
 def _episodio_abierto(db: Session, nombre: str, tecnologia: str):
@@ -102,8 +123,9 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
             # que tenia quiando se abrio la fila, aunque el origen ya haya
             # cambiado (por eso demorados reales se seguian viendo como error).
             if episodio_abierto.estado != estado_actual:
-                episodio_abierto.descripcion += (
-                    f" Cambió a {frase_estado} a las {proceso.snapshot_ts.strftime('%H:%M')}."
+                _agregar_a_descripcion(
+                    episodio_abierto,
+                    f" Cambió a {frase_estado} a las {proceso.snapshot_ts.strftime('%H:%M')}.",
                 )
                 episodio_abierto.estado = estado_actual
             episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
@@ -125,8 +147,9 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
             episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
             episodio_abierto.estado_fin = "OK"
             duracion = _formatear_duracion(episodio_abierto.fecha_hora, proceso.snapshot_ts)
-            episodio_abierto.descripcion += (
-                f" Solucionado - Estado OK a las {proceso.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+            _agregar_a_descripcion(
+                episodio_abierto,
+                f" Solucionado - Estado OK a las {proceso.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}.",
             )
         else:
             # Color dice verde pero el estado crudo no confirma "OK": no
@@ -134,9 +157,10 @@ def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
             # de mas que perder de vista un fallo que en realidad sigue.
             episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
             if episodio_abierto.estado != "INCONSISTENTE":
-                episodio_abierto.descripcion += (
+                _agregar_a_descripcion(
+                    episodio_abierto,
                     f" Color verde pero estado '{proceso.estado}' no confirma OK a las "
-                    f"{proceso.snapshot_ts.strftime('%H:%M')}: no se cierra por inconsistencia de datos."
+                    f"{proceso.snapshot_ts.strftime('%H:%M')}: no se cierra por inconsistencia de datos.",
                 )
                 episodio_abierto.estado = "INCONSISTENTE"
 
@@ -187,8 +211,9 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
         estado_normalizado = ESTADOS_TABLA_NORMALIZADOS.get(tabla.estado.upper().strip(), "ERROR")
         if episodio_abierto:
             if episodio_abierto.estado != estado_normalizado:
-                episodio_abierto.descripcion += (
-                    f" Cambió a {estado_normalizado.lower()} a las {tabla.snapshot_ts.strftime('%H:%M')}."
+                _agregar_a_descripcion(
+                    episodio_abierto,
+                    f" Cambió a {estado_normalizado.lower()} a las {tabla.snapshot_ts.strftime('%H:%M')}.",
                 )
                 episodio_abierto.estado = estado_normalizado
             episodio_abierto.fecha_actualizacion = tabla.snapshot_ts
@@ -212,8 +237,9 @@ def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
         episodio_abierto.fecha_actualizacion = tabla.snapshot_ts
         episodio_abierto.estado_fin = "OK"
         duracion = _formatear_duracion(episodio_abierto.fecha_hora, tabla.snapshot_ts)
-        episodio_abierto.descripcion += (
-            f" Solucionado - Estado OK a las {tabla.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
+        _agregar_a_descripcion(
+            episodio_abierto,
+            f" Solucionado - Estado OK a las {tabla.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}.",
         )
 
     db.flush()
@@ -238,79 +264,100 @@ def resincronizar_episodios_abiertos(db: Session) -> int:
     corregidos = 0
 
     for episodio in abiertos:
-        if episodio.tipo == "PROCESO":
-            ultimo = (
-                db.query(models.Control)
-                .filter(
-                    models.Control.nombre == episodio.nombre,
-                    models.Control.fuente == episodio.tecnologia,
+        try:
+            # Igual que en revisar_procesos_nuevos/revisar_tablas_nuevas: se
+            # capturan en variables planas antes de usarlas en el log del
+            # except, porque el commit/rollback expira el objeto y volver a
+            # tocar episodio.* ahi podria disparar un segundo ObjectDeletedError.
+            ep_id, ep_nombre, ep_tecnologia = episodio.id, episodio.nombre, episodio.tecnologia
+            if episodio.tipo == "PROCESO":
+                ultimo = (
+                    db.query(models.Control)
+                    .filter(
+                        models.Control.nombre == episodio.nombre,
+                        models.Control.fuente == episodio.tecnologia,
+                    )
+                    .order_by(models.Control.id.desc())
+                    .first()
                 )
-                .order_by(models.Control.id.desc())
-                .first()
-            )
-            if ultimo is None:
-                continue
-            color = color_efectivo(ultimo)
-            if color != "red":
-                # Ya no esta en rojo -verde, en ejecucion, o cualquier otro
-                # estado-: la falla vieja quedo atras (si vuelve a fallar,
-                # el proximo aviso abre un episodio nuevo). Antes esto solo
-                # cerraba si el color era exactamente "green", asi que un
-                # proceso que arrancaba una corrida nueva y quedaba "en
-                # ejecucion" (azul) dejaba el episodio viejo abierto para
-                # siempre -de ahi que bitacora acumulara episodios "abiertos"
-                # que la app ya no mostraba como fallando.
-                episodio.estado_fin = "OK"
-                episodio.fecha_actualizacion = ultimo.snapshot_ts
-                duracion = _formatear_duracion(episodio.fecha_hora, ultimo.snapshot_ts)
-                episodio.descripcion += (
-                    f" Solucionado - Estado OK a las {ultimo.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
-                )
-                corregidos += 1
-                continue
-            estado_actual = estado_efectivo(ultimo)
-            if episodio.estado != estado_actual:
-                frase = "demorado" if estado_actual == "DEMORADO" else f"en {estado_actual.lower()}"
-                episodio.descripcion += (
-                    f" Cambió a {frase} a las {ultimo.snapshot_ts.strftime('%H:%M')}."
-                )
-                episodio.estado = estado_actual
-                corregidos += 1
-            episodio.fecha_actualizacion = ultimo.snapshot_ts
+                if ultimo is None:
+                    continue
+                color = color_efectivo(ultimo)
+                if color != "red":
+                    # Ya no esta en rojo -verde, en ejecucion, o cualquier otro
+                    # estado-: la falla vieja quedo atras (si vuelve a fallar,
+                    # el proximo aviso abre un episodio nuevo). Antes esto solo
+                    # cerraba si el color era exactamente "green", asi que un
+                    # proceso que arrancaba una corrida nueva y quedaba "en
+                    # ejecucion" (azul) dejaba el episodio viejo abierto para
+                    # siempre -de ahi que bitacora acumulara episodios "abiertos"
+                    # que la app ya no mostraba como fallando.
+                    episodio.estado_fin = "OK"
+                    episodio.fecha_actualizacion = ultimo.snapshot_ts
+                    duracion = _formatear_duracion(episodio.fecha_hora, ultimo.snapshot_ts)
+                    _agregar_a_descripcion(
+                        episodio,
+                        f" Solucionado - Estado OK a las {ultimo.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}.",
+                    )
+                    corregidos += 1
+                else:
+                    estado_actual = estado_efectivo(ultimo)
+                    if episodio.estado != estado_actual:
+                        frase = "demorado" if estado_actual == "DEMORADO" else f"en {estado_actual.lower()}"
+                        _agregar_a_descripcion(
+                            episodio, f" Cambió a {frase} a las {ultimo.snapshot_ts.strftime('%H:%M')}."
+                        )
+                        episodio.estado = estado_actual
+                        corregidos += 1
+                    episodio.fecha_actualizacion = ultimo.snapshot_ts
 
-        elif episodio.tipo == "TABLA":
-            ultimo = (
-                db.query(models.Tabla)
-                .filter(
-                    models.Tabla.nombre == episodio.nombre,
-                    models.Tabla.fuente == episodio.tecnologia,
+            elif episodio.tipo == "TABLA":
+                ultimo = (
+                    db.query(models.Tabla)
+                    .filter(
+                        models.Tabla.nombre == episodio.nombre,
+                        models.Tabla.fuente == episodio.tecnologia,
+                    )
+                    .order_by(models.Tabla.id.desc())
+                    .first()
                 )
-                .order_by(models.Tabla.id.desc())
-                .first()
-            )
-            if ultimo is None:
-                continue
-            color_tabla = (ultimo.color or "").strip().lower()
-            if color_tabla != "red":
-                episodio.estado_fin = "OK"
-                episodio.fecha_actualizacion = ultimo.snapshot_ts
-                duracion = _formatear_duracion(episodio.fecha_hora, ultimo.snapshot_ts)
-                episodio.descripcion += (
-                    f" Solucionado - Estado OK a las {ultimo.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}."
-                )
-                corregidos += 1
-                continue
-            estado_normalizado = ESTADOS_TABLA_NORMALIZADOS.get(ultimo.estado.upper().strip(), "ERROR")
-            if episodio.estado != estado_normalizado:
-                episodio.descripcion += (
-                    f" Cambió a {estado_normalizado.lower()} a las {ultimo.snapshot_ts.strftime('%H:%M')}."
-                )
-                episodio.estado = estado_normalizado
-                corregidos += 1
-            episodio.fecha_actualizacion = ultimo.snapshot_ts
+                if ultimo is None:
+                    continue
+                color_tabla = (ultimo.color or "").strip().lower()
+                if color_tabla != "red":
+                    episodio.estado_fin = "OK"
+                    episodio.fecha_actualizacion = ultimo.snapshot_ts
+                    duracion = _formatear_duracion(episodio.fecha_hora, ultimo.snapshot_ts)
+                    _agregar_a_descripcion(
+                        episodio,
+                        f" Solucionado - Estado OK a las {ultimo.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}.",
+                    )
+                    corregidos += 1
+                else:
+                    estado_normalizado = ESTADOS_TABLA_NORMALIZADOS.get(ultimo.estado.upper().strip(), "ERROR")
+                    if episodio.estado != estado_normalizado:
+                        _agregar_a_descripcion(
+                            episodio,
+                            f" Cambió a {estado_normalizado.lower()} a las {ultimo.snapshot_ts.strftime('%H:%M')}.",
+                        )
+                        episodio.estado = estado_normalizado
+                        corregidos += 1
+                    episodio.fecha_actualizacion = ultimo.snapshot_ts
 
-    if corregidos:
-        db.commit()
+            db.commit()
+        except ObjectDeletedError:
+            db.rollback()
+            logger.warning(
+                "Episodio id %s borrado (posible purga concurrente) al resincronizar; se saltea",
+                inspect(episodio).identity[0],
+            )
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "Fallo resincronizando episodio %s [%s] (id %s); se reintenta el proximo ciclo",
+                ep_nombre, ep_tecnologia, ep_id,
+            )
+
     return corregidos
 
 
@@ -462,7 +509,7 @@ def _cerrar_incoherencia_si_existe(
     abierta.fecha_actualizacion = ts
     abierta.estado_fin = "OK"
     duracion = _formatear_duracion(abierta.fecha_hora, ts)
-    abierta.descripcion += f" Solucionado - Estado OK a las {ts.strftime('%H:%M')}. Duración: {duracion}."
+    _agregar_a_descripcion(abierta, f" Solucionado - Estado OK a las {ts.strftime('%H:%M')}. Duración: {duracion}.")
     db.flush()
 
 
@@ -549,15 +596,15 @@ def revisar_procesos_nuevos(db: Session) -> int:
     procesos_procesados = 0
 
     for proceso in nuevos:
-        # Se leen ANTES del try y se guardan en variables planas: el commit
-        # de la vuelta anterior expira todos los objetos Control que todavia
-        # quedan en `nuevos` (expire_on_commit por defecto), asi que si la
-        # fila de origen se borra entre el fetch inicial y esta vuelta,
-        # tocar proceso.* en el except (despues del rollback, que vuelve a
-        # expirar todo) dispara un SEGUNDO ObjectDeletedError -esta vez sin
-        # try que lo atrape- y tira abajo el ciclo entero del poller.
-        proceso_id, proceso_nombre, proceso_fuente = proceso.id, proceso.nombre, proceso.fuente
         try:
+            # El acceso a proceso.* va DENTRO del try: el commit de la vuelta
+            # anterior expira todos los objetos Control que todavia quedan en
+            # `nuevos` (expire_on_commit por defecto), asi que si la fila de
+            # origen se borro entre el fetch inicial y esta vuelta, leer
+            # proceso.id/nombre/fuente dispara un SELECT que no encuentra la
+            # fila -> ObjectDeletedError, capturado abajo aparte para saltear
+            # solo este proceso sin perder el cursor.
+            proceso_id, proceso_nombre, proceso_fuente = proceso.id, proceso.nombre, proceso.fuente
             color = color_efectivo(proceso)
 
             if proceso_fuente in TECNOLOGIAS_PROCESO_VALIDAS:
@@ -569,6 +616,18 @@ def revisar_procesos_nuevos(db: Session) -> int:
             estado_poller.ultimo_id_revisado = proceso_id
             db.commit()
             procesos_procesados += 1
+        except ObjectDeletedError:
+            db.rollback()
+            # proceso.id ya no es legible (fila borrada): se toma del identity
+            # map, que no dispara consulta a la base, para poder avanzar el
+            # cursor igual y no reprocesar esta fila en bucle.
+            proceso_id = inspect(proceso).identity[0]
+            logger.warning(
+                "Proceso id %s borrado (posible purga concurrente) durante el ciclo del poller; se saltea",
+                proceso_id,
+            )
+            estado_poller.ultimo_id_revisado = proceso_id
+            db.commit()
         except Exception:
             # Sin esto, un dato puntual que rompe UN proceso (nombre/estado
             # raro, lo que sea) frenaba el cursor ahi mismo para siempre: cada
@@ -773,17 +832,22 @@ def revisar_alarmas_activas(db: Session) -> int:
 
     disparadas = 0
     for proceso in _estado_actual_procesos(db):
-        # Se guardan antes del try: cada db.commit() vence los objetos ya
-        # cargados, y si otro proceso (p.ej. la purga de snapshots viejos)
-        # borro esta fila justo en el medio, leer proceso.nombre/fuente
-        # DESPUES (para loguear el error) vuelve a tocar la fila borrada y
-        # tira un segundo ObjectDeletedError que tapa el primero y aborta
-        # todo el ciclo en vez de saltear solo este proceso.
-        nombre, fuente = proceso.nombre, proceso.fuente
         try:
+            # El acceso a nombre/fuente va DENTRO del try: cada db.commit()
+            # del ciclo anterior vence los objetos ya cargados, asi que
+            # tocar un atributo aca dispara un SELECT fresco. Si otro
+            # proceso (p.ej. la purga de snapshots viejos) borro esta fila
+            # justo en el medio, ese SELECT tira ObjectDeletedError, que se
+            # captura abajo para saltear solo este proceso.
+            nombre, fuente = proceso.nombre, proceso.fuente
             if _revisar_alarma_de_proceso(db, proceso):
                 disparadas += 1
             db.commit()
+        except ObjectDeletedError:
+            db.rollback()
+            logger.warning(
+                "Proceso borrado (posible purga concurrente) durante el ciclo del poller; se saltea"
+            )
         except Exception:
             db.rollback()
             logger.exception(
@@ -868,7 +932,16 @@ def revisar_tablas_nuevas(db: Session) -> int:
 
     for tabla in nuevas:
         try:
-            if tabla.fuente in TECNOLOGIAS_TABLA_VALIDAS:
+            # Igual que en revisar_procesos_nuevos: se capturan en variables
+            # planas antes de usarlas en el log del except, porque el commit
+            # de la vuelta anterior expira todos los objetos Tabla que
+            # todavia quedan en `nuevas` y, si la fila fue borrada
+            # mientras tanto, tocar tabla.* de nuevo DESPUES del rollback
+            # (que tambien expira) dispara un segundo ObjectDeletedError sin
+            # try que lo atrape.
+            tabla_id, tabla_nombre, tabla_fuente = tabla.id, tabla.nombre, tabla.fuente
+
+            if tabla_fuente in TECNOLOGIAS_TABLA_VALIDAS:
                 _actualizar_bitacora_tabla(db, tabla)
 
             es_de_hoy = tabla.snapshot_fecha == datetime.now(BOLIVIA_TZ).date()
@@ -888,9 +961,18 @@ def revisar_tablas_nuevas(db: Session) -> int:
                 # transitorio, no un fallo.
                 _revisar_incoherencia_desde_tabla(db, tabla)
 
-            estado_poller.ultimo_id_tablas_revisado = tabla.id
+            estado_poller.ultimo_id_tablas_revisado = tabla_id
             db.commit()
             procesadas += 1
+        except ObjectDeletedError:
+            db.rollback()
+            tabla_id = inspect(tabla).identity[0]
+            logger.warning(
+                "Tabla id %s borrada (posible purga concurrente) durante el ciclo del poller; se saltea",
+                tabla_id,
+            )
+            estado_poller.ultimo_id_tablas_revisado = tabla_id
+            db.commit()
         except Exception:
             # Mismo motivo que en revisar_procesos_nuevos: commitear una
             # tabla a la vez para que una fila rota no trabe el cursor (ni
@@ -899,9 +981,9 @@ def revisar_tablas_nuevas(db: Session) -> int:
             db.rollback()
             logger.exception(
                 "Fallo actualizando bitacora/incoherencia para tabla %s [%s] (id %s); se salta y se sigue",
-                tabla.nombre, tabla.fuente, tabla.id,
+                tabla_nombre, tabla_fuente, tabla_id,
             )
-            estado_poller.ultimo_id_tablas_revisado = tabla.id
+            estado_poller.ultimo_id_tablas_revisado = tabla_id
             db.commit()
 
     return procesadas

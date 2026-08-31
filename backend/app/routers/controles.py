@@ -1,7 +1,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from sqlalchemy import distinct, func, tuple_
 from sqlalchemy.orm import Session, aliased
 
 from app import auth, models, schemas
@@ -77,10 +77,15 @@ def historial_fallas(
 ):
     """Cantidad de procesos en rojo/naranja por dia, ultimos `dias` dias
     (segun snapshot_fecha), para graficar la tendencia de fallas reciente."""
+    # Cuenta (nombre, fuente) distintos por dia, no filas crudas: un mismo
+    # proceso puede generar mas de una fila en rojo/naranja el mismo dia si
+    # reintenta rapido y cambia de estado varias veces (ver comentario en
+    # _actualizar_bitacora_proceso), lo que inflaba el conteo de "procesos
+    # en falla" por dia.
     filas = (
         db.query(
             models.Control.snapshot_fecha,
-            func.count(models.Control.id).label("fallas"),
+            func.count(distinct(tuple_(models.Control.nombre, models.Control.fuente))).label("fallas"),
         )
         .filter(func.trim(func.lower(models.Control.color)).in_(["red", "orange"]))
         .group_by(models.Control.snapshot_fecha)

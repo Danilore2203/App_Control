@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
+from app.services.poller import BOLIVIA_TZ
 
 router = APIRouter(prefix="/bitacora", tags=["bitacora"])
 
@@ -18,7 +19,11 @@ def crear_entrada(
     usuario_actual: models.Usuario = Depends(auth.obtener_usuario_actual),
 ):
     entrada = models.BitacoraError(
-        fecha_hora=payload.fecha_hora or datetime.utcnow(),
+        # El resto de la bitacora (generada por el poller) queda en hora
+        # local Bolivia naive, tomada de snapshot_ts del origen. Si una
+        # entrada manual no manda fecha_hora, el default debe seguir la
+        # misma convencion -datetime.utcnow() quedaba 4h adelantada.
+        fecha_hora=payload.fecha_hora or datetime.now(BOLIVIA_TZ).replace(tzinfo=None),
         nombre=payload.nombre.strip(),
         tecnologia=payload.tecnologia,
         estado=payload.estado,
@@ -43,6 +48,18 @@ def listar_entradas(
     if mes is not None:
         consulta = consulta.filter(extract("month", models.BitacoraError.fecha_hora) == mes)
     return consulta.order_by(models.BitacoraError.fecha_hora.desc()).all()
+
+
+def _mismo_dia_anio_anterior(fecha: datetime) -> datetime:
+    """fecha.replace(year=fecha.year - 1) explota con ValueError si fecha es
+    29 de febrero de un anio bisiesto y el anterior no lo es. Cae a 28/2 en
+    ese caso -un dia menos en la ventana de comparacion, aceptable para un
+    numero comparativo YTD, contra un 500 seguro."""
+
+    try:
+        return fecha.replace(year=fecha.year - 1)
+    except ValueError:
+        return fecha.replace(year=fecha.year - 1, day=28)
 
 
 def _contar_en_rango(db: Session, desde: datetime, hasta: datetime) -> int:
@@ -87,7 +104,7 @@ def resumen_anual(
     total_anual = _contar_en_rango(db, desde_actual, hasta_actual)
 
     desde_anterior = datetime(anio - 1, 1, 1)
-    hasta_anterior = hasta_actual.replace(year=anio - 1)
+    hasta_anterior = _mismo_dia_anio_anterior(hasta_actual)
     total_anterior = _contar_en_rango(db, desde_anterior, hasta_anterior)
 
     variacion_pct = None

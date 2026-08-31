@@ -1,4 +1,5 @@
 import logging
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -9,6 +10,7 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models
@@ -104,32 +106,46 @@ def autenticar_contra_monitor(username: str, password: str) -> Optional[str]:
 
 
 def buscar_usuario_por_identificador(identificador: str, db: Session) -> Optional[models.Usuario]:
-    """El campo de login acepta tanto el username como el correo."""
+    """El campo de login acepta tanto el username como el correo.
+    Se compara el email con func.lower() (igualdad exacta insensible a
+    mayusculas), no con ilike(): ilike trata "%" y "_" del identificador
+    como comodines, asi que un identificador como "%" matcheaba la primera
+    cuenta con email no nulo en vez de no matchear ninguna."""
     return (
         db.query(models.Usuario)
         .filter(
-            (models.Usuario.username == identificador) | (models.Usuario.email.ilike(identificador))
+            (models.Usuario.username == identificador)
+            | (func.lower(models.Usuario.email) == identificador.strip().lower())
         )
         .first()
     )
 
 
-def autenticar_usuario(identificador: str, password: str, db: Session) -> Optional[models.Usuario]:
+def autenticar_usuario(
+    identificador: str, password: str, db: Session
+) -> tuple[Optional[models.Usuario], Optional[str]]:
     """Intenta primero contra el monitor (AD + su propio fallback). Si el monitor
     deniega (por ejemplo, una cuenta creada solo aca que AD no conoce), se revisa
-    tambien el password_hash local antes de rechazar."""
+    tambien el password_hash local antes de rechazar.
+
+    Devuelve (usuario, infra_token): el infra_token que ya devolvio el
+    monitor en este mismo intento se reusa para el login, en vez de que el
+    caller vuelva a golpear el servicio externo por segunda vez con las
+    mismas credenciales (double-login contra AD, con el consumo doble de
+    cupo de intentos que eso implica si el monitor aplica lockout)."""
 
     usuario = buscar_usuario_por_identificador(identificador, db)
     if usuario is None or not usuario.activo:
-        return None
+        return None, None
 
-    if autenticar_contra_monitor(usuario.username, password):
-        return usuario
+    infra_token = autenticar_contra_monitor(usuario.username, password)
+    if infra_token:
+        return usuario, infra_token
 
     if usuario.password_hash and verificar_password(password, usuario.password_hash):
-        return usuario
+        return usuario, None
 
-    return None
+    return None, None
 
 
 def configurar_password_local(
@@ -274,6 +290,13 @@ def obtener_usuario_actual(
         username: Optional[str] = payload.get("sub")
         if username is None:
             raise credentials_exception
+        # Los refresh token (30 dias de vida) llevan "type": "refresh" y solo
+        # deben servir para POST /auth/refresh, nunca para autenticar contra
+        # el resto de la API: si un access token real quedara filtrado seria
+        # una ventana de 60 minutos, pero un refresh token usado aca extiende
+        # esa ventana a 30 dias.
+        if payload.get("type") == "refresh":
+            raise credentials_exception
     except JWTError:
         raise credentials_exception
 
@@ -296,5 +319,5 @@ def verificar_internal_key(x_internal_key: str = Header(default="")) -> None:
     """Autentica llamadas servidor-a-servidor (p.ej. op_prod resolviendo una
     solicitud de registro) con una clave compartida en vez de un JWT de admin,
     porque quien llama no es un usuario humano logueado en la app."""
-    if not settings.internal_api_key or x_internal_key != settings.internal_api_key:
+    if not settings.internal_api_key or not secrets.compare_digest(x_internal_key, settings.internal_api_key):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Clave interna invalida")

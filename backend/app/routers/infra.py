@@ -57,6 +57,10 @@ def _reenviar_post(path: str, headers: dict, json_body: dict) -> dict:
 
 
 _dep_usuario = Depends(auth.obtener_usuario_actual)
+# Acciones destructivas (abortar/cancelar sesiones de produccion) exigen
+# admin, no solo estar logueado: cualquier usuario activo obtiene infra_token
+# al hacer login, sin distincion de rol.
+_dep_admin = Depends(auth.requerir_admin)
 _dep_headers = Depends(_headers)
 
 
@@ -70,7 +74,7 @@ def netezza_data(headers: dict = _dep_headers, usuario_actual: models.Usuario = 
 
 @router.post("/netezza/sesiones/abort-txn")
 def netezza_abort_txn(
-    payload: dict, headers: dict = _dep_headers, usuario_actual: models.Usuario = _dep_usuario
+    payload: dict, headers: dict = _dep_headers, usuario_actual: models.Usuario = _dep_admin
 ):
     return _reenviar_post("/netezza/sesiones/abort-txn", headers, payload)
 
@@ -91,7 +95,7 @@ def monpost_data(
 
 
 @router.post("/monpost/cancel")
-def monpost_cancel(payload: dict, headers: dict = _dep_headers, usuario_actual: models.Usuario = _dep_usuario):
+def monpost_cancel(payload: dict, headers: dict = _dep_headers, usuario_actual: models.Usuario = _dep_admin):
     return _reenviar_post("/monpost/cancel", headers, payload)
 
 
@@ -116,7 +120,7 @@ def postprod_data(
 
 
 @router.post("/postprod/cancel")
-def postprod_cancel(payload: dict, headers: dict = _dep_headers, usuario_actual: models.Usuario = _dep_usuario):
+def postprod_cancel(payload: dict, headers: dict = _dep_headers, usuario_actual: models.Usuario = _dep_admin):
     return _reenviar_post("/postprod/cancel", headers, payload)
 
 
