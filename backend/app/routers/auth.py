@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -7,6 +9,7 @@ from app.database import get_db
 from app.rate_limit import limiter
 from app.services.fcm import enviar_alerta_push
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
@@ -51,7 +54,7 @@ def registrar(request: Request, usuario_in: schemas.UsuarioCreate, db: Session =
 @router.post("/login", response_model=schemas.Token)
 @limiter.limit("10/minute")
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    usuario = auth.autenticar_usuario(form_data.username, form_data.password, db)
+    usuario, infra_token = auth.autenticar_usuario(form_data.username, form_data.password, db)
     if not usuario:
         cuenta = auth.buscar_usuario_por_identificador(form_data.username, db)
         if cuenta is not None and cuenta.activo and not cuenta.password_hash:
@@ -69,9 +72,10 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
 
     access_token = auth.crear_access_token(data={"sub": usuario.username})
     refresh_token = auth.crear_refresh_token(usuario.username)
-    # Token del monitor OP (Netezza/Postgres): mismo AD, se pide aparte para no
-    # atar el login de la app a que el modulo de infraestructura este disponible.
-    infra_token = auth.autenticar_contra_monitor(form_data.username, form_data.password)
+    # infra_token ya viene del mismo intento contra el monitor que valido la
+    # password (ver auth.autenticar_usuario): si el usuario se autentico por
+    # el fallback local (password_hash propio, sin pasar por el monitor),
+    # infra_token queda en None -no hay sesion de monitor equivalente.
     return schemas.Token(access_token=access_token, refresh_token=refresh_token, infra_token=infra_token)
 
 
@@ -227,7 +231,8 @@ def probar_alerta(
             cuerpo="Si escuchaste esto, la alerta critica esta funcionando.",
             critica=True,
         )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"No se pudo enviar el push: {exc}")
+    except Exception:
+        logger.exception("Fallo al enviar push de prueba a usuario %s", usuario_actual.username)
+        raise HTTPException(status_code=502, detail="No se pudo enviar el push de prueba")
 
     return {"ok": True, "message_id": message_id}

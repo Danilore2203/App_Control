@@ -1,4 +1,5 @@
 import json
+import threading
 
 import firebase_admin
 from firebase_admin import credentials, messaging
@@ -6,16 +7,25 @@ from firebase_admin import credentials, messaging
 from app.config import settings
 
 _firebase_app = None
+_firebase_lock = threading.Lock()
 
 
 def inicializar_firebase():
     global _firebase_app
+    # enviar_alerta_push/enviar_resumen_push se llaman tanto desde el hilo
+    # del poller (asyncio.to_thread) como desde requests HTTP normales, cada
+    # uno en su propio hilo: sin lock, dos hilos podian entrar juntos con
+    # _firebase_app todavia en None (ventana real solo en frio, antes del
+    # primer envio) y el segundo firebase_admin.initialize_app(cred) tiraba
+    # ValueError("The default Firebase app already exists").
     if _firebase_app is None:
-        if settings.firebase_credentials_json:
-            cred = credentials.Certificate(json.loads(settings.firebase_credentials_json))
-        else:
-            cred = credentials.Certificate(settings.firebase_credentials_path)
-        _firebase_app = firebase_admin.initialize_app(cred)
+        with _firebase_lock:
+            if _firebase_app is None:
+                if settings.firebase_credentials_json:
+                    cred = credentials.Certificate(json.loads(settings.firebase_credentials_json))
+                else:
+                    cred = credentials.Certificate(settings.firebase_credentials_path)
+                _firebase_app = firebase_admin.initialize_app(cred)
     return _firebase_app
 
 

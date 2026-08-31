@@ -2,6 +2,7 @@ import re
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
@@ -46,8 +47,15 @@ def aprobar_solicitud(
     solicitud = db.get(models.SolicitudAccesoGoogle, solicitud_id)
     if solicitud is None:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    if solicitud.estado != "pendiente":
+        # Sin este chequeo, dos aprobaciones casi simultaneas (doble click, o
+        # dos admins) podian pasar juntas el "usuario is None" antes de que
+        # la primera hiciera commit, e intentar crear dos Usuario para el
+        # mismo email (no tiene unique=True), arriesgando una fila duplicada
+        # o un IntegrityError en el username generado.
+        raise HTTPException(status_code=400, detail="La solicitud ya fue procesada")
 
-    usuario = db.query(models.Usuario).filter(models.Usuario.email.ilike(solicitud.email)).first()
+    usuario = db.query(models.Usuario).filter(func.lower(models.Usuario.email) == solicitud.email.strip().lower()).first()
     if usuario is None:
         usuario = models.Usuario(
             username=_generar_username(solicitud.email, db),
