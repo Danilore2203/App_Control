@@ -1,103 +1,132 @@
-# App de Controles
+# Centinela DWH (App de Controles)
 
-Sistema de monitoreo de controles con alertas tipo alarma en el celular (Android + iOS),
-compuesto por una API (FastAPI + MySQL) y una app movil (Flutter) que se comunican via Firebase
-Cloud Messaging (FCM) para las notificaciones push.
+Monitoreo de los procesos y tablas del DWH con alarmas tipo despertador en el
+celular (Android + iOS). API en FastAPI + PostgreSQL, app en Flutter, y
+Firebase Cloud Messaging (FCM) para las notificaciones push.
+
+## Cómo fluyen los datos
+
+```
+OP_PROD (red Nuevatel) ──MySQL c137 (como siempre)
+        │
+        └──HTTPS 443──► POST /internal/catalogos ──► PostgreSQL de App_Control
+                            │                                  │
+                            ├─► ciclo del poller (alarmas, bitácora)
+                            └─► FCM "catalogos_actualizados" ──► la app refresca
+```
+
+1. **OP_PROD** corre su snapshot cada 5 min y actualiza sus catálogos en MySQL
+   *en el lugar* (una fila por proceso y día, id estable; cada cambio de
+   estado queda como evento en `dataops_catalogo_cambios`).
+2. Al terminar, **empuja a esta API solo lo que cambió** en ese ciclo
+   (`backend/modules/dataops_monitor/push_app_control.py` en OP_PROD). Si no
+   hubo cambios no manda nada; si falla la red, el próximo ciclo manda el día
+   completo. La red de Nuevatel solo deja salir HTTPS, por eso no se escribe
+   directo en la base.
+3. La API aplica el envío (upsert por id, idempotente), corre un ciclo del
+   poller y avisa a los celulares con un mensaje FCM silencioso.
+4. La app **no sondea**: refresca cuando llega ese aviso y al volver a primer
+   plano. El servicio de Guardia revisa cada 5 min como respaldo.
+
+No existe réplica de tablas ni sondeo cada minuto: antes eso agotó la cuota
+de consultas del plan gratuito de Supabase.
 
 ## Estructura
 
 ```
-backend/   API REST en FastAPI, conecta a tu MySQL existente
+backend/   API REST (FastAPI + SQLAlchemy), desplegada en Railway
 mobile/    App Flutter (Android + iOS)
 ```
 
 ## 1. Backend (API)
 
-### Instalacion
+### Instalación
 
 ```
 cd backend
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
+uv venv .venv --python 3.12        # o: python -m venv .venv
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt pytest
 copy .env.example .env
 ```
 
-Editar `.env` con:
-- `DATABASE_URL`: cadena de conexion a tu MySQL (`mysql+pymysql://usuario:password@host:3306/tu_bd`)
-- `JWT_SECRET`: un secreto largo y aleatorio (para firmar los tokens de sesion)
-- `INGEST_API_KEY`: otro secreto, lo va a usar el script/proceso que reporta el resultado de cada control
-- `FIREBASE_CREDENTIALS_PATH`: ruta al JSON de la cuenta de servicio de Firebase (ver paso 2)
+Variables de `.env` (en Railway van como variables del servicio):
 
-Los modelos de `Control`/`Alerta` en `app/models.py` son un punto de partida generico
-(nombre, proceso, estado, resultado, fecha). Cuando tengas a mano el esquema real de tu
-tabla de controles, los ajustamos para que coincida.
+- `DATABASE_URL`: PostgreSQL, p.ej. `postgresql+psycopg://usuario:password@host:5432/defaultdb?sslmode=require`
+  (plan gratuito de Aiven; cualquier Postgres sirve, el código no usa nada
+  propio de un proveedor).
+- `JWT_SECRET`: secreto largo y aleatorio para firmar los tokens de sesión.
+- `INTERNAL_API_KEY`: clave compartida con OP_PROD (allá es
+  `OP_APP_CONTROL_INTERNAL_KEY`) para `/internal/*`.
+- `FIREBASE_CREDENTIALS_PATH` o `FIREBASE_CREDENTIALS_JSON`: cuenta de servicio de Firebase.
+- `MONITOR_AUTH_URL`: URL del monitor web de OP_PROD (login AD y pantalla de Infraestructura).
+- `GOOGLE_OAUTH_CLIENT_ID`: Web client id de Firebase para el login con Google.
+- `CRITICAL_ALERTS_ENABLED`: `true` solo cuando Apple apruebe el entitlement Critical Alerts.
 
-### Correr en desarrollo
+### Correr y probar
 
 ```
-uvicorn app.main:app --reload
+.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-La API queda en `http://localhost:8000`, con documentacion interactiva en `http://localhost:8000/docs`.
-
-Al arrancar crea automaticamente las tablas que falten en tu base (`usuarios`, `controles`, `alertas`).
-Para produccion conviene pasar a migraciones con Alembic mas adelante, pero para arrancar esto alcanza.
+La API queda en `http://localhost:8000` (documentación en `/docs`). Al
+arrancar crea las tablas que falten y agrega las columnas nuevas
+(idempotente). Las pruebas corren contra SQLite en memoria, no necesitan base.
 
 ### Endpoints principales
 
-- `POST /auth/register`, `POST /auth/login` — cuentas de usuario de la app
-- `POST /auth/me/fcm-token` — la app guarda ahi su token de notificaciones push
-- `GET /controles` — lista de controles (requiere sesion)
-- `POST /controles` — ingesta de resultados (requiere header `X-API-Key`, la usa el script que corre tus controles). Si el `estado` viene en `"fallo"`, dispara la alerta push automaticamente.
-- `GET /alertas` — historial de alertas del usuario logueado
+- `POST /internal/catalogos` — recibe los cambios de OP_PROD (header `X-Internal-Key`). Contrato en `app/schemas.py` (`CatalogoPushIn`) y lógica en `app/services/catalogos.py`.
+- `POST /internal/solicitudes-registro/{id}/aprobar` — OP_PROD aprueba una cuenta local.
+- `POST /auth/login`, `/auth/google`, `/auth/register` — sesión (AD vía OP_PROD, Google, o cuenta local aprobada por un admin).
+- `POST /auth/me/fcm-token` — la app guarda su token de push.
+- `GET /controles` — estado actual de cada proceso; `GET /controles/historial-fallas?dias=7` — procesos que fallaron por día.
+- `GET /alertas` — historial de alertas; `/bitacora` — bitácora de errores; `/infra/*` — proxy al monitor de OP_PROD.
+
+### El ciclo del poller (`app/services/ciclo.py`)
+
+Se dispara al recibir cada push y, como respaldo, cada 5 min. En orden:
+alarmas de procesos core según el estado actual, resumen horario de no-core,
+bitácora a partir de los eventos de cambio (cursor `ultimo_cambio_revisado`),
+resincronización de episodios abiertos y purga diaria (catálogos 60 días,
+eventos y alertas 180). Un advisory lock de Postgres evita que dos instancias
+corran a la vez durante un redeploy.
 
 ## 2. Firebase (notificaciones push)
 
-1. Crear un proyecto en https://console.firebase.google.com
-2. Agregar una app Android (con el `applicationId` que uses en `mobile/android`) y descargar `google-services.json`
-3. Agregar una app iOS (con el bundle id que uses en `mobile/ios`) y descargar `GoogleService-Info.plist`
-4. En **Project Settings > Service Accounts**, generar una clave privada nueva: ese JSON es el que va en `FIREBASE_CREDENTIALS_PATH` del backend
-5. En **Project Settings > Cloud Messaging > Apple app configuration**, subir la **APNs Authentication Key** de tu cuenta de Apple Developer (necesaria para que FCM pueda reenviar a iPhone)
-6. Para el modo "alarma real" en iOS (que suene aunque el iPhone este en silencio), hay que solicitarle a Apple el entitlement **Critical Alerts** desde tu cuenta de Apple Developer. Mientras se aprueba (o si no se aprueba), las alertas usan **Time-Sensitive**, que ya rompe el modo Enfoque/No Molestar sin permiso especial. Una vez aprobado, poner `CRITICAL_ALERTS_ENABLED=true` en el `.env` del backend.
+1. Proyecto en https://console.firebase.google.com con una app Android
+   (`com.nuevatel.controles`) y una iOS (mismo bundle id); descargar
+   `google-services.json` y `GoogleService-Info.plist`.
+2. **Project Settings > Service Accounts**: generar una clave privada; ese JSON
+   va en `FIREBASE_CREDENTIALS_PATH` / `FIREBASE_CREDENTIALS_JSON`.
+3. **Cloud Messaging > Apple app configuration**: subir la APNs Authentication Key.
+4. Para alarma real en iOS con el celular en silencio hace falta el entitlement
+   **Critical Alerts** de Apple; mientras tanto se usa Time-Sensitive.
 
-## 3. App movil (Flutter)
+Mensajes que manda el backend (todos de solo datos, la app arma la notificación):
+`alerta_critica` (alarma de pantalla completa si la guardia está armada),
+`alerta_normal`, `resumen_no_core` y `catalogos_actualizados` (silencioso, solo
+refresca pantallas).
 
-Requiere tener instalado el **Flutter SDK** (no esta instalado en esta maquina todavia):
-https://docs.flutter.dev/get-started/install
+## 3. App móvil (Flutter)
 
 ```
 cd mobile
-flutter create .          # genera las carpetas android/ e ios/ sin tocar lib/ ni pubspec.yaml
 flutter pub get
-```
-
-Despues:
-- Copiar `google-services.json` a `mobile/android/app/`
-- Copiar `GoogleService-Info.plist` a `mobile/ios/Runner/`
-- Agregar un archivo de sonido para la alarma:
-  - Android: `mobile/android/app/src/main/res/raw/alarma.mp3` (o `.ogg`)
-  - iOS: `mobile/ios/Runner/alarma.caf`
-- Ajustar `mobile/lib/config.dart` con la URL real de la API (en emulador Android, `10.0.2.2` apunta al localhost de la PC; en un celular fisico hay que usar la IP/dominio real del servidor)
-
-Correr la app:
-
-```
 flutter run
 ```
 
-### Que hace ya el esqueleto de la app
+- `google-services.json` en `mobile/android/app/`, `GoogleService-Info.plist` en `mobile/ios/Runner/`.
+- `mobile/lib/config.dart` tiene la URL de la API.
+- `flutter analyze` y `flutter test` corren en CI; no hace falta tener el SDK en la máquina para tocar el backend.
 
-- Login / registro contra la API
-- Dashboard con la lista de controles y su estado
-- Pantalla de alertas (historial)
-- Registro automatico del token de FCM contra el backend al iniciar sesion
-- Canal de notificacion Android `alarmas_criticas` con sonido e importancia maxima
-- Notificaciones locales en primer plano con `fullScreenIntent` (Android) e `interruptionLevel: timeSensitive` (iOS)
+## 4. Lado OP_PROD
 
-## Proximos pasos sugeridos
+En `backend/config/secrets.local.env` de OP_PROD (máquina con
+`OP_SCHEDULER_PRIMARY=1`, que es la que corre el snapshot):
 
-1. Pasarme el esquema real de tu tabla de controles para ajustar `app/models.py`
-2. Definir como tu sistema actual (el que corre los controles) va a llamar a `POST /controles` — cron, script, trigger de MySQL, etc.
-3. Instalar Flutter SDK para poder correr y ajustar la app en un emulador/celular
-4. Crear el proyecto de Firebase y cargar las credenciales
+```
+OP_APP_CONTROL_URL=https://<dominio-de-railway>
+OP_APP_CONTROL_INTERNAL_KEY=<la misma INTERNAL_API_KEY>
+```
+
+Sin esas dos variables el snapshot funciona igual pero no empuja nada.
