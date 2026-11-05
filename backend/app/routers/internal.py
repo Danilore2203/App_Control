@@ -3,9 +3,23 @@ from sqlalchemy.orm import Session
 
 from app import auth, schemas
 from app.database import get_db
+from app.services.catalogos import aplicar_push_catalogos
 from app.services.solicitudes import aprobar_solicitud_registro
 
 router = APIRouter(prefix="/internal", tags=["internal"])
+
+
+@router.post(
+    "/catalogos",
+    response_model=schemas.CatalogoPushOut,
+    dependencies=[Depends(auth.verificar_internal_key)],
+)
+def recibir_catalogos(push: schemas.CatalogoPushIn, db: Session = Depends(get_db)):
+    """Punto de entrada de los catalogos: OP_PROD lo llama al final de cada
+    snapshot con lo que cambio en ese ciclo (ver app/services/catalogos.py
+    para el contrato). Reemplaza a la replica MySQL -> Supabase y al sondeo
+    del poller sobre los catalogos."""
+    return aplicar_push_catalogos(db, push)
 
 
 @router.post(

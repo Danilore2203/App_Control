@@ -50,6 +50,16 @@ def _migrar_columnas_legacy():
             conn.execute(text("ALTER TABLE episodios_alerta DROP COLUMN IF EXISTS push_ok"))
         except Exception:
             logger.exception("No se pudo correr la migracion de push_ok (revisar a mano si persiste)")
+    # estado_ts llego despues de que los catalogos ya existian en la base;
+    # create_all() no agrega columnas a tablas existentes. Idempotente.
+    for tabla in ("dataops_catalogo_procesos", "dataops_catalogo_tablas"):
+        with engine.begin() as conn:
+            try:
+                conn.execute(
+                    text(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS estado_ts TIMESTAMP WITHOUT TIME ZONE")
+                )
+            except Exception:
+                logger.exception("No se pudo agregar estado_ts a %s (revisar a mano si persiste)", tabla)
 
 
 _migrar_columnas_legacy()
