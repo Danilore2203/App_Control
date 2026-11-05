@@ -34,9 +34,19 @@ de consultas del plan gratuito de Supabase.
 ## Estructura
 
 ```
-backend/   API REST (FastAPI + SQLAlchemy), desplegada en Railway
+backend/   API REST (FastAPI + SQLAlchemy)
 mobile/    App Flutter (Android + iOS)
 ```
+
+### Hosting gratuito
+
+El backend se despliega en **Render** (plan Free) con el `render.yaml` de la
+raíz: *New → Blueprint → este repo*, y Render pide los valores de las
+variables. El plan Free duerme el servicio tras 15 min sin tráfico, así que
+hay que mantenerlo despierto con un ping externo gratuito (p.ej.
+[cron-job.org](https://cron-job.org): `GET https://<servicio>.onrender.com/health`
+cada 5 min). La base es PostgreSQL en **Aiven** (plan Free). Queda
+`backend/railway.json` por si se vuelve a Railway.
 
 ## 1. Backend (API)
 
