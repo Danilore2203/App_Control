@@ -232,6 +232,27 @@ def _aplicar_relaciones(db: Session, seccion: schemas.RelacionesIn, completo: bo
     return schemas.CatalogoSeccionOut(insertadas=insertadas, actualizadas=actualizadas, eliminadas=eliminadas, omitidas=0)
 
 
+def filtro_bitacora_local_automatica():
+    """Episodios de proceso/tabla que la app genero por su cuenta (poller
+    viejo): sin origen_id, sin autor humano y que no son incoherencias.
+    Desde que la bitacora se replica de MySQL son duplicados."""
+    from sqlalchemy import and_, or_
+
+    return and_(
+        models.BitacoraError.origen_id.is_(None),
+        models.BitacoraError.creado_por_id.is_(None),
+        or_(models.BitacoraError.estado.is_(None), models.BitacoraError.estado != "INCOHERENCIA"),
+    )
+
+
+def eliminar_bitacora_local_automatica(db: Session) -> int:
+    """Borra los episodios locales automaticos (ver filtro). Las entradas
+    manuales y las incoherencias se conservan."""
+    borradas = db.query(models.BitacoraError).filter(filtro_bitacora_local_automatica()).delete(synchronize_session=False)
+    db.commit()
+    return borradas
+
+
 def estado_catalogos(db: Session, hoy) -> schemas.CatalogoEstadoOut:
     """Resumen de lo recibido, para verificar contra MySQL de OP_PROD sin
     entrar a la base ni a los logs del hosting."""
@@ -257,9 +278,19 @@ def estado_catalogos(db: Session, hoy) -> schemas.CatalogoEstadoOut:
         .filter(models.BitacoraError.origen_id.isnot(None))
         .one()
     )
+    locales = db.query(func.count(models.BitacoraError.id)).filter(models.BitacoraError.origen_id.is_(None)).scalar()
+    locales_auto = db.query(func.count(models.BitacoraError.id)).filter(filtro_bitacora_local_automatica()).scalar()
+    hoy_mysql = (
+        db.query(func.count(models.BitacoraError.id))
+        .filter(models.BitacoraError.origen_id.isnot(None), func.date(models.BitacoraError.fecha_hora) == hoy)
+        .scalar()
+    )
     return schemas.CatalogoEstadoOut(
         bitacora_total=bitacora_total,
         bitacora_ultima_actualizacion=bitacora_ultima,
+        bitacora_locales=locales or 0,
+        bitacora_locales_automaticas=locales_auto or 0,
+        bitacora_hoy_mysql=hoy_mysql or 0,
         relaciones_total=db.query(func.count(models.ProcesoTabla.id)).scalar() or 0,
         usuarios_total=db.query(func.count(models.Usuario.id)).scalar() or 0,
         fecha=hoy,

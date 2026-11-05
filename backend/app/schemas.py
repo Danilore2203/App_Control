@@ -436,5 +436,11 @@ class CatalogoEstadoOut(BaseModel):
     episodios_alerta_abiertos: int
     bitacora_total: int = 0  # filas replicadas de MySQL (con origen_id)
     bitacora_ultima_actualizacion: Optional[datetime] = None
+    # Filas propias de la app (origen_id NULL): manuales e incoherencias...
+    bitacora_locales: int = 0
+    # ...y las que genero el poller viejo por su cuenta (episodios de
+    # proceso/tabla sin autor): duplican a las de MySQL y deben borrarse.
+    bitacora_locales_automaticas: int = 0
+    bitacora_hoy_mysql: int = 0  # filas de hoy con origen_id
     relaciones_total: int = 0
     usuarios_total: int = 0
