@@ -305,12 +305,54 @@ class UsuariosIn(BaseModel):
     administradores: list[str] = Field(default_factory=list)  # usernames
 
 
+class BitacoraImportIn(BaseModel):
+    """Fila de c137.bitacora_errores (la bitacora del monitor web). Se
+    identifica por `origen_id` (el id de MySQL); el id local es propio."""
+
+    origen_id: int
+    fecha_hora: datetime
+    fecha_actualizacion: Optional[datetime] = None
+    nombre: str
+    tecnologia: str
+    descripcion: str = ""
+    estado: Optional[str] = None
+    estado_fin: Optional[str] = None
+    tipo: Optional[str] = None
+
+
+class BitacoraIn(BaseModel):
+    upsert: list[BitacoraImportIn] = Field(default_factory=list)
+
+
+class RelacionImportIn(BaseModel):
+    """Fila de c137.dataops_proceso_tabla (que tabla alimenta cada proceso),
+    usada por el chequeo de fallo silencioso. Mismo id que MySQL."""
+
+    id: int
+    proceso_nombre: str
+    tabla_nombre: str
+    tipo_relacion: str = "ALIMENTA"
+    orden: int = 0
+    activo: bool = True
+    creado_en: Optional[datetime] = None
+    auto_inferida: bool = False
+
+
+class RelacionesIn(BaseModel):
+    upsert: list[RelacionImportIn] = Field(default_factory=list)
+
+
 class CatalogoPushIn(BaseModel):
     """Un ciclo de snapshot de OP_PROD: lo que cambio en los catalogos de
     `fecha` y los eventos de cambio de estado. Con `completo=True` el envio
-    trae todas las filas del dia y lo que no venga se elimina. `usuarios`
-    viene solo en los envios completos: la tabla usuarios de MySQL (cuentas
-    del monitor web) para que las mismas cuentas entren a la app."""
+    trae todas las filas del dia y lo que no venga se elimina.
+
+    Secciones opcionales (MySQL es la fuente, la app solo refleja):
+    - `usuarios`: tabla usuarios + administradores (solo en envios completos).
+    - `bitacora`: filas nuevas o modificadas de bitacora_errores desde el
+      envio anterior (en los completos, los ultimos dias). Upsert por origen_id.
+    - `relaciones`: dataops_proceso_tabla completa (solo en envios completos);
+      lo que no venga se elimina."""
 
     fecha: date
     completo: bool = False
@@ -318,6 +360,8 @@ class CatalogoPushIn(BaseModel):
     tablas: CatalogoTablasIn = Field(default_factory=CatalogoTablasIn)
     eventos: list[CatalogoEventoIn] = Field(default_factory=list)
     usuarios: Optional[UsuariosIn] = None
+    bitacora: Optional[BitacoraIn] = None
+    relaciones: Optional[RelacionesIn] = None
 
 
 class CatalogoSeccionOut(BaseModel):
@@ -339,11 +383,18 @@ class UsuariosOut(BaseModel):
     omitidos: list[str]  # usernames cuyo email ya pertenece a otro usuario local
 
 
+class BitacoraOut(BaseModel):
+    insertadas: int
+    actualizadas: int
+
+
 class CatalogoPushOut(BaseModel):
     procesos: CatalogoSeccionOut
     tablas: CatalogoSeccionOut
     eventos: CatalogoEventosOut
     usuarios: Optional[UsuariosOut] = None
+    bitacora: Optional[BitacoraOut] = None
+    relaciones: Optional[CatalogoSeccionOut] = None
 
 
 class AdministradorIn(BaseModel):
@@ -368,3 +419,7 @@ class CatalogoEstadoOut(BaseModel):
     ultimo_evento_id: int
     ultimo_cambio_revisado: int  # cursor del poller sobre los eventos
     episodios_alerta_abiertos: int
+    bitacora_total: int = 0  # filas replicadas de MySQL (con origen_id)
+    bitacora_ultima_actualizacion: Optional[datetime] = None
+    relaciones_total: int = 0
+    usuarios_total: int = 0

@@ -15,8 +15,6 @@ logger = logging.getLogger(__name__)
 
 COLORES_ALERTABLES = {"red", "orange"}
 BOLIVIA_TZ = timezone(timedelta(hours=-4))
-TECNOLOGIAS_PROCESO_VALIDAS = {"AIRFLOW", "DATASTAGE", "PENTAHO"}
-TECNOLOGIAS_TABLA_VALIDAS = {"QA_CONTROL", "PG_PROD"}
 ESTADOS_TABLA_NORMALIZADOS = {
     "ERROR": "ERROR",
     "VACIA": "VACIA",
@@ -79,195 +77,17 @@ def _episodio_abierto(db: Session, nombre: str, tecnologia: str):
     )
 
 
-def _actualizar_bitacora_proceso(db: Session, proceso: models.Control) -> None:
-    """Un episodio de error = una fila mientras el proceso siga sin volver a
-    verde (se relee cada 5 min), sin cortar por dia calendario. Si el color de
-    origen no es ninguno de los conocidos (red/orange/green), se registra
-    igual como ADVERTENCIA en vez de perderse en silencio.
-
-    Termina con un flush (no un commit: eso lo sigue haciendo el que llama,
-    una sola vez para todo el lote) para que, si el MISMO proceso aparece
-    mas de una vez en el mismo lote de "nuevos" (p.ej. reintenta rapido y
-    cambia de estado mas de una vez entre un ciclo del poller y el otro),
-    la proxima llamada a _episodio_abierto() vea el episodio recien
-    creado/cerrado en vez de una foto vieja de la base. SessionLocal usa
-    autoflush=False, asi que sin esto una fila nueva quedaba sin guardar en
-    la base hasta el commit final del lote entero, y la siguiente vez que
-    este mismo proceso volvia a cambiar de estado en el mismo lote, la
-    consulta no la encontraba -perdiendo o duplicando el episodio segun el
-    orden exacto de los cambios."""
-
-    color = color_efectivo(proceso)
-    conocido = color in ("red", "green")
-    episodio_abierto = _episodio_abierto(db, proceso.nombre, proceso.fuente)
-
-    if not conocido:
-        if episodio_abierto:
-            episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
-        else:
-            db.add(
-                models.BitacoraError(
-                    fecha_hora=proceso.snapshot_ts,
-                    fecha_actualizacion=proceso.snapshot_ts,
-                    nombre=proceso.nombre,
-                    tecnologia=proceso.fuente,
-                    estado="ADVERTENCIA",
-                    estado_fin="ERROR",
-                    tipo="PROCESO",
-                    descripcion=(
-                        f"Proceso en estado ADVERTENCIA a las {proceso.snapshot_ts.strftime('%H:%M')} "
-                        f"(estado original: {proceso.estado}, color: {proceso.color})."
-                    ),
-                )
-            )
-        db.flush()
-        return
-
-    if color == "red":
-        estado_actual = estado_efectivo(proceso)
-        frase_estado = "demorado" if estado_actual == "DEMORADO" else f"en {estado_actual.lower()}"
-        if episodio_abierto:
-            # El proceso puede pasar de ERROR a DEMORADO (o al reves) sin
-            # cerrarse el episodio - sin esto el estado quedaba pegado al
-            # que tenia quiando se abrio la fila, aunque el origen ya haya
-            # cambiado (por eso demorados reales se seguian viendo como error).
-            if episodio_abierto.estado != estado_actual:
-                _agregar_a_descripcion(
-                    episodio_abierto,
-                    f" Cambió a {frase_estado} a las {proceso.snapshot_ts.strftime('%H:%M')}.",
-                )
-                episodio_abierto.estado = estado_actual
-            episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
-        else:
-            db.add(
-                models.BitacoraError(
-                    fecha_hora=proceso.snapshot_ts,
-                    fecha_actualizacion=proceso.snapshot_ts,
-                    nombre=proceso.nombre,
-                    tecnologia=proceso.fuente,
-                    estado=estado_actual,
-                    estado_fin="ERROR",
-                    tipo="PROCESO",
-                    descripcion=f"Proceso {frase_estado} a las {proceso.snapshot_ts.strftime('%H:%M')}.",
-                )
-            )
-    elif episodio_abierto:
-        if recuperado_confirmado(proceso):
-            episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
-            episodio_abierto.estado_fin = "OK"
-            duracion = _formatear_duracion(episodio_abierto.fecha_hora, proceso.snapshot_ts)
-            _agregar_a_descripcion(
-                episodio_abierto,
-                f" Solucionado - Estado OK a las {proceso.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}.",
-            )
-        else:
-            # Color dice verde pero el estado crudo no confirma "OK": no
-            # llegaron bien los datos de origen. No se cierra a ciegas -mejor
-            # de mas que perder de vista un fallo que en realidad sigue.
-            episodio_abierto.fecha_actualizacion = proceso.snapshot_ts
-            if episodio_abierto.estado != "INCONSISTENTE":
-                _agregar_a_descripcion(
-                    episodio_abierto,
-                    f" Color verde pero estado '{proceso.estado}' no confirma OK a las "
-                    f"{proceso.snapshot_ts.strftime('%H:%M')}: no se cierra por inconsistencia de datos.",
-                )
-                episodio_abierto.estado = "INCONSISTENTE"
-
-    db.flush()
-
-
-def _actualizar_bitacora_tabla(db: Session, tabla: models.Tabla) -> None:
-    """Misma logica de episodio que _actualizar_bitacora_proceso, mirando
-    dataops_catalogo_tablas en vez de dataops_catalogo_procesos. El color se
-    normaliza (strip + lower) por la misma razon que en procesos.py: el
-    origen no siempre lo escribe con la misma capitalizacion.
-
-    Mismo flush final que _actualizar_bitacora_proceso, y por la misma
-    razon: sin el, dos filas nuevas de la MISMA tabla en el mismo lote no se
-    ven entre si (SessionLocal usa autoflush=False)."""
-
-    color_tabla = (tabla.color or "").strip().lower()
-    estado_tabla = (tabla.estado or "").strip().upper()
-    if estado_tabla in ESTADOS_TABLA_TRANSITORIOS:
-        return
-
-    conocido = color_tabla in ("red", "green")
-    episodio_abierto = _episodio_abierto(db, tabla.nombre, tabla.fuente)
-
-    if not conocido:
-        if episodio_abierto:
-            episodio_abierto.fecha_actualizacion = tabla.snapshot_ts
-        else:
-            db.add(
-                models.BitacoraError(
-                    fecha_hora=tabla.snapshot_ts,
-                    fecha_actualizacion=tabla.snapshot_ts,
-                    nombre=tabla.nombre,
-                    tecnologia=tabla.fuente,
-                    estado="ADVERTENCIA",
-                    estado_fin="ERROR",
-                    tipo="TABLA",
-                    descripcion=(
-                        f"Tabla en estado ADVERTENCIA a las {tabla.snapshot_ts.strftime('%H:%M')} "
-                        f"(estado original: {tabla.estado}, color: {tabla.color})."
-                    ),
-                )
-            )
-        db.flush()
-        return
-
-    if color_tabla == "red":
-        estado_normalizado = ESTADOS_TABLA_NORMALIZADOS.get(tabla.estado.upper().strip(), "ERROR")
-        if episodio_abierto:
-            if episodio_abierto.estado != estado_normalizado:
-                _agregar_a_descripcion(
-                    episodio_abierto,
-                    f" Cambió a {estado_normalizado.lower()} a las {tabla.snapshot_ts.strftime('%H:%M')}.",
-                )
-                episodio_abierto.estado = estado_normalizado
-            episodio_abierto.fecha_actualizacion = tabla.snapshot_ts
-        else:
-            db.add(
-                models.BitacoraError(
-                    fecha_hora=tabla.snapshot_ts,
-                    fecha_actualizacion=tabla.snapshot_ts,
-                    nombre=tabla.nombre,
-                    tecnologia=tabla.fuente,
-                    estado=estado_normalizado,
-                    estado_fin="ERROR",
-                    tipo="TABLA",
-                    descripcion=(
-                        f"Tabla en {estado_normalizado.lower()} a las {tabla.snapshot_ts.strftime('%H:%M')} "
-                        f"(cantidad={tabla.cantidad})."
-                    ),
-                )
-            )
-    elif episodio_abierto:
-        episodio_abierto.fecha_actualizacion = tabla.snapshot_ts
-        episodio_abierto.estado_fin = "OK"
-        duracion = _formatear_duracion(episodio_abierto.fecha_hora, tabla.snapshot_ts)
-        _agregar_a_descripcion(
-            episodio_abierto,
-            f" Solucionado - Estado OK a las {tabla.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}.",
-        )
-
-    db.flush()
-
-
 def resincronizar_episodios_abiertos(db: Session) -> int:
-    """Los `_actualizar_bitacora_*` de arriba solo corrigen un episodio
-    cuando llega una fila NUEVA para ese proceso/tabla (id > cursor del
-    poller). Si el origen tarda en generar una fila nueva para ese proceso
-    puntual, el episodio se queda con el estado congelado desde que se abrio
-    -por eso un proceso que paso de ERROR a DEMORADO podia seguir viendose
-    como ERROR indefinidamente. Esto revisa TODOS los episodios abiertos
-    contra el ultimo snapshot conocido (sin importar el cursor) y los
-    corrige. Se corre en cada ciclo del poller, ademas de (no en vez de) la
-    logica normal basada en filas nuevas."""
+    """Revisa los episodios abiertos PROPIOS de la app (origen_id NULL:
+    incoherencias proceso/tabla y entradas manuales) contra el estado actual
+    del catalogo y los cierra o corrige. Los episodios de procesos y tablas
+    ya no los genera la app: vienen replicados de la bitacora de MySQL
+    (origen_id con valor), donde OP_PROD los abre y cierra; tocarlos aca
+    seria tener dos escritores con criterios distintos."""
 
     abiertos = (
         db.query(models.BitacoraError)
-        .filter(models.BitacoraError.estado_fin == "ERROR")
+        .filter(models.BitacoraError.estado_fin == "ERROR", models.BitacoraError.origen_id.is_(None))
         .all()
     )
     corregidos = 0
@@ -618,17 +438,16 @@ def _vista_evento(db: Session, evento: models.CatalogoCambio):
 
 
 def revisar_cambios_nuevos(db: Session) -> int:
-    """Vuelca a la bitacora los eventos de cambio de estado que OP_PROD
-    registro en dataops_catalogo_cambios (id mayor al ultimo revisado): un
-    evento por cada vez que un proceso o tabla cambio de estado, con la hora
-    real del cambio. Reemplaza al recorrido anterior de los catalogos por
-    id, que dejo de tener sentido cuando OP_PROD paso a actualizar las
-    filas en el lugar (un cambio de estado ya no crea una fila nueva).
+    """Recorre los eventos de cambio de estado que OP_PROD registro en
+    dataops_catalogo_cambios (id mayor al ultimo revisado) y, por cada uno,
+    revisa la incoherencia proceso/tabla (fallo silencioso: proceso core en
+    OK con su tabla vacia/en error, o tabla en rojo cuyo proceso dice OK).
 
-    Ya NO envia alarmas aca (ver `revisar_alarmas_activas`): la alarma se
-    decide mirando el estado ACTUAL de cada proceso en cada ciclo, no los
-    eventos, para que un proceso que ya estaba en ERROR antes de que
-    existiera el poller o el token FCM no se quede sin alarma."""
+    No escribe episodios de proceso/tabla en la bitacora: esos vienen
+    replicados de MySQL en cada push (ver services/catalogos.py), con el
+    mismo criterio que ve el monitor web. Tampoco envia alarmas (ver
+    `revisar_alarmas_activas`): la alarma se decide mirando el estado ACTUAL
+    de cada proceso en cada ciclo, no los eventos."""
 
     estado_poller = _obtener_o_crear_estado(db)
 
@@ -647,13 +466,9 @@ def revisar_cambios_nuevos(db: Session) -> int:
         try:
             vista = _vista_evento(db, evento)
             if tipo == "PROCESO":
-                if vista.fuente in TECNOLOGIAS_PROCESO_VALIDAS:
-                    _actualizar_bitacora_proceso(db, vista)
                 if vista.id is not None and color_efectivo(vista) == "green" and es_core(vista):
                     _revisar_incoherencia_desde_proceso(db, vista)
             else:
-                if vista.fuente in TECNOLOGIAS_TABLA_VALIDAS:
-                    _actualizar_bitacora_tabla(db, vista)
                 # Si el evento es de un dia anterior (carga de ayer que llego
                 # tarde), el proceso de hoy ni siquiera corrio: no es un fallo
                 # silencioso nuevo. Tampoco si la tabla sigue "EN PROCESO".
@@ -677,7 +492,7 @@ def revisar_cambios_nuevos(db: Session) -> int:
             # lleva el trabajo ya bueno de los anteriores.
             db.rollback()
             logger.exception(
-                "Fallo volcando a bitacora el evento %s (%s %s); se salta y se sigue", evento_id, tipo, nombre
+                "Fallo revisando el evento %s (%s %s); se salta y se sigue", evento_id, tipo, nombre
             )
             estado_poller.ultimo_cambio_revisado = evento_id
             db.commit()
@@ -967,10 +782,13 @@ def notificar_actualizacion_app(db: Session) -> int:
 # Retencion en la base de App_Control. Nadie mas purga estas tablas: antes lo
 # hacia la replica de OP_PROD (catalogos: solo el dia de hoy). Los catalogos
 # se guardan 60 dias como en MySQL (alcanza para el grafico de fallas y para
-# resincronizar episodios); eventos y alertas, 180.
+# resincronizar episodios); eventos y alertas, 180; la bitacora, 12 meses
+# (el resumen anual compara contra el mismo periodo del anio anterior).
+# MySQL conserva la bitacora completa: si hace falta mas, se vuelve a cargar.
 RETENCION_CATALOGOS_DIAS = 60
 RETENCION_EVENTOS_DIAS = 180
 RETENCION_ALERTAS_DIAS = 180
+RETENCION_BITACORA_DIAS = 365
 _ultima_purga: date | None = None
 
 
@@ -988,10 +806,14 @@ def purgar_historial(db: Session, hoy: date | None = None) -> dict:
     limite_catalogos = hoy - timedelta(days=RETENCION_CATALOGOS_DIAS)
     limite_eventos = datetime.combine(hoy - timedelta(days=RETENCION_EVENTOS_DIAS), time.min)
     limite_alertas = datetime.combine(hoy - timedelta(days=RETENCION_ALERTAS_DIAS), time.min)
+    limite_bitacora = datetime.combine(hoy - timedelta(days=RETENCION_BITACORA_DIAS), time.min)
     referenciados = select(models.Alerta.control_id)
 
     try:
         borrado = {
+            "bitacora": db.query(models.BitacoraError)
+            .filter(models.BitacoraError.fecha_hora < limite_bitacora)
+            .delete(synchronize_session=False),
             "alertas": db.query(models.Alerta)
             .filter(models.Alerta.creado_en < limite_alertas)
             .delete(synchronize_session=False),

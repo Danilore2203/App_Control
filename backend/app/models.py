@@ -205,6 +205,11 @@ class BitacoraError(Base):
     __tablename__ = "bitacora_errores"
 
     id = Column(Integer, primary_key=True, index=True)
+    # id de la misma fila en c137.bitacora_errores de MySQL (la bitacora del
+    # monitor web, que OP_PROD replica aca en cada push). NULL = entrada
+    # propia de la app: manual, o incoherencia proceso/tabla detectada por el
+    # poller. Es la clave del upsert, por eso es unica.
+    origen_id = Column(Integer, nullable=True, unique=True, index=True)
     fecha_hora = Column(DateTime, nullable=False, default=datetime.utcnow)
     fecha_actualizacion = Column(DateTime, nullable=True)
     nombre = Column(String(255), nullable=False)

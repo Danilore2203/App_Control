@@ -173,6 +173,61 @@ def _aplicar_usuarios(db: Session, seccion: schemas.UsuariosIn) -> schemas.Usuar
     )
 
 
+def _aplicar_bitacora(db: Session, seccion: schemas.BitacoraIn) -> schemas.BitacoraOut:
+    """Refleja filas de c137.bitacora_errores por origen_id. Las entradas
+    propias de la app (origen_id NULL: manuales e incoherencias) no se tocan."""
+    if not seccion.upsert:
+        return schemas.BitacoraOut(insertadas=0, actualizadas=0)
+    ids = [f.origen_id for f in seccion.upsert]
+    existentes = {
+        e.origen_id: e
+        for e in db.query(models.BitacoraError).filter(models.BitacoraError.origen_id.in_(ids)).all()
+    }
+    insertadas = actualizadas = 0
+    for fila in seccion.upsert:
+        datos = fila.model_dump()
+        obj = existentes.get(fila.origen_id)
+        if obj is None:
+            obj = models.BitacoraError(**datos)
+            db.add(obj)
+            existentes[fila.origen_id] = obj
+            insertadas += 1
+        else:
+            for k, v in datos.items():
+                setattr(obj, k, v)
+            actualizadas += 1
+    db.flush()
+    return schemas.BitacoraOut(insertadas=insertadas, actualizadas=actualizadas)
+
+
+def _aplicar_relaciones(db: Session, seccion: schemas.RelacionesIn, completo: bool) -> schemas.CatalogoSeccionOut:
+    """dataops_proceso_tabla por id de MySQL. En un envio completo, lo que
+    no venga se elimina (la tabla es chica, ~cientos de filas)."""
+    ids = [f.id for f in seccion.upsert]
+    existentes = {}
+    if ids:
+        existentes = {r.id: r for r in db.query(models.ProcesoTabla).filter(models.ProcesoTabla.id.in_(ids)).all()}
+    insertadas = actualizadas = 0
+    for fila in seccion.upsert:
+        datos = fila.model_dump()
+        obj = existentes.get(fila.id)
+        if obj is None:
+            db.add(models.ProcesoTabla(**datos))
+            insertadas += 1
+        else:
+            for k, v in datos.items():
+                setattr(obj, k, v)
+            actualizadas += 1
+    db.flush()
+    eliminadas = 0
+    if completo:
+        consulta = db.query(models.ProcesoTabla)
+        if ids:
+            consulta = consulta.filter(models.ProcesoTabla.id.notin_(ids))
+        eliminadas = consulta.delete(synchronize_session=False)
+    return schemas.CatalogoSeccionOut(insertadas=insertadas, actualizadas=actualizadas, eliminadas=eliminadas, omitidas=0)
+
+
 def estado_catalogos(db: Session, hoy) -> schemas.CatalogoEstadoOut:
     """Resumen de lo recibido, para verificar contra MySQL de OP_PROD sin
     entrar a la base ni a los logs del hosting."""
@@ -190,7 +245,19 @@ def estado_catalogos(db: Session, hoy) -> schemas.CatalogoEstadoOut:
     )
     cursor = db.query(models.PollerState).first()
     abiertos = db.query(func.count(models.EpisodioAlerta.id)).filter(models.EpisodioAlerta.abierto.is_(True)).scalar()
+    bitacora_total, bitacora_ultima = (
+        db.query(
+            func.count(models.BitacoraError.id),
+            func.max(func.coalesce(models.BitacoraError.fecha_actualizacion, models.BitacoraError.fecha_hora)),
+        )
+        .filter(models.BitacoraError.origen_id.isnot(None))
+        .one()
+    )
     return schemas.CatalogoEstadoOut(
+        bitacora_total=bitacora_total,
+        bitacora_ultima_actualizacion=bitacora_ultima,
+        relaciones_total=db.query(func.count(models.ProcesoTabla.id)).scalar() or 0,
+        usuarios_total=db.query(func.count(models.Usuario.id)).scalar() or 0,
         fecha=hoy,
         procesos_hoy=procesos,
         tablas_hoy=tablas,
@@ -212,12 +279,18 @@ def aplicar_push_catalogos(db: Session, push: schemas.CatalogoPushIn) -> schemas
         tablas = _aplicar_catalogo(db, models.Tabla, push.tablas, push.fecha, push.completo)
         eventos = _aplicar_eventos(db, push.eventos)
         usuarios = _aplicar_usuarios(db, push.usuarios) if push.usuarios is not None else None
+        bitacora = _aplicar_bitacora(db, push.bitacora) if push.bitacora is not None else None
+        relaciones = (
+            _aplicar_relaciones(db, push.relaciones, push.completo) if push.relaciones is not None else None
+        )
         db.commit()
     except Exception:
         db.rollback()
         raise
 
-    resultado = schemas.CatalogoPushOut(procesos=procesos, tablas=tablas, eventos=eventos, usuarios=usuarios)
+    resultado = schemas.CatalogoPushOut(
+        procesos=procesos, tablas=tablas, eventos=eventos, usuarios=usuarios, bitacora=bitacora, relaciones=relaciones
+    )
     logger.info(
         "Catalogos recibidos de OP_PROD (fecha %s, completo=%s): %s",
         push.fecha, push.completo, resultado.model_dump(),
