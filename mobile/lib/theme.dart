@@ -118,6 +118,10 @@ class AppTextStyles {
 /// Tema de la app: sigue automaticamente el modo claro/oscuro del celular
 /// (ThemeMode.system en main.dart), usando siempre los colores de marca.
 class AppTheme {
+  /// Las pruebas lo ponen en false: google_fonts intenta descargar Inter y
+  /// en el entorno de test no hay red ni assets, y falla el test entero.
+  static bool usarGoogleFonts = true;
+
   static ThemeData get light => _build(Brightness.light);
 
   static ThemeData get dark => _build(Brightness.dark);
@@ -207,7 +211,7 @@ class AppTheme {
     // monoespaciada (AppTextStyles.tech) queda solo para datos tecnicos
     // chicos, no para la jerarquia de las pantallas.
     final baseTextTheme = ThemeData(brightness: brightness, useMaterial3: true).textTheme;
-    final textTheme = GoogleFonts.interTextTheme(baseTextTheme).apply(
+    final textTheme = (usarGoogleFonts ? GoogleFonts.interTextTheme(baseTextTheme) : baseTextTheme).apply(
       bodyColor: colorScheme.onSurface,
       displayColor: colorScheme.onSurface,
     );
