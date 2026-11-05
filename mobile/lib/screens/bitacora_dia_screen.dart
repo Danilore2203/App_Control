@@ -320,12 +320,12 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
           const SizedBox(height: 14),
           // Indicadores del dia (.bt-kpi-tile): tocar uno filtra la lista.
           GridView.count(
-            crossAxisCount: 3,
+            crossAxisCount: 2,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             mainAxisSpacing: 8,
             crossAxisSpacing: 8,
-            childAspectRatio: 1.45,
+            childAspectRatio: 2.35,
             children: [
               IndicadorTile(
                 etiqueta: "Total",
