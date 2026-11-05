@@ -120,6 +120,7 @@ class ControlOut(BaseModel):
     version: Optional[str] = None
     snapshot_fecha: date
     snapshot_ts: datetime
+    estado_ts: Optional[datetime] = None  # hora real del ultimo cambio de estado
 
 
 class HistorialFallaOut(BaseModel):

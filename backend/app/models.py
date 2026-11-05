@@ -223,8 +223,17 @@ class PollerState(Base):
     __tablename__ = "poller_state"
 
     id = Column(Integer, primary_key=True)
+    # Cursores viejos sobre los catalogos (id > ultimo). Ya no se usan: desde
+    # que OP_PROD actualiza las filas en el lugar, un cambio de estado no
+    # genera una fila nueva en el catalogo, sino un evento en
+    # dataops_catalogo_cambios. Se conservan solo para no alterar la tabla.
     ultimo_id_revisado = Column(Integer, nullable=False, default=0)
     ultimo_id_tablas_revisado = Column(Integer, nullable=False, default=0)
+    # Cursor actual: ultimo id de dataops_catalogo_cambios ya volcado a la
+    # bitacora. Columna aparte (y no reusar ultimo_id_revisado) porque ese
+    # guarda un id de catalogo, que es un numero mucho mayor: reutilizarlo
+    # habria saltado todos los eventos.
+    ultimo_cambio_revisado = Column(Integer, nullable=False, default=0)
 
 
 class EpisodioAlerta(Base):
