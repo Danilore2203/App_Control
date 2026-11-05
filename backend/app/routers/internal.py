@@ -46,7 +46,8 @@ def designar_administrador_interno(datos: schemas.AdministradorIn, db: Session =
     """Deja a un correo como administrador, creando el usuario si no existe.
     Es la unica forma de tener el PRIMER administrador en una base nueva
     (todos los demas accesos los aprueba un administrador). Idempotente."""
-    return designar_administrador(db, datos.email, datos.nombre)
+    usuario = designar_administrador(db, datos.email, datos.nombre)
+    return schemas.UsuarioOut.model_validate(usuario, from_attributes=True).model_copy(update={"es_admin": True})
 
 
 @router.get(

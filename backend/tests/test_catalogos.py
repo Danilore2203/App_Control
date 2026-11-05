@@ -123,6 +123,7 @@ def test_estado_resume_lo_recibido_del_dia(db):
     assert estado_catalogos(db, HOY).model_dump() == {
         "fecha": HOY, "procesos_hoy": 0, "tablas_hoy": 0, "eventos_hoy": 0, "ultimo_snapshot_ts": None,
         "ultimo_evento_ts": None, "ultimo_evento_id": 0, "ultimo_cambio_revisado": 0, "episodios_alerta_abiertos": 0,
+        "bitacora_total": 0, "bitacora_ultima_actualizacion": None, "relaciones_total": 0, "usuarios_total": 0,
     }
 
     ts_tarde = datetime(2026, 11, 5, 9, 30)
@@ -137,6 +138,99 @@ def test_estado_resume_lo_recibido_del_dia(db):
     assert (estado.procesos_hoy, estado.tablas_hoy, estado.eventos_hoy) == (2, 1, 1)
     assert estado.ultimo_snapshot_ts == ts_tarde
     assert (estado.ultimo_evento_ts, estado.ultimo_evento_id) == (ts_tarde, 100)
+
+
+def usuario_mysql(username, email=None, admin=False, **extra):
+    return schemas.UsuarioImportIn(username=username, email=email, **extra)
+
+
+def test_usuarios_de_mysql_se_replican_por_username_sin_tocar_lo_local(db):
+    # Usuario creado aca a mano (primer admin) que no existe en MySQL.
+    db.add(models.Usuario(username="danilorejasperalta", email="danilorejasperalta@gmail.com",
+                          email_google="danilorejasperalta@gmail.com", activo=True))
+    db.commit()
+    local = db.query(models.Usuario).one()
+    db.add(models.Administrador(usuario_id=local.id))
+    db.commit()
+
+    envio = push(completo=True)
+    envio.usuarios = schemas.UsuariosIn(
+        upsert=[
+            usuario_mysql("darejas", "Danilo.Rejas@nuevatel.com", nombre="Danilo Rejas", password_hash="$2b$12$x"),
+            usuario_mysql("jusmartinez", "Justo.Martinez@nuevatel.com", activo=True),
+            usuario_mysql("jebutron", "Jean.Butron@nuevatel.com", password_hash=""),
+        ],
+        administradores=["darejas", "noexiste"],
+    )
+    out = aplicar_push_catalogos(db, envio)
+
+    assert out.usuarios.model_dump() == {"insertados": 3, "actualizados": 0, "administradores_nuevos": 1, "omitidos": []}
+    darejas = db.query(models.Usuario).filter_by(username="darejas").one()
+    assert (darejas.password_hash, darejas.email) == ("$2b$12$x", "Danilo.Rejas@nuevatel.com")
+    assert db.query(models.Usuario).filter_by(username="jebutron").one().password_hash is None
+    admins = {a.usuario_id for a in db.query(models.Administrador).all()}
+    assert admins == {local.id, darejas.id}  # el admin local sigue, se suma el de MySQL
+
+    # Segundo envio: actualiza en el lugar, conserva el email_google vinculado aca.
+    darejas.email_google = "danilo.personal@gmail.com"
+    db.commit()
+    out2 = aplicar_push_catalogos(db, envio)
+    assert (out2.usuarios.insertados, out2.usuarios.actualizados, out2.usuarios.administradores_nuevos) == (0, 3, 0)
+    assert db.query(models.Usuario).filter_by(username="darejas").one().email_google == "danilo.personal@gmail.com"
+    assert db.query(models.Usuario).count() == 4
+
+
+def test_usuario_cuyo_email_ya_es_de_otro_se_omite(db):
+    db.add(models.Usuario(username="local", email="danix.rp.22@gmail.com", activo=True))
+    db.commit()
+    envio = push()
+    envio.usuarios = schemas.UsuariosIn(upsert=[usuario_mysql("danix.rp.22", "danix.rp.22@gmail.com")])
+
+    out = aplicar_push_catalogos(db, envio)
+
+    assert out.usuarios.omitidos == ["danix.rp.22"]
+    assert db.query(models.Usuario).count() == 1
+
+
+def test_bitacora_de_mysql_se_replica_por_origen_id_sin_tocar_lo_propio(db):
+    db.add(models.BitacoraError(fecha_hora=TS, nombre="manual", tecnologia="AIRFLOW", descripcion="a mano",
+                                estado="ERROR", estado_fin="ERROR", tipo="PROCESO"))
+    db.commit()
+    fila = schemas.BitacoraImportIn(
+        origen_id=500, fecha_hora=TS, nombre="carga_a", tecnologia="AIRFLOW", descripcion="Proceso en error",
+        estado="ERROR", estado_fin="ERROR", tipo="PROCESO",
+    )
+    envio = push()
+    envio.bitacora = schemas.BitacoraIn(upsert=[fila])
+    out = aplicar_push_catalogos(db, envio)
+    assert out.bitacora.model_dump() == {"insertadas": 1, "actualizadas": 0}
+
+    # Cierre del episodio alla: misma fila (mismo id local), actualizada.
+    id_local = db.query(models.BitacoraError).filter_by(origen_id=500).one().id
+    fila.estado_fin = "OK"
+    fila.fecha_actualizacion = datetime(2026, 11, 5, 9, 3)
+    fila.descripcion = "Proceso en error. Solucionado"
+    out2 = aplicar_push_catalogos(db, envio)
+    assert out2.bitacora.model_dump() == {"insertadas": 0, "actualizadas": 1}
+    cerrada = db.query(models.BitacoraError).filter_by(origen_id=500).one()
+    assert (cerrada.id, cerrada.estado_fin, cerrada.fecha_actualizacion) == (id_local, "OK", datetime(2026, 11, 5, 9, 3))
+    assert db.query(models.BitacoraError).filter_by(nombre="manual").one().estado_fin == "ERROR"
+    assert db.query(models.BitacoraError).count() == 2
+
+
+def test_relaciones_proceso_tabla_completo_reemplaza(db):
+    db.add(models.ProcesoTabla(id=99, proceso_nombre="viejo", tabla_nombre="t", tipo_relacion="ALIMENTA"))
+    db.commit()
+    envio = push(completo=True)
+    envio.relaciones = schemas.RelacionesIn(upsert=[
+        schemas.RelacionImportIn(id=1, proceso_nombre="carga_a", tabla_nombre="t_a"),
+        schemas.RelacionImportIn(id=2, proceso_nombre="carga_b", tabla_nombre="t_b", activo=False),
+    ])
+
+    out = aplicar_push_catalogos(db, envio)
+
+    assert out.relaciones.model_dump() == {"insertadas": 2, "actualizadas": 0, "eliminadas": 1, "omitidas": 0}
+    assert sorted(r.id for r in db.query(models.ProcesoTabla).all()) == [1, 2]
 
 
 def test_un_fallo_no_deja_el_envio_a_medias(db):

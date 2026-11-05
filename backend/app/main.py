@@ -50,6 +50,7 @@ def _migrar_columnas_legacy():
         ("dataops_catalogo_procesos", "estado_ts TIMESTAMP WITHOUT TIME ZONE"),
         ("dataops_catalogo_tablas", "estado_ts TIMESTAMP WITHOUT TIME ZONE"),
         ("poller_state", "ultimo_cambio_revisado INTEGER NOT NULL DEFAULT 0"),
+        ("bitacora_errores", "origen_id INTEGER"),
     )
     for tabla, columna in columnas_nuevas:
         with engine.begin() as conn:
@@ -57,6 +58,13 @@ def _migrar_columnas_legacy():
                 conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {columna}"))
             except Exception:
                 logger.exception("No se pudo agregar la columna %s a %s (revisar a mano si persiste)", columna, tabla)
+    with engine.begin() as conn:
+        try:
+            conn.execute(
+                text("CREATE UNIQUE INDEX IF NOT EXISTS ix_bitacora_errores_origen_id ON bitacora_errores (origen_id)")
+            )
+        except Exception:
+            logger.exception("No se pudo crear el indice de origen_id (revisar a mano si persiste)")
 
 
 _migrar_columnas_legacy()
