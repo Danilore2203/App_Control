@@ -80,7 +80,7 @@ class TarjetaSesionPostgres extends StatelessWidget {
           if ((sesion.waitEvent ?? "").trim().isNotEmpty) ...[
             const SizedBox(height: 4),
             Text("Esperando: ${sesion.waitEvent}",
-                style: TextStyle(
+                style: const TextStyle(
                     color: StatusColors.advertencia,
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600)),
@@ -89,7 +89,7 @@ class TarjetaSesionPostgres extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               "Bloqueada por PID: ${sesion.pidsQueLaBloquean.join(', ')}",
-              style: TextStyle(
+              style: const TextStyle(
                   color: StatusColors.critico,
                   fontSize: 11.5,
                   fontWeight: FontWeight.w600),

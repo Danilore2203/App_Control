@@ -134,7 +134,7 @@ class _BitacoraMesScreenState extends State<BitacoraMesScreen> {
                         color: StatusColors.critico.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Icon(Icons.bar_chart, color: StatusColors.critico),
+                      child: const Icon(Icons.bar_chart, color: StatusColors.critico),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
@@ -156,7 +156,7 @@ class _BitacoraMesScreenState extends State<BitacoraMesScreen> {
                                 TextSpan(
                                   text:
                                       "${entradas.length} error${entradas.length == 1 ? '' : 'es'} ",
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                       color: StatusColors.critico,
                                       fontWeight: FontWeight.bold),
                                 ),

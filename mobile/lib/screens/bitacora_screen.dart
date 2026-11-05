@@ -305,7 +305,7 @@ class _TarjetaMes extends StatelessWidget {
           child: Stack(
             children: [
               if (tieneError && !esHoy)
-                Positioned(
+                const Positioned(
                   top: 8,
                   right: 8,
                   child: Text("!",

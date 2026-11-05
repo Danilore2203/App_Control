@@ -216,7 +216,7 @@ Future<void> _mostrarNotificacionNormal({
     id,
     titulo,
     cuerpo,
-    NotificationDetails(
+    const NotificationDetails(
       android: AndroidNotificationDetails(
         _idCanalNormal,
         "Alertas",
@@ -224,7 +224,7 @@ Future<void> _mostrarNotificacionNormal({
         importance: Importance.high,
         priority: Priority.high,
       ),
-      iOS: const DarwinNotificationDetails(interruptionLevel: InterruptionLevel.active),
+      iOS: DarwinNotificationDetails(interruptionLevel: InterruptionLevel.active),
     ),
     payload: jsonEncode({
       "titulo": titulo,

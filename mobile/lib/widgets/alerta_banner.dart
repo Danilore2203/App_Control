@@ -33,8 +33,9 @@ class _AlertaBannerState extends State<AlertaBanner> {
 
   @override
   Widget build(BuildContext context) {
-    if (_cerrado || widget.cantidadCriticos == 0)
+    if (_cerrado || widget.cantidadCriticos == 0) {
       return const SizedBox.shrink();
+    }
 
     final texto = widget.fuentesAfectadas.isEmpty
         ? "${widget.cantidadCriticos} proceso(s) en estado crítico"
