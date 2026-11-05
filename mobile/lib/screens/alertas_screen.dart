@@ -1,10 +1,9 @@
-import "dart:async";
-
 import "package:flutter/material.dart";
 
 import "../models/alerta.dart";
 import "../models/bitacora_error.dart";
 import "../models/control.dart";
+import "../services/actualizaciones_service.dart";
 import "../services/api_service.dart";
 import "../theme.dart";
 import "../widgets/detalle_proceso_sheet.dart";
@@ -64,7 +63,7 @@ class _AlertasScreenState extends State<AlertasScreen> {
   late Future<List<Control>> _controlesFuture;
   List<BitacoraError> _incoherenciasHoy = [];
   bool _bannerDescartado = false;
-  Timer? _autoRefresco;
+  late final SuscripcionActualizaciones _actualizaciones;
 
   @override
   void initState() {
@@ -72,9 +71,9 @@ class _AlertasScreenState extends State<AlertasScreen> {
     _alertasFuture = _apiService.obtenerAlertas();
     _controlesFuture = _apiService.obtenerControles();
     _cargarIncoherencias();
-    // Sin esto la pantalla quedaba con la foto de cuando se abrio hasta que
-    // el usuario la cerraba y volvia a entrar (mismo bug que en Controles).
-    _autoRefresco = Timer.periodic(const Duration(seconds: 60), (_) {
+    // Refresca cuando el backend avisa que hay datos nuevos (y al volver a
+    // primer plano), en vez de preguntar cada 60 s aunque no haya nada.
+    _actualizaciones = SuscripcionActualizaciones(() {
       if (!mounted) return;
       setState(() {
         _alertasFuture = _apiService.obtenerAlertas();
@@ -86,7 +85,7 @@ class _AlertasScreenState extends State<AlertasScreen> {
 
   @override
   void dispose() {
-    _autoRefresco?.cancel();
+    _actualizaciones.cancelar();
     super.dispose();
   }
 

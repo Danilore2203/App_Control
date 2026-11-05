@@ -7,6 +7,7 @@ import "package:flutter_local_notifications/flutter_local_notifications.dart";
 import "package:permission_handler/permission_handler.dart";
 
 import "../theme.dart";
+import "actualizaciones_service.dart";
 import "api_service.dart";
 import "guardia_foreground_task.dart";
 import "guardia_service.dart";
@@ -260,8 +261,15 @@ Future<void> mostrarRecordatorioDeError({
 /// mostro como alarma de pantalla completa (para que el llamador decida si
 /// conviene ademas navegar directo a esa pantalla). Funciona igual la llame
 /// el listener de primer plano o el manejador de segundo plano.
+/// Aviso silencioso del backend de que los catalogos cambiaron (ver
+/// enviar_actualizacion_push en fcm.py). No se muestra nada: solo se avisa a
+/// las pantallas abiertas para que refresquen (ver actualizaciones_service).
+const String _tipoCatalogosActualizados = "catalogos_actualizados";
+
 Future<bool> _mostrarNotificacionDeAlarma(RemoteMessage message) async {
   final tipo = message.data["tipo"];
+
+  if (tipo == _tipoCatalogosActualizados) return false;
 
   if (tipo == "resumen_no_core") {
     // Agregado de procesos NO core: nunca es alarma de pantalla completa,
@@ -327,6 +335,9 @@ Future<bool> _mostrarNotificacionDeAlarma(RemoteMessage message) async {
 /// antes de poder mostrar nada, o `.show()` no hace nada.
 @pragma("vm:entry-point")
 Future<void> manejarMensajeEnSegundoPlano(RemoteMessage message) async {
+  // En segundo plano no hay pantalla que refrescar: cuando la app vuelva a
+  // primer plano, cada pantalla se refresca sola (SuscripcionActualizaciones).
+  if (message.data["tipo"] == _tipoCatalogosActualizados) return;
   try {
     await Firebase.initializeApp();
     await _plugin.initialize(
@@ -395,6 +406,10 @@ class NotificationService {
     FirebaseMessaging.onBackgroundMessage(manejarMensajeEnSegundoPlano);
 
     FirebaseMessaging.onMessage.listen((message) async {
+      if (message.data["tipo"] == _tipoCatalogosActualizados) {
+        ActualizacionesCatalogo.instancia.notificar();
+        return;
+      }
       try {
         final esAlarma = await _mostrarNotificacionDeAlarma(message);
         if (esAlarma) {
