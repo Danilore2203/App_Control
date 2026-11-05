@@ -109,6 +109,70 @@ def _aplicar_eventos(db: Session, eventos: list[schemas.CatalogoEventoIn]) -> sc
     return schemas.CatalogoEventosOut(insertados=insertados, ignorados=len(eventos) - insertados)
 
 
+def _aplicar_usuarios(db: Session, seccion: schemas.UsuariosIn) -> schemas.UsuariosOut:
+    """Replica la tabla usuarios de MySQL (cuentas del monitor web) por
+    username. MySQL manda en todo menos en lo que es propio de la app: si un
+    usuario ya tiene email_google vinculado aca y alla viene vacio, se
+    conserva. Nunca borra usuarios ni quita administradores (los admins de
+    MySQL se suman a los que ya haya aca, p.ej. el primero creado por
+    /internal/administradores)."""
+    from sqlalchemy import func
+
+    por_username = {u.username.lower(): u for u in db.query(models.Usuario).all()}
+    insertados = actualizados = 0
+    omitidos: list[str] = []
+
+    for fila in seccion.upsert:
+        clave = fila.username.strip().lower()
+        existente = por_username.get(clave)
+        # Un email ya usado por OTRO usuario local (p.ej. creado a mano con el
+        # correo de Google) rompe el login por email: se salta la fila y se
+        # informa, en vez de dejar dos cuentas respondiendo al mismo correo.
+        emails = [e.lower() for e in (fila.email, fila.email_google) if e]
+        if emails:
+            duenio = (
+                db.query(models.Usuario)
+                .filter(
+                    (func.lower(models.Usuario.email).in_(emails)) | (func.lower(models.Usuario.email_google).in_(emails))
+                )
+                .first()
+            )
+            if duenio is not None and (existente is None or duenio.id != existente.id):
+                omitidos.append(fila.username)
+                continue
+
+        if existente is None:
+            existente = models.Usuario(username=fila.username.strip())
+            db.add(existente)
+            por_username[clave] = existente
+            insertados += 1
+        else:
+            actualizados += 1
+        existente.nombre = fila.nombre
+        existente.email = fila.email
+        existente.password_hash = fila.password_hash or None
+        existente.activo = fila.activo
+        if fila.fecha_creacion is not None:
+            existente.fecha_creacion = fila.fecha_creacion
+        if fila.email_google:
+            existente.email_google = fila.email_google
+    db.flush()
+
+    nuevos_admin = 0
+    for username in seccion.administradores:
+        usuario = por_username.get(username.strip().lower())
+        if usuario is None:
+            continue
+        ya = db.query(models.Administrador).filter(models.Administrador.usuario_id == usuario.id).first()
+        if ya is None:
+            db.add(models.Administrador(usuario_id=usuario.id))
+            nuevos_admin += 1
+
+    return schemas.UsuariosOut(
+        insertados=insertados, actualizados=actualizados, administradores_nuevos=nuevos_admin, omitidos=omitidos
+    )
+
+
 def estado_catalogos(db: Session, hoy) -> schemas.CatalogoEstadoOut:
     """Resumen de lo recibido, para verificar contra MySQL de OP_PROD sin
     entrar a la base ni a los logs del hosting."""
@@ -147,12 +211,13 @@ def aplicar_push_catalogos(db: Session, push: schemas.CatalogoPushIn) -> schemas
         procesos = _aplicar_catalogo(db, models.Control, push.procesos, push.fecha, push.completo)
         tablas = _aplicar_catalogo(db, models.Tabla, push.tablas, push.fecha, push.completo)
         eventos = _aplicar_eventos(db, push.eventos)
+        usuarios = _aplicar_usuarios(db, push.usuarios) if push.usuarios is not None else None
         db.commit()
     except Exception:
         db.rollback()
         raise
 
-    resultado = schemas.CatalogoPushOut(procesos=procesos, tablas=tablas, eventos=eventos)
+    resultado = schemas.CatalogoPushOut(procesos=procesos, tablas=tablas, eventos=eventos, usuarios=usuarios)
     logger.info(
         "Catalogos recibidos de OP_PROD (fecha %s, completo=%s): %s",
         push.fecha, push.completo, resultado.model_dump(),

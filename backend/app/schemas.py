@@ -286,16 +286,38 @@ class CatalogoTablasIn(BaseModel):
     bajas: list[int] = Field(default_factory=list)
 
 
+class UsuarioImportIn(BaseModel):
+    """Fila de la tabla usuarios de MySQL (compartida con el monitor web).
+    Se identifica por username, no por id: los ids locales los asigna esta
+    base (hay usuarios creados aca que no existen alla)."""
+
+    username: str
+    nombre: Optional[str] = None
+    email: Optional[str] = None
+    email_google: Optional[str] = None
+    password_hash: Optional[str] = None  # bcrypt, el mismo formato que usa la app
+    activo: bool = True
+    fecha_creacion: Optional[datetime] = None
+
+
+class UsuariosIn(BaseModel):
+    upsert: list[UsuarioImportIn] = Field(default_factory=list)
+    administradores: list[str] = Field(default_factory=list)  # usernames
+
+
 class CatalogoPushIn(BaseModel):
     """Un ciclo de snapshot de OP_PROD: lo que cambio en los catalogos de
     `fecha` y los eventos de cambio de estado. Con `completo=True` el envio
-    trae todas las filas del dia y lo que no venga se elimina."""
+    trae todas las filas del dia y lo que no venga se elimina. `usuarios`
+    viene solo en los envios completos: la tabla usuarios de MySQL (cuentas
+    del monitor web) para que las mismas cuentas entren a la app."""
 
     fecha: date
     completo: bool = False
     procesos: CatalogoProcesosIn = Field(default_factory=CatalogoProcesosIn)
     tablas: CatalogoTablasIn = Field(default_factory=CatalogoTablasIn)
     eventos: list[CatalogoEventoIn] = Field(default_factory=list)
+    usuarios: Optional[UsuariosIn] = None
 
 
 class CatalogoSeccionOut(BaseModel):
@@ -310,10 +332,18 @@ class CatalogoEventosOut(BaseModel):
     ignorados: int  # ya existian (reintento del mismo envio)
 
 
+class UsuariosOut(BaseModel):
+    insertados: int
+    actualizados: int
+    administradores_nuevos: int
+    omitidos: list[str]  # usernames cuyo email ya pertenece a otro usuario local
+
+
 class CatalogoPushOut(BaseModel):
     procesos: CatalogoSeccionOut
     tablas: CatalogoSeccionOut
     eventos: CatalogoEventosOut
+    usuarios: Optional[UsuariosOut] = None
 
 
 class AdministradorIn(BaseModel):

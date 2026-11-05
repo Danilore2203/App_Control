@@ -139,6 +139,58 @@ def test_estado_resume_lo_recibido_del_dia(db):
     assert (estado.ultimo_evento_ts, estado.ultimo_evento_id) == (ts_tarde, 100)
 
 
+def usuario_mysql(username, email=None, admin=False, **extra):
+    return schemas.UsuarioImportIn(username=username, email=email, **extra)
+
+
+def test_usuarios_de_mysql_se_replican_por_username_sin_tocar_lo_local(db):
+    # Usuario creado aca a mano (primer admin) que no existe en MySQL.
+    db.add(models.Usuario(username="danilorejasperalta", email="danilorejasperalta@gmail.com",
+                          email_google="danilorejasperalta@gmail.com", activo=True))
+    db.commit()
+    local = db.query(models.Usuario).one()
+    db.add(models.Administrador(usuario_id=local.id))
+    db.commit()
+
+    envio = push(completo=True)
+    envio.usuarios = schemas.UsuariosIn(
+        upsert=[
+            usuario_mysql("darejas", "Danilo.Rejas@nuevatel.com", nombre="Danilo Rejas", password_hash="$2b$12$x"),
+            usuario_mysql("jusmartinez", "Justo.Martinez@nuevatel.com", activo=True),
+            usuario_mysql("jebutron", "Jean.Butron@nuevatel.com", password_hash=""),
+        ],
+        administradores=["darejas", "noexiste"],
+    )
+    out = aplicar_push_catalogos(db, envio)
+
+    assert out.usuarios.model_dump() == {"insertados": 3, "actualizados": 0, "administradores_nuevos": 1, "omitidos": []}
+    darejas = db.query(models.Usuario).filter_by(username="darejas").one()
+    assert (darejas.password_hash, darejas.email) == ("$2b$12$x", "Danilo.Rejas@nuevatel.com")
+    assert db.query(models.Usuario).filter_by(username="jebutron").one().password_hash is None
+    admins = {a.usuario_id for a in db.query(models.Administrador).all()}
+    assert admins == {local.id, darejas.id}  # el admin local sigue, se suma el de MySQL
+
+    # Segundo envio: actualiza en el lugar, conserva el email_google vinculado aca.
+    darejas.email_google = "danilo.personal@gmail.com"
+    db.commit()
+    out2 = aplicar_push_catalogos(db, envio)
+    assert (out2.usuarios.insertados, out2.usuarios.actualizados, out2.usuarios.administradores_nuevos) == (0, 3, 0)
+    assert db.query(models.Usuario).filter_by(username="darejas").one().email_google == "danilo.personal@gmail.com"
+    assert db.query(models.Usuario).count() == 4
+
+
+def test_usuario_cuyo_email_ya_es_de_otro_se_omite(db):
+    db.add(models.Usuario(username="local", email="danix.rp.22@gmail.com", activo=True))
+    db.commit()
+    envio = push()
+    envio.usuarios = schemas.UsuariosIn(upsert=[usuario_mysql("danix.rp.22", "danix.rp.22@gmail.com")])
+
+    out = aplicar_push_catalogos(db, envio)
+
+    assert out.usuarios.omitidos == ["danix.rp.22"]
+    assert db.query(models.Usuario).count() == 1
+
+
 def test_un_fallo_no_deja_el_envio_a_medias(db):
     aplicar_push_catalogos(db, push(completo=True, procesos=[proceso(1, "a")]))
     # Evento con nombre None viola NOT NULL al hacer flush: la transaccion
