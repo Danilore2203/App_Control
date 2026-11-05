@@ -12,6 +12,8 @@ from app.services.catalogos import aplicar_push_catalogos
 
 HOY = date(2026, 11, 5)
 TS = datetime(2026, 11, 5, 8, 0)
+# Contrasena ficticia de las pruebas (no es un secreto real).
+CLAVE_PRUEBA = "Temporal-123"  # gitleaks:allow
 
 
 def push_usuarios(*usuarios):
@@ -54,13 +56,14 @@ def test_admin_asigna_password(db):
     db.add(models.Usuario(id=1, username="ana", email="ana@nuevatel.com", activo=False))
     db.commit()
 
-    out = asignar_password(usuario_id=1, payload=schemas.PasswordAdminIn(password="Temporal-123"), db=db, _admin=None)
+    datos = schemas.PasswordAdminIn(password=CLAVE_PRUEBA)
+    out = asignar_password(usuario_id=1, payload=datos, db=db, _admin=None)
 
     assert out.ok
     ana = db.get(models.Usuario, 1)
-    assert ana.activo and auth.verificar_password("Temporal-123", ana.password_hash)
+    assert ana.activo and auth.verificar_password(CLAVE_PRUEBA, ana.password_hash)
     with pytest.raises(HTTPException):
-        asignar_password(usuario_id=99, payload=schemas.PasswordAdminIn(password="Temporal-123"), db=db, _admin=None)
+        asignar_password(usuario_id=99, payload=datos, db=db, _admin=None)
 
 
 def test_rechazar_solicitud_ya_procesada_falla(db):
