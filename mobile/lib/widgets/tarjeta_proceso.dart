@@ -28,6 +28,11 @@ class TarjetaProceso extends StatelessWidget {
   }
 
   IconData get _icono {
+    if (control.esTabla) {
+      return control.color == "red"
+          ? Icons.table_view_outlined
+          : Icons.table_chart_outlined;
+    }
     if (control.esDemorado) return Icons.schedule;
     switch (control.color) {
       case "red":
@@ -62,10 +67,25 @@ class TarjetaProceso extends StatelessWidget {
     return control.horaFin ?? control.horaLog ?? control.horaProgramada;
   }
 
+  /// Linea de detalle: para procesos "Terminado: 06:12", para tablas la
+  /// cantidad de registros y la capa (lo que trae el catalogo de tablas).
+  String _detalle() {
+    if (control.esTabla) {
+      final partes = <String>[];
+      final registros = control.cantidadFormateada;
+      if (registros != null) partes.add("$registros reg.");
+      final layer = control.layer?.trim();
+      if (layer != null && layer.isNotEmpty) partes.add(layer);
+      return partes.isEmpty ? "Tabla" : partes.join("  ·  ");
+    }
+    final hora = _hora;
+    return hora != null ? "$_etiquetaHora: $hora" : _etiquetaHora;
+  }
+
   @override
   Widget build(BuildContext context) {
     final color = _color(context);
-    final hora = _hora;
+    final detalle = _detalle();
     final esCritico = control.color == "red";
 
     return Container(
@@ -132,10 +152,7 @@ class TarjetaProceso extends StatelessWidget {
                                   .colorScheme
                                   .onSurfaceVariant),
                           children: [
-                            TextSpan(
-                                text: hora != null
-                                    ? "$_etiquetaHora: $hora  ·  "
-                                    : "$_etiquetaHora  ·  "),
+                            TextSpan(text: "$detalle  ·  "),
                             TextSpan(
                               text: control.estado,
                               style: TextStyle(

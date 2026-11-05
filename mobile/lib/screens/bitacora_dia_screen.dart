@@ -6,8 +6,8 @@ import "../services/api_service.dart";
 import "../theme.dart";
 import "../utils/meses_es.dart";
 import "../widgets/estado_vacio.dart";
-import "../widgets/fondo_app.dart";
 import "../widgets/formulario_entrada_bitacora.dart";
+import "../widgets/pestanas.dart";
 import "../widgets/titulo_seccion.dart";
 
 IconData iconoTecnologia(String tecnologia) {
@@ -304,7 +304,7 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
         children: [
           // Pestanas General / Procesos / Tablas, como el monitor web.
-          _Pestanas(
+          Pestanas(
             seleccionada: _vista,
             opciones: [
               ("GENERAL", "General", _entradas.length),
@@ -481,71 +481,6 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
                 padding: const EdgeInsets.only(bottom: 14),
                 child: _TarjetaFalloDia(entrada: entrada),
               ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Selector General / Procesos / Tablas (.do-tabs del monitor web): una
-/// barra vidrio con la opcion activa en lima.
-class _Pestanas extends StatelessWidget {
-  const _Pestanas({
-    required this.seleccionada,
-    required this.opciones,
-    required this.onCambiar,
-  });
-
-  final String seleccionada;
-  final List<(String, String, int)> opciones;
-  final ValueChanged<String> onCambiar;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    return Vidrio(
-      padding: const EdgeInsets.all(4),
-      radius: 14,
-      blur: 8,
-      child: Row(
-        children: [
-          for (final (clave, etiqueta, cantidad) in opciones)
-            Expanded(
-              child: Material(
-                color: clave == seleccionada ? colorScheme.primary : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(10),
-                  onTap: () => onCambiar(clave),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          etiqueta,
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: clave == seleccionada ? colorScheme.onPrimary : colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          "$cantidad",
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: clave == seleccionada
-                                ? colorScheme.onPrimary.withValues(alpha: 0.7)
-                                : colorScheme.outline,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
     );

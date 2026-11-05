@@ -128,6 +128,27 @@ class ControlOut(BaseModel):
     estado_ts: Optional[datetime] = None  # hora real del ultimo cambio de estado
 
 
+class TablaOut(BaseModel):
+    """Estado actual de una tabla (dataops_catalogo_tablas), para la vista
+    Tablas del monitor. Mismo formato que ControlOut donde coincide para
+    que la app pueda listarlas con las mismas tarjetas."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    nombre: str
+    fuente: str
+    estado: str
+    color: str
+    cantidad: int
+    layer: Optional[str] = None
+    hora_programada: Optional[str] = None
+    ultima_fecha: Optional[str] = None
+    snapshot_fecha: date
+    snapshot_ts: datetime
+    estado_ts: Optional[datetime] = None
+
+
 class HistorialFallaOut(BaseModel):
     fecha: date
     fallas: int
