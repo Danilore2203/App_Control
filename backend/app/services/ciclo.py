@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from app.database import PollerSessionLocal, engine
 from app.services.poller import (
+    notificar_actualizacion_app,
     purgar_historial,
     resincronizar_episodios_abiertos,
     revisar_alarmas_activas,
@@ -29,7 +30,7 @@ _POLLER_LOCK_KEY = 892375100
 _lock_proceso = threading.Lock()
 
 
-def _correr_ciclo(db) -> None:
+def _correr_ciclo(db, avisar_app: bool) -> None:
     # Va primero y no depende de las otras: decide la alarma mirando el
     # estado ACTUAL de cada proceso, no el cursor de bitacora, para que una
     # falla en las otras nunca le cueste una alarma real al usuario.
@@ -38,11 +39,18 @@ def _correr_ciclo(db) -> None:
     revisar_cambios_nuevos(db)
     resincronizar_episodios_abiertos(db)
     purgar_historial(db)
+    if avisar_app:
+        # Al final, para que cuando la app vuelva a pedir /controles y la
+        # bitacora ya esten las alarmas y episodios de este push.
+        notificar_actualizacion_app(db)
 
 
-def ejecutar_ciclo() -> bool:
-    """Corre un ciclo completo. Devuelve False si se salto porque otro ciclo
-    ya estaba corriendo (en este proceso o en otra instancia)."""
+def ejecutar_ciclo(avisar_app: bool = False) -> bool:
+    """Corre un ciclo completo. `avisar_app`: ademas, al terminar, manda a
+    los celulares el aviso silencioso de que hay datos nuevos (solo tiene
+    sentido cuando el ciclo lo disparo un push con cambios). Devuelve False
+    si se salto porque otro ciclo ya estaba corriendo (en este proceso o en
+    otra instancia)."""
     if not _lock_proceso.acquire(blocking=False):
         logger.info("Ya hay un ciclo del poller corriendo en este proceso; se salta")
         return False
@@ -62,7 +70,7 @@ def ejecutar_ciclo() -> bool:
                 return False
             db = PollerSessionLocal()
             try:
-                _correr_ciclo(db)
+                _correr_ciclo(db, avisar_app)
             finally:
                 db.close()
         finally:
@@ -76,14 +84,18 @@ def ejecutar_ciclo() -> bool:
     return True
 
 
-def _ciclo_seguro() -> None:
+def _ciclo_seguro(avisar_app: bool) -> None:
     try:
-        ejecutar_ciclo()
+        if not ejecutar_ciclo(avisar_app) and avisar_app:
+            # Se salto porque otro ciclo ya corria: ese ciclo no sabe que
+            # hay que avisar a la app. El timer de respaldo no avisa, asi
+            # que se reintenta en breve para no dejar la app sin refresco.
+            threading.Timer(5.0, _ciclo_seguro, args=(True,)).start()
     except Exception:
         logger.exception("El ciclo del poller disparado por un push fallo; el timer lo reintenta")
 
 
-def ejecutar_ciclo_en_segundo_plano() -> None:
+def ejecutar_ciclo_en_segundo_plano(avisar_app: bool) -> None:
     """Para el endpoint de push: responde a OP_PROD enseguida y procesa los
     datos nuevos en un hilo aparte."""
-    threading.Thread(target=_ciclo_seguro, name="ciclo-poller", daemon=True).start()
+    threading.Thread(target=_ciclo_seguro, args=(avisar_app,), name="ciclo-poller", daemon=True).start()

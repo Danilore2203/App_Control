@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import ObjectDeletedError
 
 from app import models
-from app.services.fcm import enviar_alerta_push, enviar_resumen_push
+from app.services.fcm import enviar_actualizacion_push, enviar_alerta_push, enviar_resumen_push
 from app.services.procesos import color_efectivo, es_core, estado_efectivo, recuperado_confirmado
 
 logger = logging.getLogger(__name__)
@@ -944,6 +944,24 @@ def revisar_resumen_no_core(db: Session) -> bool:
             logger.exception("Fallo al enviar resumen de no-core a usuario %s", usuario.id)
     db.commit()
     return True
+
+
+def notificar_actualizacion_app(db: Session) -> int:
+    """Manda a cada celular registrado el aviso silencioso de que hay
+    catalogos nuevos (ver enviar_actualizacion_push). Se llama una vez por
+    push de OP_PROD que trajo cambios. Devuelve cuantos avisos salieron."""
+    enviados = 0
+    for usuario, token_row in _obtener_destinatarios(db):
+        try:
+            enviar_actualizacion_push(token_row.fcm_token)
+            enviados += 1
+        except messaging.UnregisteredError:
+            logger.warning("Token FCM de usuario %s ya no esta registrado en Firebase: se elimina", usuario.id)
+            db.delete(token_row)
+        except Exception:
+            logger.exception("Fallo al avisar actualizacion de catalogos a usuario %s", usuario.id)
+    db.commit()
+    return enviados
 
 
 # Retencion en la base de App_Control. Nadie mas purga estas tablas: antes lo

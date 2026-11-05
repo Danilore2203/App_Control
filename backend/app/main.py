@@ -98,9 +98,12 @@ def _asegurar_indices():
 
 
 # Timer de respaldo. El ciclo real se dispara al recibir cada push de OP_PROD
-# (POST /internal/catalogos); esto solo cubre reintentos de push FCM fallidos
-# y el resumen horario de no-core si por algun motivo no llega ningun push.
-INTERVALO_POLLER_SEGUNDOS = 60
+# (POST /internal/catalogos, cada 5 min cuando hay cambios); esto solo cubre
+# reintentos de push FCM fallidos y el resumen horario de no-core si por
+# algun motivo no llega ningun push. Antes era 60 s y era la UNICA forma de
+# enterarse de algo: ahora los datos no pueden cambiar mas seguido que el
+# snapshot de OP_PROD, asi que sondear mas rapido no aporta nada.
+INTERVALO_POLLER_SEGUNDOS = 300
 
 
 async def _loop_poller():
