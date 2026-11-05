@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from app import models, schemas
-from app.services.catalogos import aplicar_push_catalogos
+from app.services.catalogos import aplicar_push_catalogos, estado_catalogos
 
 HOY = date(2026, 11, 5)
 AYER = date(2026, 11, 4)
@@ -117,6 +117,26 @@ def test_no_borra_un_proceso_que_tiene_alertas(db):
 
     assert out.procesos.model_dump() == {"insertadas": 0, "actualizadas": 0, "eliminadas": 1, "omitidas": 1}
     assert [c.id for c in db.query(models.Control).all()] == [2]
+
+
+def test_estado_resume_lo_recibido_del_dia(db):
+    assert estado_catalogos(db, HOY).model_dump() == {
+        "fecha": HOY, "procesos_hoy": 0, "tablas_hoy": 0, "eventos_hoy": 0, "ultimo_snapshot_ts": None,
+        "ultimo_evento_ts": None, "ultimo_evento_id": 0, "ultimo_cambio_revisado": 0, "episodios_alerta_abiertos": 0,
+    }
+
+    ts_tarde = datetime(2026, 11, 5, 9, 30)
+    aplicar_push_catalogos(db, push(
+        completo=True,
+        procesos=[proceso(1, "a"), proceso(2, "b", ts=ts_tarde), proceso(90, "ayer", fecha=AYER)],
+        tablas=[tabla(10, "t")],
+        eventos=[evento(100, "b", "OK", "ERROR", ts=ts_tarde)],
+    ))
+
+    estado = estado_catalogos(db, HOY)
+    assert (estado.procesos_hoy, estado.tablas_hoy, estado.eventos_hoy) == (2, 1, 1)
+    assert estado.ultimo_snapshot_ts == ts_tarde
+    assert (estado.ultimo_evento_ts, estado.ultimo_evento_id) == (ts_tarde, 100)
 
 
 def test_un_fallo_no_deja_el_envio_a_medias(db):

@@ -109,6 +109,36 @@ def _aplicar_eventos(db: Session, eventos: list[schemas.CatalogoEventoIn]) -> sc
     return schemas.CatalogoEventosOut(insertados=insertados, ignorados=len(eventos) - insertados)
 
 
+def estado_catalogos(db: Session, hoy) -> schemas.CatalogoEstadoOut:
+    """Resumen de lo recibido, para verificar contra MySQL de OP_PROD sin
+    entrar a la base ni a los logs del hosting."""
+    from sqlalchemy import func
+
+    def _cuenta_y_max(modelo, columna_fecha, columna_ts):
+        return db.query(func.count(modelo.id), func.max(columna_ts)).filter(columna_fecha == hoy).one()
+
+    procesos, ts_procesos = _cuenta_y_max(models.Control, models.Control.snapshot_fecha, models.Control.snapshot_ts)
+    tablas, ts_tablas = _cuenta_y_max(models.Tabla, models.Tabla.snapshot_fecha, models.Tabla.snapshot_ts)
+    eventos, ultimo_evento_ts, ultimo_evento_id = (
+        db.query(func.count(models.CatalogoCambio.id), func.max(models.CatalogoCambio.ts), func.max(models.CatalogoCambio.id))
+        .filter(func.date(models.CatalogoCambio.ts) == hoy)
+        .one()
+    )
+    cursor = db.query(models.PollerState).first()
+    abiertos = db.query(func.count(models.EpisodioAlerta.id)).filter(models.EpisodioAlerta.abierto.is_(True)).scalar()
+    return schemas.CatalogoEstadoOut(
+        fecha=hoy,
+        procesos_hoy=procesos,
+        tablas_hoy=tablas,
+        eventos_hoy=eventos,
+        ultimo_snapshot_ts=max(t for t in (ts_procesos, ts_tablas) if t is not None) if (ts_procesos or ts_tablas) else None,
+        ultimo_evento_ts=ultimo_evento_ts,
+        ultimo_evento_id=ultimo_evento_id or 0,
+        ultimo_cambio_revisado=cursor.ultimo_cambio_revisado if cursor else 0,
+        episodios_alerta_abiertos=abiertos or 0,
+    )
+
+
 def aplicar_push_catalogos(db: Session, push: schemas.CatalogoPushIn) -> schemas.CatalogoPushOut:
     """Aplica un envio de OP_PROD en una sola transaccion: o entra todo o no
     entra nada, para que un reintento parcial nunca deje los catalogos a

@@ -1,4 +1,3 @@
-import re
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,22 +7,9 @@ from sqlalchemy.orm import Session
 from app import auth, models, schemas
 from app.database import get_db
 from app.services.solicitudes import aprobar_solicitud_registro as _aprobar_solicitud_registro
+from app.services.usuarios import generar_username
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-
-def _generar_username(email: str, db: Session) -> str:
-    base = re.sub(r"[^A-Za-z0-9_.]", "", email.split("@")[0]) or "usuario"
-    if not base[0].isalpha():
-        base = f"u{base}"
-    base = base[:90]
-
-    username = base
-    sufijo = 1
-    while db.query(models.Usuario).filter(models.Usuario.username == username).first():
-        sufijo += 1
-        username = f"{base}{sufijo}"
-    return username
 
 
 @router.get("/solicitudes", response_model=List[schemas.SolicitudAccesoOut])
@@ -58,7 +44,7 @@ def aprobar_solicitud(
     usuario = db.query(models.Usuario).filter(func.lower(models.Usuario.email) == solicitud.email.strip().lower()).first()
     if usuario is None:
         usuario = models.Usuario(
-            username=_generar_username(solicitud.email, db),
+            username=generar_username(solicitud.email, db),
             email=solicitud.email,
             nombre=solicitud.nombre,
             activo=True,
