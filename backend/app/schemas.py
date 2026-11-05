@@ -316,6 +316,15 @@ class CatalogoPushOut(BaseModel):
     eventos: CatalogoEventosOut
 
 
+class AdministradorIn(BaseModel):
+    """POST /internal/administradores: deja a este correo como administrador
+    (creando el usuario si hace falta). Para la primera cuenta de una base
+    nueva o para sumar administradores sin tocar la base."""
+
+    email: EmailStr
+    nombre: Optional[str] = None
+
+
 class CatalogoEstadoOut(BaseModel):
     """Que tiene App_Control en su base, para contrastar con MySQL de OP_PROD
     (GET /internal/catalogos/estado)."""

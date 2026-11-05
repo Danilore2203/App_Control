@@ -9,6 +9,7 @@ from app.services.catalogos import aplicar_push_catalogos, estado_catalogos
 from app.services.ciclo import ejecutar_ciclo_en_segundo_plano
 from app.services.poller import BOLIVIA_TZ
 from app.services.solicitudes import aprobar_solicitud_registro
+from app.services.usuarios import designar_administrador
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -34,6 +35,18 @@ def recibir_catalogos(push: schemas.CatalogoPushIn, db: Session = Depends(get_db
     ) or resultado.eventos.insertados > 0
     ejecutar_ciclo_en_segundo_plano(avisar_app=hubo_cambios)
     return resultado
+
+
+@router.post(
+    "/administradores",
+    response_model=schemas.UsuarioOut,
+    dependencies=[Depends(auth.verificar_internal_key)],
+)
+def designar_administrador_interno(datos: schemas.AdministradorIn, db: Session = Depends(get_db)):
+    """Deja a un correo como administrador, creando el usuario si no existe.
+    Es la unica forma de tener el PRIMER administrador en una base nueva
+    (todos los demas accesos los aprueba un administrador). Idempotente."""
+    return designar_administrador(db, datos.email, datos.nombre)
 
 
 @router.get(
