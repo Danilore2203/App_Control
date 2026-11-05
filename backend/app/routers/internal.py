@@ -1,10 +1,13 @@
+from datetime import date, datetime
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app import auth, schemas
 from app.database import get_db
-from app.services.catalogos import aplicar_push_catalogos
+from app.services.catalogos import aplicar_push_catalogos, estado_catalogos
 from app.services.ciclo import ejecutar_ciclo_en_segundo_plano
+from app.services.poller import BOLIVIA_TZ
 from app.services.solicitudes import aprobar_solicitud_registro
 
 router = APIRouter(prefix="/internal", tags=["internal"])
@@ -31,6 +34,17 @@ def recibir_catalogos(push: schemas.CatalogoPushIn, db: Session = Depends(get_db
     ) or resultado.eventos.insertados > 0
     ejecutar_ciclo_en_segundo_plano(avisar_app=hubo_cambios)
     return resultado
+
+
+@router.get(
+    "/catalogos/estado",
+    response_model=schemas.CatalogoEstadoOut,
+    dependencies=[Depends(auth.verificar_internal_key)],
+)
+def estado_catalogos_interno(fecha: date | None = None, db: Session = Depends(get_db)):
+    """Que hay en la base para un dia (hoy por defecto, hora Bolivia): para
+    contrastar con MySQL de OP_PROD y ver si el push esta llegando."""
+    return estado_catalogos(db, fecha or datetime.now(BOLIVIA_TZ).date())
 
 
 @router.post(

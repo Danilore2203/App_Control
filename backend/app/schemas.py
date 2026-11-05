@@ -314,3 +314,18 @@ class CatalogoPushOut(BaseModel):
     procesos: CatalogoSeccionOut
     tablas: CatalogoSeccionOut
     eventos: CatalogoEventosOut
+
+
+class CatalogoEstadoOut(BaseModel):
+    """Que tiene App_Control en su base, para contrastar con MySQL de OP_PROD
+    (GET /internal/catalogos/estado)."""
+
+    fecha: date
+    procesos_hoy: int
+    tablas_hoy: int
+    eventos_hoy: int
+    ultimo_snapshot_ts: Optional[datetime] = None  # ultima fila de catalogo tocada
+    ultimo_evento_ts: Optional[datetime] = None
+    ultimo_evento_id: int
+    ultimo_cambio_revisado: int  # cursor del poller sobre los eventos
+    episodios_alerta_abiertos: int
