@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 
 import "../models/control.dart";
 import "../theme.dart";
+import "titulo_seccion.dart";
 
 /// Fila de tarjetas, una por cada fuente (DataStage/Pentaho/Airflow/Otro),
 /// cada una con un medidor circular chico mostrando % de exito.
@@ -25,8 +26,6 @@ class MonitoreoPorFuente extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     final porFuente = <String, List<Control>>{};
     for (final control in controles) {
       porFuente.putIfAbsent(control.fuente, () => []).add(control);
@@ -42,13 +41,9 @@ class MonitoreoPorFuente extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: Text(
-            "MONITOREO POR FUENTE",
-            style: AppTextStyles.tech(
-                color: colorScheme.onSurfaceVariant, fontSize: 10),
-          ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: TituloSeccion("Por fuente"),
         ),
         SizedBox(
           height: 118,

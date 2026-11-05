@@ -7,6 +7,7 @@ import "services/guardia_foreground_task.dart";
 import "services/navegacion_service.dart";
 import "services/notification_service.dart";
 import "theme.dart";
+import "widgets/fondo_app.dart";
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,6 +49,9 @@ class _AppControlesState extends State<AppControles> {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: ThemeMode.system,
+      // Fondo comun (gradiente + brillo lima + puntos) detras de todas las
+      // pantallas; los Scaffold van transparentes (ver AppTheme).
+      builder: (context, child) => FondoApp(child: child ?? const SizedBox.shrink()),
       // LoginScreen decide sola entre mostrar Google o el desbloqueo con
       // huella/Face ID, segun si ya hay una sesion guardada.
       home: const LoginScreen(),

@@ -6,6 +6,7 @@ import "../services/api_service.dart";
 import "../theme.dart";
 import "../utils/meses_es.dart";
 import "../widgets/estado_vacio.dart";
+import "../widgets/fondo_app.dart";
 import "../widgets/titulo_seccion.dart";
 import "bitacora_mes_screen.dart";
 
@@ -125,19 +126,30 @@ class _BitacoraContenidoState extends State<BitacoraContenido> {
               ),
               const SizedBox(height: 4),
               _ResumenAnio(resumen: resumen, esAnioActual: esAnioActual),
-              const SizedBox(height: 12),
-              for (final mesInfo in resumen.meses) ...[
-                _FilaMes(
-                  nombre: nombresMesEs[mesInfo.mes - 1],
-                  info: mesInfo,
-                  maximo: maximoMes,
-                  esActual: esAnioActual && mesInfo.mes == ahora.month,
-                  esFuturo: esAnioActual && mesInfo.mes > ahora.month ||
-                      resumen.anio > ahora.year,
-                  onTap: () => _abrirMes(mesInfo.mes),
+              const SizedBox(height: 14),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: 12,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 1.18,
                 ),
-                const SizedBox(height: 8),
-              ],
+                itemBuilder: (context, index) {
+                  final mesInfo = resumen.meses[index];
+                  return _TarjetaMes(
+                    nombre: mesesAbrevEs[index],
+                    info: mesInfo,
+                    maximo: maximoMes,
+                    esActual: esAnioActual && mesInfo.mes == ahora.month,
+                    esFuturo: esAnioActual && mesInfo.mes > ahora.month ||
+                        resumen.anio > ahora.year,
+                    onTap: () => _abrirMes(mesInfo.mes),
+                  );
+                },
+              ),
             ],
           ),
         );
@@ -266,11 +278,11 @@ class _SelectorAnio extends StatelessWidget {
   }
 }
 
-/// Una fila por mes: nombre, barra proporcional al mes con más episodios,
-/// total y cuántos siguen abiertos. Reemplaza a la grilla de 12 cuadrados
-/// con un punto de color, que no decía cuánto ni qué quedaba pendiente.
-class _FilaMes extends StatelessWidget {
-  const _FilaMes({
+/// Cuadro de un mes: nombre, total grande, barra proporcional al mes con
+/// más episodios y badge con los que siguen abiertos. El mes actual va
+/// resaltado en lima; los futuros, atenuados y sin acción.
+class _TarjetaMes extends StatelessWidget {
+  const _TarjetaMes({
     required this.nombre,
     required this.info,
     required this.maximo,
@@ -291,93 +303,96 @@ class _FilaMes extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final sinDatos = info.total == 0;
-    final proporcion = maximo == 0 ? 0.0 : info.total / maximo;
-    final colorBarra = info.abiertos > 0
+    final proporcion = maximo == 0 ? 0.0 : (info.total / maximo).clamp(0.04, 1.0);
+    final hayAbiertos = info.abiertos > 0;
+    final colorBarra = hayAbiertos
         ? StatusColors.critico
         : sinDatos
-            ? colorScheme.outlineVariant
+            ? Colors.transparent
             : colorScheme.primary;
     final colorTexto = esFuturo
-        ? colorScheme.onSurfaceVariant.withValues(alpha: 0.45)
+        ? colorScheme.outline.withValues(alpha: 0.5)
         : colorScheme.onSurface;
+    // Tono de la tarjeta (linea superior, como .lt-kpi::after): rojo si
+    // quedan abiertos, lima si es el mes actual, neutro si no.
+    final tono = hayAbiertos
+        ? StatusColors.critico
+        : esActual
+            ? colorScheme.primary
+            : colorScheme.outlineVariant;
 
-    return Material(
-      color: esActual
-          ? colorScheme.primary.withValues(alpha: 0.10)
-          : colorScheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: esFuturo ? null : onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 92,
-                child: Text(
-                  nombre,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: colorTexto,
-                    fontWeight: esActual ? FontWeight.w800 : FontWeight.w600,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: proporcion,
-                    minHeight: 8,
-                    backgroundColor: colorScheme.outlineVariant.withValues(alpha: 0.35),
-                    color: colorBarra,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 58,
-                child: Text(
-                  sinDatos ? "–" : _formatearMiles(info.total),
-                  textAlign: TextAlign.right,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: colorTexto,
-                    fontWeight: FontWeight.w700,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ),
-              SizedBox(
-                width: 54,
-                child: info.abiertos > 0
-                    ? Align(
-                        alignment: Alignment.centerRight,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    return Vidrio(
+      padding: EdgeInsets.zero,
+      blur: 10,
+      color: esActual ? colorScheme.primary.withValues(alpha: 0.14) : null,
+      borderColor: esActual
+          ? colorScheme.primary.withValues(alpha: 0.6)
+          : hayAbiertos
+              ? StatusColors.critico.withValues(alpha: 0.35)
+              : null,
+      onTap: esFuturo ? null : onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(height: 3, color: esFuturo ? Colors.transparent : tono),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 9, 12, 11),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Eyebrow(
+                        nombre,
+                        color: esActual ? acentoTinta(context) : (esFuturo ? colorTexto : null),
+                      ),
+                      if (hayAbiertos)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: StatusColors.critico.withValues(alpha: 0.14),
-                            borderRadius: BorderRadius.circular(8),
+                            color: StatusColors.critico,
+                            borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
                             "${info.abiertos}",
                             style: theme.textTheme.labelSmall?.copyWith(
-                              color: StatusColors.critico,
+                              color: Colors.white,
                               fontWeight: FontWeight.w800,
+                              fontSize: 10,
                             ),
                           ),
                         ),
-                      )
-                    : Icon(
-                        Icons.chevron_right,
-                        size: 18,
-                        color: esFuturo
-                            ? Colors.transparent
-                            : colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
-                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  Text(
+                    sinDatos ? "–" : _formatearMiles(info.total),
+                    maxLines: 1,
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      color: sinDatos ? colorScheme.outline.withValues(alpha: 0.5) : colorTexto,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -1.0,
+                      height: 1.0,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: LinearProgressIndicator(
+                      value: sinDatos ? 0 : proporcion,
+                      minHeight: 4,
+                      backgroundColor: colorScheme.outlineVariant.withValues(alpha: 0.5),
+                      color: colorBarra,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

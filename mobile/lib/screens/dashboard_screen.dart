@@ -18,6 +18,7 @@ import "../widgets/estado_vacio.dart";
 import "../widgets/monitoreo_por_fuente.dart";
 import "../widgets/salud_sistema.dart";
 import "../widgets/tarjeta_proceso.dart";
+import "../widgets/titulo_seccion.dart";
 import "alertas_screen.dart";
 
 class DashboardScreen extends StatefulWidget {
@@ -253,13 +254,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildEncabezadoLista(ColorScheme colorScheme) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Text(
-        "RECIENTES (HOY)",
-        style: AppTextStyles.tech(
-            color: colorScheme.onSurfaceVariant, fontSize: 10),
-      ),
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: TituloSeccion("Procesos"),
     );
   }
 
@@ -388,16 +385,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             Text(
               switch (_tabActual) {
-                0 => "MONITOR DE PROCESOS",
-                1 => "CENTRO DE ALERTAS",
-                2 => "CONFIGURACIÓN DE GUARDIA",
-                _ => "BITÁCORA",
+                0 => "Monitor de procesos",
+                1 => "Alertas",
+                2 => "Guardia",
+                _ => "Bitácora",
               },
-              style: AppTextStyles.tech(
-                color: colorScheme.primary,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: colorScheme.onSurface,
+                  ),
             ),
             if (_tabActual == 0) ...[
               const SizedBox(height: 2),
