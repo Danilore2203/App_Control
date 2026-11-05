@@ -1,12 +1,12 @@
 class AppConfig {
-  // Backend desplegado en Railway (prueba, dura mientras dure el trial).
-  // Se puede pisar sin recompilar el codigo (aunque si hay que generar un
-  // APK nuevo) pasando --dart-define=API_BASE_URL=https://otra-url al
-  // buildear, por si el trial se cae y hay que apuntar a otro lado rapido:
+  // Backend desplegado en Render (plan Free, ver render.yaml en la raiz).
+  // Se puede pisar sin tocar el codigo (aunque si hay que generar un APK
+  // nuevo) pasando --dart-define=API_BASE_URL=https://otra-url al buildear,
+  // por si hay que apuntar a otro lado rapido:
   //   flutter build apk --release --dart-define=API_BASE_URL=https://...
   static const String apiBaseUrl = String.fromEnvironment(
     "API_BASE_URL",
-    defaultValue: "https://appcontrol-production-268f.up.railway.app",
+    defaultValue: "https://centinela-dwh-api.onrender.com",
   );
 
   // Web Client ID generado por Firebase al activar Google como proveedor de
