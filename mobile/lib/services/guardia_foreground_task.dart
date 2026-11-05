@@ -18,7 +18,7 @@ const _claveEstadoAlarmas = "guardia_estado_alarmas";
 const _claveIdsReconocidos = "guardia_ids_reconocidos";
 
 // La alarma sonora se repite mientras el proceso siga en error, pero no en
-// cada corrida (cada 2 min seria insoportable): solo al detectarlo y despues
+// cada corrida (cada 5 min seria insoportable): solo al detectarlo y despues
 // cada vez que pase esta duracion. El recordatorio silencioso es mas
 // frecuente porque no interrumpe con sonido.
 const _duracionEntreAlarmas = Duration(hours: 1);
@@ -68,7 +68,10 @@ void inicializarForegroundTask() {
       playSound: false,
     ),
     foregroundTaskOptions: ForegroundTaskOptions(
-      eventAction: ForegroundTaskEventAction.repeat(120000), // cada 2 min
+      // Cada 5 min: es el ritmo del snapshot de OP_PROD, los datos no pueden
+      // cambiar mas seguido. Antes era cada 2 min y cada celular con guardia
+      // armada sumaba 720 consultas por dia al servidor sin nada nuevo que ver.
+      eventAction: ForegroundTaskEventAction.repeat(300000),
       autoRunOnBoot: false,
       allowWakeLock: true,
       allowWifiLock: true,
@@ -194,13 +197,13 @@ class _GuardiaTaskHandler extends TaskHandler {
   }
 
   /// Via de respaldo, independiente del push de Firebase: este Foreground
-  /// Service ya esta corriendo cada 2 min de por si (con mucha mas
+  /// Service ya esta corriendo cada 5 min de por si (con mucha mas
   /// proteccion contra los bloqueos de bateria/autoarranque de fabrica que
   /// revivir una app muerta via FCM), asi que aprovecha esa misma corrida
   /// para detectar procesos core en falla EL MISMO y disparar la alarma
   /// local directo, sin esperar a que llegue (o no) el push.
   ///
-  /// La alarma sonora no se repite cada 2 min mientras siga la misma falla
+  /// La alarma sonora no se repite cada 5 min mientras siga la misma falla
   /// (seria insoportable): suena al detectarla y, si sigue en error, otra
   /// vez cada _duracionEntreAlarmas. Aparte, cada _duracionEntreRecordatorios
   /// se manda un recordatorio silencioso (sin sonido de alarma) para que

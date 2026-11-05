@@ -304,11 +304,11 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                           ),
                         ),
                         const SizedBox(height: 20),
-                        Row(
+                        const Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             _InsigniaPie(icono: Icons.wifi_tethering, texto: "CONEXIÓN SEGURA"),
-                            const SizedBox(width: 16),
+                            SizedBox(width: 16),
                             _InsigniaPie(icono: Icons.lock_person_outlined, texto: "DATOS ENCRIPTADOS"),
                           ],
                         ),

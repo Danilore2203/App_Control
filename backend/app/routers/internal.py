@@ -3,9 +3,34 @@ from sqlalchemy.orm import Session
 
 from app import auth, schemas
 from app.database import get_db
+from app.services.catalogos import aplicar_push_catalogos
+from app.services.ciclo import ejecutar_ciclo_en_segundo_plano
 from app.services.solicitudes import aprobar_solicitud_registro
 
 router = APIRouter(prefix="/internal", tags=["internal"])
+
+
+@router.post(
+    "/catalogos",
+    response_model=schemas.CatalogoPushOut,
+    dependencies=[Depends(auth.verificar_internal_key)],
+)
+def recibir_catalogos(push: schemas.CatalogoPushIn, db: Session = Depends(get_db)):
+    """Punto de entrada de los catalogos: OP_PROD lo llama al final de cada
+    snapshot con lo que cambio en ese ciclo (ver app/services/catalogos.py
+    para el contrato). Reemplaza a la replica MySQL -> Supabase y al sondeo
+    del poller sobre los catalogos.
+
+    Apenas queda aplicado se dispara un ciclo del poller en segundo plano
+    (alarmas, bitacora) y, si el envio trajo algo, el aviso silencioso a
+    los celulares para que refresquen: asi la app se entera en el mismo
+    minuto en que OP_PROD vio el cambio, sin sondear."""
+    resultado = aplicar_push_catalogos(db, push)
+    hubo_cambios = any(
+        v for seccion in (resultado.procesos, resultado.tablas) for v in seccion.model_dump().values()
+    ) or resultado.eventos.insertados > 0
+    ejecutar_ciclo_en_segundo_plano(avisar_app=hubo_cambios)
+    return resultado
 
 
 @router.post(

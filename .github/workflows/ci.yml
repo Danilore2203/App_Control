@@ -17,9 +17,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt pytest
       - name: Verifica que el backend compile (sin correrlo, no hay DB en CI)
         run: python -m compileall -q app
+      - name: Pruebas del backend (SQLite en memoria, no necesita DB)
+        run: python -m pytest tests -q
 
   mobile:
     runs-on: ubuntu-latest

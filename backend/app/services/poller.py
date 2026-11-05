@@ -1,13 +1,14 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from types import SimpleNamespace
 
 from firebase_admin import messaging
-from sqlalchemy import func, inspect
+from sqlalchemy import func, inspect, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import ObjectDeletedError
 
 from app import models
-from app.services.fcm import enviar_alerta_push, enviar_resumen_push
+from app.services.fcm import enviar_actualizacion_push, enviar_alerta_push, enviar_resumen_push
 from app.services.procesos import color_efectivo, es_core, estado_efectivo, recuperado_confirmado
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,14 @@ ESTADOS_TABLA_NORMALIZADOS = {
 }
 # Tabla todavia cargando: ni error ni exito, no se registra ni se alerta.
 ESTADOS_TABLA_TRANSITORIOS = {"EN PROCESO"}
+
+
+def hora_cambio(fila) -> datetime:
+    """Hora del ultimo cambio de ESTADO de una fila de catalogo. snapshot_ts
+    se mueve con cualquier columna (hora_log, cantidad...), asi que para
+    "en error desde las HH:MM" la hora correcta es estado_ts. Cae a
+    snapshot_ts en filas anteriores a que existiera la columna."""
+    return getattr(fila, "estado_ts", None) or fila.snapshot_ts
 
 
 def _formatear_duracion(inicio, fin) -> str:
@@ -277,11 +286,12 @@ def resincronizar_episodios_abiertos(db: Session) -> int:
                         models.Control.nombre == episodio.nombre,
                         models.Control.fuente == episodio.tecnologia,
                     )
-                    .order_by(models.Control.id.desc())
+                    .order_by(models.Control.snapshot_fecha.desc(), models.Control.snapshot_ts.desc())
                     .first()
                 )
                 if ultimo is None:
                     continue
+                hora = hora_cambio(ultimo)
                 color = color_efectivo(ultimo)
                 if color != "red":
                     # Ya no esta en rojo -verde, en ejecucion, o cualquier otro
@@ -293,11 +303,11 @@ def resincronizar_episodios_abiertos(db: Session) -> int:
                     # siempre -de ahi que bitacora acumulara episodios "abiertos"
                     # que la app ya no mostraba como fallando.
                     episodio.estado_fin = "OK"
-                    episodio.fecha_actualizacion = ultimo.snapshot_ts
-                    duracion = _formatear_duracion(episodio.fecha_hora, ultimo.snapshot_ts)
+                    episodio.fecha_actualizacion = hora
+                    duracion = _formatear_duracion(episodio.fecha_hora, hora)
                     _agregar_a_descripcion(
                         episodio,
-                        f" Solucionado - Estado OK a las {ultimo.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}.",
+                        f" Solucionado - Estado OK a las {hora.strftime('%H:%M')}. Duración: {duracion}.",
                     )
                     corregidos += 1
                 else:
@@ -305,11 +315,11 @@ def resincronizar_episodios_abiertos(db: Session) -> int:
                     if episodio.estado != estado_actual:
                         frase = "demorado" if estado_actual == "DEMORADO" else f"en {estado_actual.lower()}"
                         _agregar_a_descripcion(
-                            episodio, f" Cambió a {frase} a las {ultimo.snapshot_ts.strftime('%H:%M')}."
+                            episodio, f" Cambió a {frase} a las {hora.strftime('%H:%M')}."
                         )
                         episodio.estado = estado_actual
                         corregidos += 1
-                    episodio.fecha_actualizacion = ultimo.snapshot_ts
+                    episodio.fecha_actualizacion = hora
 
             elif episodio.tipo == "TABLA":
                 ultimo = (
@@ -318,19 +328,20 @@ def resincronizar_episodios_abiertos(db: Session) -> int:
                         models.Tabla.nombre == episodio.nombre,
                         models.Tabla.fuente == episodio.tecnologia,
                     )
-                    .order_by(models.Tabla.id.desc())
+                    .order_by(models.Tabla.snapshot_fecha.desc(), models.Tabla.snapshot_ts.desc())
                     .first()
                 )
                 if ultimo is None:
                     continue
+                hora = hora_cambio(ultimo)
                 color_tabla = (ultimo.color or "").strip().lower()
                 if color_tabla != "red":
                     episodio.estado_fin = "OK"
-                    episodio.fecha_actualizacion = ultimo.snapshot_ts
-                    duracion = _formatear_duracion(episodio.fecha_hora, ultimo.snapshot_ts)
+                    episodio.fecha_actualizacion = hora
+                    duracion = _formatear_duracion(episodio.fecha_hora, hora)
                     _agregar_a_descripcion(
                         episodio,
-                        f" Solucionado - Estado OK a las {ultimo.snapshot_ts.strftime('%H:%M')}. Duración: {duracion}.",
+                        f" Solucionado - Estado OK a las {hora.strftime('%H:%M')}. Duración: {duracion}.",
                     )
                     corregidos += 1
                 else:
@@ -338,11 +349,11 @@ def resincronizar_episodios_abiertos(db: Session) -> int:
                     if episodio.estado != estado_normalizado:
                         _agregar_a_descripcion(
                             episodio,
-                            f" Cambió a {estado_normalizado.lower()} a las {ultimo.snapshot_ts.strftime('%H:%M')}.",
+                            f" Cambió a {estado_normalizado.lower()} a las {hora.strftime('%H:%M')}.",
                         )
                         episodio.estado = estado_normalizado
                         corregidos += 1
-                    episodio.fecha_actualizacion = ultimo.snapshot_ts
+                    episodio.fecha_actualizacion = hora
 
             db.commit()
         except ObjectDeletedError:
@@ -573,82 +584,105 @@ def _obtener_o_crear_estado(db: Session) -> models.PollerState:
     return estado
 
 
-def revisar_procesos_nuevos(db: Session) -> int:
-    """Busca snapshots nuevos en dataops_catalogo_procesos (id mayor al ultimo revisado)
-    y actualiza bitacora + incoherencia por cada proceso. Ya NO envia alarmas
-    aca (ver `revisar_alarmas_activas`): esto solo miraba filas NUEVAS, asi que
-    un proceso que ya estaba en ERROR antes de que el origen volviera a
-    escribir una fila para el (o antes de que el poller/token FCM existieran)
-    se quedaba sin alarma para siempre. La alarma ahora se decide mirando el
-    estado ACTUAL de cada proceso en cada ciclo, no las filas nuevas."""
+def _vista_evento(db: Session, evento: models.CatalogoCambio):
+    """Estado de un proceso/tabla EN EL MOMENTO del evento, con la misma
+    forma que una fila de catalogo, para reusar _actualizar_bitacora_* y las
+    revisiones de incoherencia tal cual. Los datos fijos (id, core,
+    cantidad, snapshot_fecha) salen de la fila de catalogo de ese dia;
+    estado, color y hora salen del evento. No sirve mirar solo la fila: si
+    entre un ciclo y otro llegaron dos eventos del mismo proceso (ERROR y
+    despues OK), la fila ya muestra solo el final y la bitacora tiene que
+    ver los dos pasos, cada uno con su hora."""
+
+    modelo = models.Control if evento.tipo == "PROCESO" else models.Tabla
+    fila = (
+        db.query(modelo)
+        .filter(modelo.nombre == evento.nombre, modelo.snapshot_fecha == evento.ts.date())
+        .order_by(modelo.snapshot_ts.desc())
+        .first()
+    )
+    if fila is not None:
+        datos = {c.name: getattr(fila, c.name) for c in modelo.__table__.columns}
+    else:
+        # Fila ya no esta (p.ej. baja a mitad del dia): la bitacora se
+        # registra igual con lo que trae el evento; lo que necesita la fila
+        # (incoherencia proceso/tabla) se salta.
+        datos = {
+            "id": None, "nombre": evento.nombre, "fuente": evento.fuente,
+            "snapshot_fecha": evento.ts.date(), "core": None, "cantidad": None,
+        }
+    if not datos.get("fuente"):
+        datos["fuente"] = evento.fuente
+    datos.update(estado=evento.estado_nuevo, color=evento.color_nuevo, snapshot_ts=evento.ts, estado_ts=evento.ts)
+    return SimpleNamespace(**datos)
+
+
+def revisar_cambios_nuevos(db: Session) -> int:
+    """Vuelca a la bitacora los eventos de cambio de estado que OP_PROD
+    registro en dataops_catalogo_cambios (id mayor al ultimo revisado): un
+    evento por cada vez que un proceso o tabla cambio de estado, con la hora
+    real del cambio. Reemplaza al recorrido anterior de los catalogos por
+    id, que dejo de tener sentido cuando OP_PROD paso a actualizar las
+    filas en el lugar (un cambio de estado ya no crea una fila nueva).
+
+    Ya NO envia alarmas aca (ver `revisar_alarmas_activas`): la alarma se
+    decide mirando el estado ACTUAL de cada proceso en cada ciclo, no los
+    eventos, para que un proceso que ya estaba en ERROR antes de que
+    existiera el poller o el token FCM no se quede sin alarma."""
 
     estado_poller = _obtener_o_crear_estado(db)
 
     nuevos = (
-        db.query(models.Control)
-        .filter(models.Control.id > estado_poller.ultimo_id_revisado)
-        .order_by(models.Control.id.asc())
+        db.query(models.CatalogoCambio)
+        .filter(models.CatalogoCambio.id > estado_poller.ultimo_cambio_revisado)
+        .order_by(models.CatalogoCambio.id.asc())
         .all()
     )
     if not nuevos:
         return 0
 
-    procesos_procesados = 0
-
-    for proceso in nuevos:
+    procesados = 0
+    for evento in nuevos:
+        evento_id, nombre, tipo = evento.id, evento.nombre, evento.tipo
         try:
-            # El acceso a proceso.* va DENTRO del try: el commit de la vuelta
-            # anterior expira todos los objetos Control que todavia quedan en
-            # `nuevos` (expire_on_commit por defecto), asi que si la fila de
-            # origen se borro entre el fetch inicial y esta vuelta, leer
-            # proceso.id/nombre/fuente dispara un SELECT que no encuentra la
-            # fila -> ObjectDeletedError, capturado abajo aparte para saltear
-            # solo este proceso sin perder el cursor.
-            proceso_id, proceso_nombre, proceso_fuente = proceso.id, proceso.nombre, proceso.fuente
-            color = color_efectivo(proceso)
+            vista = _vista_evento(db, evento)
+            if tipo == "PROCESO":
+                if vista.fuente in TECNOLOGIAS_PROCESO_VALIDAS:
+                    _actualizar_bitacora_proceso(db, vista)
+                if vista.id is not None and color_efectivo(vista) == "green" and es_core(vista):
+                    _revisar_incoherencia_desde_proceso(db, vista)
+            else:
+                if vista.fuente in TECNOLOGIAS_TABLA_VALIDAS:
+                    _actualizar_bitacora_tabla(db, vista)
+                # Si el evento es de un dia anterior (carga de ayer que llego
+                # tarde), el proceso de hoy ni siquiera corrio: no es un fallo
+                # silencioso nuevo. Tampoco si la tabla sigue "EN PROCESO".
+                es_de_hoy = vista.snapshot_fecha == datetime.now(BOLIVIA_TZ).date()
+                estado_tabla = (vista.estado or "").strip().upper()
+                if (
+                    (vista.color or "").strip().lower() == "red"
+                    and estado_tabla not in ESTADOS_TABLA_TRANSITORIOS
+                    and es_de_hoy
+                ):
+                    _revisar_incoherencia_desde_tabla(db, vista)
 
-            if proceso_fuente in TECNOLOGIAS_PROCESO_VALIDAS:
-                _actualizar_bitacora_proceso(db, proceso)
-
-            if color == "green" and es_core(proceso):
-                _revisar_incoherencia_desde_proceso(db, proceso)
-
-            estado_poller.ultimo_id_revisado = proceso_id
+            estado_poller.ultimo_cambio_revisado = evento_id
             db.commit()
-            procesos_procesados += 1
-        except ObjectDeletedError:
-            db.rollback()
-            # proceso.id ya no es legible (fila borrada): se toma del identity
-            # map, que no dispara consulta a la base, para poder avanzar el
-            # cursor igual y no reprocesar esta fila en bucle.
-            proceso_id = inspect(proceso).identity[0]
-            logger.warning(
-                "Proceso id %s borrado (posible purga concurrente) durante el ciclo del poller; se saltea",
-                proceso_id,
-            )
-            estado_poller.ultimo_id_revisado = proceso_id
-            db.commit()
+            procesados += 1
         except Exception:
-            # Sin esto, un dato puntual que rompe UN proceso (nombre/estado
-            # raro, lo que sea) frenaba el cursor ahi mismo para siempre: cada
-            # ciclo siguiente volvia a intentar la misma fila, volvia a
-            # explotar antes de llegar al commit, y TODO lo que estaba
-            # despues en la cola (de cualquier otro proceso) se quedaba sin
-            # sincronizar a la bitacora indefinidamente, mientras Controles
-            # (que lee el estado en vivo, sin pasar por este cursor) seguia
-            # mostrando todo bien. Se commitea proceso por proceso (no una
-            # sola vez al final) para que el rollback de una fila rota no se
-            # lleve puesto el trabajo ya bueno de las filas anteriores del
-            # mismo lote.
+            # Un dato puntual que rompe UN evento no debe frenar el cursor
+            # ahi para siempre (cada ciclo volveria a explotar en el mismo
+            # evento y todo lo posterior quedaria sin bitacora). Se commitea
+            # evento por evento por lo mismo: el rollback de uno roto no se
+            # lleva el trabajo ya bueno de los anteriores.
             db.rollback()
             logger.exception(
-                "Fallo actualizando bitacora/incoherencia para %s [%s] (id %s); se salta y se sigue",
-                proceso_nombre, proceso_fuente, proceso_id,
+                "Fallo volcando a bitacora el evento %s (%s %s); se salta y se sigue", evento_id, tipo, nombre
             )
-            estado_poller.ultimo_id_revisado = proceso_id
+            estado_poller.ultimo_cambio_revisado = evento_id
             db.commit()
 
-    return procesos_procesados
+    return procesados
 
 
 def _estado_actual_procesos(db: Session) -> list[models.Control]:
@@ -775,7 +809,7 @@ def _revisar_alarma_de_proceso(db: Session, proceso: models.Control) -> bool:
             return False
         if episodio is not None and episodio.abierto:
             episodio.abierto = False
-            episodio.cerrado_en = proceso.snapshot_ts
+            episodio.cerrado_en = hora_cambio(proceso)
             _limpiar_notificados(db, episodio.id)
             logger.info("Alarma cerrada: %s [%s] volvio a verde", proceso.nombre, proceso.fuente)
         return False
@@ -800,14 +834,14 @@ def _revisar_alarma_de_proceso(db: Session, proceso: models.Control) -> bool:
             color=color,
             abierto=True,
             control_id_actual=proceso.id,
-            primera_deteccion=proceso.snapshot_ts,
+            primera_deteccion=hora_cambio(proceso),
         )
         db.add(episodio)
         db.flush()  # asigna episodio.id, lo necesita _disparar_alarma
         logger.warning("Nueva alarma detectada: %s [%s] en %s", proceso.nombre, proceso.fuente, estado_efectivo(proceso))
     elif reabre:
         episodio.abierto = True
-        episodio.primera_deteccion = proceso.snapshot_ts
+        episodio.primera_deteccion = hora_cambio(proceso)
         episodio.cerrado_en = None
         _limpiar_notificados(db, episodio.id)
         logger.warning("Proceso %s [%s] volvio a fallar: reabre alarma", proceso.nombre, proceso.fuente)
@@ -816,7 +850,7 @@ def _revisar_alarma_de_proceso(db: Session, proceso: models.Control) -> bool:
     episodio.control_id_actual = proceso.id
 
     exito = _disparar_alarma(db, proceso, episodio)
-    episodio.ultima_alerta_en = proceso.snapshot_ts
+    episodio.ultima_alerta_en = hora_cambio(proceso)
     return exito
 
 
@@ -912,78 +946,72 @@ def revisar_resumen_no_core(db: Session) -> bool:
     return True
 
 
-def revisar_tablas_nuevas(db: Session) -> int:
-    """Busca snapshots nuevos en dataops_catalogo_tablas (id mayor al ultimo revisado)
-    y actualiza la bitacora con la misma logica de episodio que los procesos.
-    No genera alertas push, solo llena la bitacora."""
-
-    estado_poller = _obtener_o_crear_estado(db)
-
-    nuevas = (
-        db.query(models.Tabla)
-        .filter(models.Tabla.id > estado_poller.ultimo_id_tablas_revisado)
-        .order_by(models.Tabla.id.asc())
-        .all()
-    )
-    if not nuevas:
-        return 0
-
-    procesadas = 0
-
-    for tabla in nuevas:
+def notificar_actualizacion_app(db: Session) -> int:
+    """Manda a cada celular registrado el aviso silencioso de que hay
+    catalogos nuevos (ver enviar_actualizacion_push). Se llama una vez por
+    push de OP_PROD que trajo cambios. Devuelve cuantos avisos salieron."""
+    enviados = 0
+    for usuario, token_row in _obtener_destinatarios(db):
         try:
-            # Igual que en revisar_procesos_nuevos: se capturan en variables
-            # planas antes de usarlas en el log del except, porque el commit
-            # de la vuelta anterior expira todos los objetos Tabla que
-            # todavia quedan en `nuevas` y, si la fila fue borrada
-            # mientras tanto, tocar tabla.* de nuevo DESPUES del rollback
-            # (que tambien expira) dispara un segundo ObjectDeletedError sin
-            # try que lo atrape.
-            tabla_id, tabla_nombre, tabla_fuente = tabla.id, tabla.nombre, tabla.fuente
-
-            if tabla_fuente in TECNOLOGIAS_TABLA_VALIDAS:
-                _actualizar_bitacora_tabla(db, tabla)
-
-            es_de_hoy = tabla.snapshot_fecha == datetime.now(BOLIVIA_TZ).date()
-            estado_tabla = (tabla.estado or "").strip().upper()
-            if (
-                (tabla.color or "").strip().lower() == "red"
-                and estado_tabla not in ESTADOS_TABLA_TRANSITORIOS
-                and es_de_hoy
-            ):
-                # Si el snapshot es de un dia anterior (p.ej. la carga de
-                # ayer que llego tarde o quedo colgada, y hoy todavia no se
-                # actualizo), el proceso de hoy ni siquiera corrio aun: no es
-                # un fallo silencioso nuevo, es una fila vieja. Alertar aca
-                # seria un falso positivo -se espera a que llegue un
-                # snapshot con fecha de hoy. Tampoco alerta si la tabla
-                # sigue "EN PROCESO": todavia esta cargando, el rojo es
-                # transitorio, no un fallo.
-                _revisar_incoherencia_desde_tabla(db, tabla)
-
-            estado_poller.ultimo_id_tablas_revisado = tabla_id
-            db.commit()
-            procesadas += 1
-        except ObjectDeletedError:
-            db.rollback()
-            tabla_id = inspect(tabla).identity[0]
-            logger.warning(
-                "Tabla id %s borrada (posible purga concurrente) durante el ciclo del poller; se saltea",
-                tabla_id,
-            )
-            estado_poller.ultimo_id_tablas_revisado = tabla_id
-            db.commit()
+            enviar_actualizacion_push(token_row.fcm_token)
+            enviados += 1
+        except messaging.UnregisteredError:
+            logger.warning("Token FCM de usuario %s ya no esta registrado en Firebase: se elimina", usuario.id)
+            db.delete(token_row)
         except Exception:
-            # Mismo motivo que en revisar_procesos_nuevos: commitear una
-            # tabla a la vez para que una fila rota no trabe el cursor (ni
-            # se lleve puesto el trabajo ya bueno de las tablas anteriores
-            # del mismo lote al hacer rollback).
-            db.rollback()
-            logger.exception(
-                "Fallo actualizando bitacora/incoherencia para tabla %s [%s] (id %s); se salta y se sigue",
-                tabla_nombre, tabla_fuente, tabla_id,
-            )
-            estado_poller.ultimo_id_tablas_revisado = tabla_id
-            db.commit()
+            logger.exception("Fallo al avisar actualizacion de catalogos a usuario %s", usuario.id)
+    db.commit()
+    return enviados
 
-    return procesadas
+
+# Retencion en la base de App_Control. Nadie mas purga estas tablas: antes lo
+# hacia la replica de OP_PROD (catalogos: solo el dia de hoy). Los catalogos
+# se guardan 60 dias como en MySQL (alcanza para el grafico de fallas y para
+# resincronizar episodios); eventos y alertas, 180.
+RETENCION_CATALOGOS_DIAS = 60
+RETENCION_EVENTOS_DIAS = 180
+RETENCION_ALERTAS_DIAS = 180
+_ultima_purga: date | None = None
+
+
+def purgar_historial(db: Session, hoy: date | None = None) -> dict:
+    """Borra lo mas viejo que la retencion, una vez por dia (la primera vez
+    que corre el ciclo cada dia). Las filas de catalogo que todavia tienen
+    alertas apuntandolas (FK) se dejan: se van solas cuando se purguen esas
+    alertas, 120 dias despues."""
+    global _ultima_purga
+
+    hoy = hoy or datetime.now(BOLIVIA_TZ).date()
+    if _ultima_purga == hoy:
+        return {}
+
+    limite_catalogos = hoy - timedelta(days=RETENCION_CATALOGOS_DIAS)
+    limite_eventos = datetime.combine(hoy - timedelta(days=RETENCION_EVENTOS_DIAS), time.min)
+    limite_alertas = datetime.combine(hoy - timedelta(days=RETENCION_ALERTAS_DIAS), time.min)
+    referenciados = select(models.Alerta.control_id)
+
+    try:
+        borrado = {
+            "alertas": db.query(models.Alerta)
+            .filter(models.Alerta.creado_en < limite_alertas)
+            .delete(synchronize_session=False),
+            "procesos": db.query(models.Control)
+            .filter(models.Control.snapshot_fecha < limite_catalogos, models.Control.id.not_in(referenciados))
+            .delete(synchronize_session=False),
+            "tablas": db.query(models.Tabla)
+            .filter(models.Tabla.snapshot_fecha < limite_catalogos)
+            .delete(synchronize_session=False),
+            "eventos": db.query(models.CatalogoCambio)
+            .filter(models.CatalogoCambio.ts < limite_eventos)
+            .delete(synchronize_session=False),
+        }
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Fallo la purga diaria del historial; se reintenta en el proximo ciclo")
+        return {}
+
+    _ultima_purga = hoy
+    if any(borrado.values()):
+        logger.info("Purga diaria del historial: %s", borrado)
+    return borrado

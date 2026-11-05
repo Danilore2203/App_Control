@@ -9,7 +9,7 @@ from slowapi.errors import RateLimitExceeded
 
 from sqlalchemy import text
 
-from app.database import Base, SessionLocal, engine
+from app.database import Base, engine
 from app.rate_limit import limiter
 from app.routers import admin as admin_router
 from app.routers import alertas as alertas_router
@@ -18,13 +18,7 @@ from app.routers import bitacora as bitacora_router
 from app.routers import controles as controles_router
 from app.routers import infra as infra_router
 from app.routers import internal as internal_router
-from app.services.poller import (
-    resincronizar_episodios_abiertos,
-    revisar_alarmas_activas,
-    revisar_procesos_nuevos,
-    revisar_resumen_no_core,
-    revisar_tablas_nuevas,
-)
+from app.services.ciclo import ejecutar_ciclo
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,6 +44,19 @@ def _migrar_columnas_legacy():
             conn.execute(text("ALTER TABLE episodios_alerta DROP COLUMN IF EXISTS push_ok"))
         except Exception:
             logger.exception("No se pudo correr la migracion de push_ok (revisar a mano si persiste)")
+    # Columnas que llegaron despues de que las tablas ya existian en la base;
+    # create_all() no agrega columnas a tablas existentes. Idempotentes.
+    columnas_nuevas = (
+        ("dataops_catalogo_procesos", "estado_ts TIMESTAMP WITHOUT TIME ZONE"),
+        ("dataops_catalogo_tablas", "estado_ts TIMESTAMP WITHOUT TIME ZONE"),
+        ("poller_state", "ultimo_cambio_revisado INTEGER NOT NULL DEFAULT 0"),
+    )
+    for tabla, columna in columnas_nuevas:
+        with engine.begin() as conn:
+            try:
+                conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {columna}"))
+            except Exception:
+                logger.exception("No se pudo agregar la columna %s a %s (revisar a mano si persiste)", columna, tabla)
 
 
 _migrar_columnas_legacy()
@@ -90,56 +97,19 @@ def _asegurar_indices():
         logger.exception("No se pudo crear el indice de dataops_catalogo_procesos")
 
 
-INTERVALO_POLLER_SEGUNDOS = 60
-
-# Clave arbitraria para el advisory lock de Postgres (pg_try_advisory_lock usa
-# un bigint como namespace propio, no colisiona con nada mas de la base).
-_POLLER_LOCK_KEY = 892375100
-
-
-def _ejecutar_poller():
-    # Advisory lock a nivel de sesion: si Railway solapa dos instancias
-    # durante un redeploy (la vieja se apaga mientras la nueva ya arranco su
-    # propio _loop_poller), sin esto ambas leen el mismo cursor de
-    # PollerState, ninguna ve el episodio que la otra esta por insertar, y
-    # cada una crea su propia fila para el mismo proceso -bitacora queda con
-    # el mismo fallo duplicado. Con el lock, la instancia que no lo consigue
-    # simplemente se salta este ciclo (el que sigue, 60s despues, ya encuentra
-    # el cursor actualizado por la que si corrio).
-    conn = engine.connect()
-    try:
-        adquirido = conn.execute(
-            text("SELECT pg_try_advisory_lock(:clave)"), {"clave": _POLLER_LOCK_KEY}
-        ).scalar()
-        if not adquirido:
-            logger.info("Otra instancia ya tiene el poller corriendo; se salta este ciclo")
-            return
-
-        db = SessionLocal()
-        try:
-            # Va primero y no depende de las otras dos: decide la alarma mirando
-            # el estado ACTUAL de cada proceso, no filas nuevas ni el cursor de
-            # bitacora, para que una falla en esas otras dos nunca le cueste una
-            # alarma real al usuario.
-            revisar_alarmas_activas(db)
-            revisar_resumen_no_core(db)
-            revisar_procesos_nuevos(db)
-            revisar_tablas_nuevas(db)
-            resincronizar_episodios_abiertos(db)
-        finally:
-            db.close()
-    finally:
-        try:
-            conn.execute(text("SELECT pg_advisory_unlock(:clave)"), {"clave": _POLLER_LOCK_KEY})
-        except Exception:
-            pass
-        conn.close()
+# Timer de respaldo. El ciclo real se dispara al recibir cada push de OP_PROD
+# (POST /internal/catalogos, cada 5 min cuando hay cambios); esto solo cubre
+# reintentos de push FCM fallidos y el resumen horario de no-core si por
+# algun motivo no llega ningun push. Antes era 60 s y era la UNICA forma de
+# enterarse de algo: ahora los datos no pueden cambiar mas seguido que el
+# snapshot de OP_PROD, asi que sondear mas rapido no aporta nada.
+INTERVALO_POLLER_SEGUNDOS = 300
 
 
 async def _loop_poller():
     while True:
         try:
-            await asyncio.to_thread(_ejecutar_poller)
+            await asyncio.to_thread(ejecutar_ciclo)
         except Exception:
             logger.exception("El poller fallo en este ciclo, reintenta en %ss", INTERVALO_POLLER_SEGUNDOS)
         await asyncio.sleep(INTERVALO_POLLER_SEGUNDOS)

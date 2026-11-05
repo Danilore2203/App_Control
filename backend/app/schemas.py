@@ -1,6 +1,6 @@
 import re
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
@@ -120,6 +120,7 @@ class ControlOut(BaseModel):
     version: Optional[str] = None
     snapshot_fecha: date
     snapshot_ts: datetime
+    estado_ts: Optional[datetime] = None  # hora real del ultimo cambio de estado
 
 
 class HistorialFallaOut(BaseModel):
@@ -224,3 +225,92 @@ class BitacoraResumenAnioOut(BaseModel):
     total_anual: int
     variacion_pct: Optional[float] = None
     meses: list[BitacoraResumenMesOut]
+
+
+# ---- Catalogos empujados por OP_PROD (POST /internal/catalogos) ----
+# Los ids son los de MySQL (c137.*): OP_PROD los manda tal cual y aca se
+# conservan, para que alertas.control_id y los cursores del poller sigan
+# apuntando a lo mismo en los dos lados.
+
+
+class CatalogoProcesoIn(BaseModel):
+    id: int
+    nombre: str
+    fuente: str
+    estado: str
+    color: str
+    hora_programada: Optional[str] = None
+    hora_log: Optional[str] = None
+    hora_fin: Optional[str] = None
+    core: Optional[str] = None
+    ruta: Optional[str] = None
+    version: Optional[str] = None
+    snapshot_fecha: date
+    snapshot_ts: datetime
+    estado_ts: Optional[datetime] = None
+
+
+class CatalogoTablaIn(BaseModel):
+    id: int
+    nombre: str
+    fuente: str
+    estado: str
+    color: str
+    cantidad: int = 0
+    layer: Optional[str] = None
+    hora_programada: Optional[str] = None
+    ultima_fecha: Optional[str] = None
+    snapshot_fecha: date
+    snapshot_ts: datetime
+    estado_ts: Optional[datetime] = None
+
+
+class CatalogoEventoIn(BaseModel):
+    id: int
+    tipo: Literal["PROCESO", "TABLA"]
+    nombre: str
+    fuente: str = ""
+    estado_anterior: Optional[str] = None  # None = aparecio durante el dia
+    estado_nuevo: str
+    color_nuevo: str = "gray"
+    ts: datetime
+
+
+class CatalogoProcesosIn(BaseModel):
+    upsert: list[CatalogoProcesoIn] = Field(default_factory=list)
+    bajas: list[int] = Field(default_factory=list)
+
+
+class CatalogoTablasIn(BaseModel):
+    upsert: list[CatalogoTablaIn] = Field(default_factory=list)
+    bajas: list[int] = Field(default_factory=list)
+
+
+class CatalogoPushIn(BaseModel):
+    """Un ciclo de snapshot de OP_PROD: lo que cambio en los catalogos de
+    `fecha` y los eventos de cambio de estado. Con `completo=True` el envio
+    trae todas las filas del dia y lo que no venga se elimina."""
+
+    fecha: date
+    completo: bool = False
+    procesos: CatalogoProcesosIn = Field(default_factory=CatalogoProcesosIn)
+    tablas: CatalogoTablasIn = Field(default_factory=CatalogoTablasIn)
+    eventos: list[CatalogoEventoIn] = Field(default_factory=list)
+
+
+class CatalogoSeccionOut(BaseModel):
+    insertadas: int
+    actualizadas: int
+    eliminadas: int
+    omitidas: int  # bajas que no se borraron por tener alertas asociadas
+
+
+class CatalogoEventosOut(BaseModel):
+    insertados: int
+    ignorados: int  # ya existian (reintento del mismo envio)
+
+
+class CatalogoPushOut(BaseModel):
+    procesos: CatalogoSeccionOut
+    tablas: CatalogoSeccionOut
+    eventos: CatalogoEventosOut

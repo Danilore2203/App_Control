@@ -92,6 +92,28 @@ def enviar_alerta_push(
     return messaging.send(mensaje)
 
 
+def enviar_actualizacion_push(fcm_token: str) -> str:
+    """Aviso silencioso (sin titulo ni cuerpo, no se muestra nada) de que
+    los catalogos cambiaron: la app, si esta abierta, vuelve a pedir
+    /controles. Reemplaza al timer de 60 s con el que la app preguntaba
+    aunque no hubiera nada nuevo -ahora se refresca solo cuando OP_PROD
+    mando cambios, en el mismo minuto. Prioridad normal: si el celular esta
+    dormido no hace falta despertarlo, lo lee al volver."""
+
+    inicializar_firebase()
+
+    mensaje = messaging.Message(
+        token=fcm_token,
+        data={"tipo": "catalogos_actualizados"},
+        android=messaging.AndroidConfig(priority="normal"),
+        apns=messaging.APNSConfig(
+            headers={"apns-priority": "5", "apns-push-type": "background"},
+            payload=messaging.APNSPayload(aps=messaging.Aps(content_available=True)),
+        ),
+    )
+    return messaging.send(mensaje)
+
+
 def enviar_resumen_push(fcm_token: str, titulo: str, cuerpo: str) -> str:
     """Resumen agregado de procesos NO core en error/demorado (ver
     revisar_resumen_no_core en poller.py): a diferencia de enviar_alerta_push,

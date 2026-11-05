@@ -1,8 +1,7 @@
-import "dart:async";
-
 import "package:flutter/material.dart";
 
 import "../models/bitacora_error.dart";
+import "../services/actualizaciones_service.dart";
 import "../services/api_service.dart";
 import "../theme.dart";
 import "../utils/meses_es.dart";
@@ -131,7 +130,7 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
   // /controles, no va a matchear- para no tocar la tabla de bitacora.
   Set<String> _nombresCoreActuales = {};
   late final AnimationController _pulseController;
-  Timer? _autoRefresco;
+  late final SuscripcionActualizaciones _actualizaciones;
 
   @override
   void initState() {
@@ -142,11 +141,15 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
       vsync: this,
       duration: const Duration(seconds: 1),
     )..repeat(reverse: true);
-    // Esta pantalla llega con una foto fija (entradasIniciales) que se
-    // quedaba congelada hasta salir y volver a entrar. Se refresca sola
-    // cada 60s mientras el usuario la tenga abierta revisando el dia.
-    _autoRefresco = Timer.periodic(const Duration(seconds: 60), (_) async {
-      if (!mounted) return;
+    // Esta pantalla llega con una foto fija (entradasIniciales). Se refresca
+    // cuando el backend avisa que hay cambios (y al volver a primer plano),
+    // en vez de preguntar cada 60 s aunque no haya nada.
+    _actualizaciones = SuscripcionActualizaciones(_refrescarEntradas);
+  }
+
+  Future<void> _refrescarEntradas() async {
+    if (!mounted) return;
+    try {
       final nuevasEntradas =
           await _apiService.obtenerBitacoraEntradas(widget.anio, mes: widget.mes);
       if (!mounted) return;
@@ -154,14 +157,16 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
         _entradas =
             nuevasEntradas.where((e) => e.fechaHora.day == widget.dia).toList();
       });
-    });
+    } catch (_) {
+      // Sin red o servidor caido: se queda con lo que ya tenia.
+    }
   }
 
   @override
   void dispose() {
     _busquedaController.dispose();
     _pulseController.dispose();
-    _autoRefresco?.cancel();
+    _actualizaciones.cancelar();
     super.dispose();
   }
 

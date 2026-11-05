@@ -72,7 +72,12 @@ class Control(Base):
     ruta = Column(String(500), nullable=True)
     version = Column(String(100), nullable=True)
     snapshot_fecha = Column(Date, nullable=False)
+    # Hora en que la fila cambio por ultima vez (cualquier columna).
     snapshot_ts = Column(DateTime, nullable=False)
+    # Hora en que cambio el ESTADO por ultima vez. Es la que debe usarse para
+    # mostrar "en error desde las HH:MM": snapshot_ts tambien se mueve por
+    # cambios de hora_log/hora_fin que no son un cambio de estado.
+    estado_ts = Column(DateTime, nullable=True)
 
     alertas = relationship("Alerta", back_populates="control")
 
@@ -94,6 +99,28 @@ class Tabla(Base):
     ultima_fecha = Column(String(30), nullable=True)
     snapshot_fecha = Column(Date, nullable=False)
     snapshot_ts = Column(DateTime, nullable=False)
+    estado_ts = Column(DateTime, nullable=True)
+
+
+class CatalogoCambio(Base):
+    """Un evento por cada cambio de estado de un proceso o tabla, tal como lo
+    registra OP_PROD en c137.dataops_catalogo_cambios (mismo id). Desde que
+    los catalogos se actualizan en el lugar (una fila por nombre y dia, con
+    id estable), esta es la unica tabla donde "aparece algo nuevo" cuando un
+    proceso cambia: es la que debe recorrer el poller por cursor de id, no
+    los catalogos."""
+
+    __tablename__ = "dataops_catalogo_cambios"
+    __table_args__ = (Index("ix_dataops_catalogo_cambios_ts", "ts"),)
+
+    id = Column(Integer, primary_key=True)
+    tipo = Column(String(10), nullable=False)  # PROCESO | TABLA
+    nombre = Column(String(255), nullable=False)
+    fuente = Column(String(20), nullable=False, default="")
+    estado_anterior = Column(String(50), nullable=True)  # None = aparecio durante el dia
+    estado_nuevo = Column(String(50), nullable=False)
+    color_nuevo = Column(String(20), nullable=False, default="gray")
+    ts = Column(DateTime, nullable=False)
 
 
 class ProcesoTabla(Base):
@@ -196,8 +223,17 @@ class PollerState(Base):
     __tablename__ = "poller_state"
 
     id = Column(Integer, primary_key=True)
+    # Cursores viejos sobre los catalogos (id > ultimo). Ya no se usan: desde
+    # que OP_PROD actualiza las filas en el lugar, un cambio de estado no
+    # genera una fila nueva en el catalogo, sino un evento en
+    # dataops_catalogo_cambios. Se conservan solo para no alterar la tabla.
     ultimo_id_revisado = Column(Integer, nullable=False, default=0)
     ultimo_id_tablas_revisado = Column(Integer, nullable=False, default=0)
+    # Cursor actual: ultimo id de dataops_catalogo_cambios ya volcado a la
+    # bitacora. Columna aparte (y no reusar ultimo_id_revisado) porque ese
+    # guarda un id de catalogo, que es un numero mucho mayor: reutilizarlo
+    # habria saltado todos los eventos.
+    ultimo_cambio_revisado = Column(Integer, nullable=False, default=0)
 
 
 class EpisodioAlerta(Base):

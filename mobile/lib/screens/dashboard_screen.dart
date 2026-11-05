@@ -4,6 +4,7 @@ import "package:flutter/material.dart";
 
 import "../models/control.dart";
 import "../models/usuario.dart";
+import "../services/actualizaciones_service.dart";
 import "../services/api_service.dart";
 import "../services/infra_service.dart";
 import "../theme.dart";
@@ -44,33 +45,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _bannerBloqueosDescartado = false;
   int _fallosConsecutivosBloqueos = 0;
 
-  Timer? _autoRefrescoControles;
+  late final SuscripcionActualizaciones _actualizaciones;
 
   @override
   void initState() {
     super.initState();
     _controlesFuture = _apiService.obtenerControles();
     _iniciarVigiaBloqueosProd();
-    _iniciarAutoRefrescoControles();
+    // Refresca cuando el backend avisa que hay catalogos nuevos (y al volver
+    // a primer plano), en vez de preguntar cada 60 s aunque no haya nada.
+    // No toca los filtros que el usuario tenga puestos (a diferencia de
+    // _recargarControles, que los resetea porque ese es un refresh explicito
+    // del usuario).
+    _actualizaciones = SuscripcionActualizaciones(() {
+      if (!mounted) return;
+      setState(() => _controlesFuture = _apiService.obtenerControles());
+    });
     _apiService.obtenerPerfil().then((usuario) {
       if (mounted) setState(() => _usuario = usuario);
     }).catchError((_) {
       // El menu simplemente no muestra la seccion de admin si esto falla.
-    });
-  }
-
-  /// Sin esto, la lista de controles quedaba con la foto de cuando se abrio
-  /// la pantalla hasta que el usuario la cerraba y volvia a entrar (o hacia
-  /// pull-to-refresh a mano): un proceso podia cambiar de estado en el
-  /// origen y la app se lo perdia hasta el proximo reingreso. Refresca sola
-  /// cada 60s (mismo ritmo que el poller del backend), sin tocar los
-  /// filtros que el usuario tenga puestos (a diferencia de
-  /// _recargarControles, que los resetea porque ese es un refresh explicito
-  /// del usuario).
-  void _iniciarAutoRefrescoControles() {
-    _autoRefrescoControles = Timer.periodic(const Duration(seconds: 60), (_) {
-      if (!mounted) return;
-      setState(() => _controlesFuture = _apiService.obtenerControles());
     });
   }
 
@@ -79,7 +73,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _busquedaController.dispose();
     _busquedaFocus.dispose();
     _vigiaBloqueosProd?.cancel();
-    _autoRefrescoControles?.cancel();
+    _actualizaciones.cancelar();
     super.dispose();
   }
 
