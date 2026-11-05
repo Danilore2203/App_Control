@@ -77,7 +77,13 @@ def ejecutar_ciclo(avisar_app: bool = False) -> bool:
             try:
                 conn.execute(text("SELECT pg_advisory_unlock(:clave)"), {"clave": _POLLER_LOCK_KEY})
             except Exception:
-                pass
+                # El lock es de SESION: si no se pudo soltar, la conexion no
+                # puede volver al pool con el lock tomado (todos los ciclos
+                # siguientes creerian que "otra instancia" lo tiene, para
+                # siempre). Se invalida para que el pool la descarte y
+                # Postgres libere el lock al cerrarse de verdad.
+                logger.warning("No se pudo soltar el advisory lock; se descarta la conexion")
+                conn.invalidate()
             conn.close()
     finally:
         _lock_proceso.release()

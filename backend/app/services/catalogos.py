@@ -150,7 +150,11 @@ def _aplicar_usuarios(db: Session, seccion: schemas.UsuariosIn) -> schemas.Usuar
             actualizados += 1
         existente.nombre = fila.nombre
         existente.email = fila.email
-        existente.password_hash = fila.password_hash or None
+        # La contrasena local que un usuario configuro en la app NO se pisa
+        # con un NULL de MySQL (alla casi nadie tiene hash): solo se toma la
+        # de MySQL cuando existe, que es cuando alguien la cambio alla.
+        if fila.password_hash:
+            existente.password_hash = fila.password_hash
         existente.activo = fila.activo
         if fila.fecha_creacion is not None:
             existente.fecha_creacion = fila.fecha_creacion

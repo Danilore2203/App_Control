@@ -126,12 +126,15 @@ async def _loop_poller():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     tarea_poller = asyncio.create_task(_loop_poller())
-    # Sin await ni asyncio.to_thread aca: el healthcheck de Railway tiene que
-    # poder pasar apenas la app levanta, sin esperar a que termine de
-    # construirse el indice.
-    asyncio.create_task(asyncio.to_thread(_asegurar_indices))
+    # Sin await ni asyncio.to_thread aca: el healthcheck del hosting tiene
+    # que poder pasar apenas la app levanta, sin esperar a que termine de
+    # construirse el indice. La referencia se guarda porque asyncio solo
+    # mantiene referencias debiles a las tareas: sin esto el GC podia
+    # cancelarla a mitad de camino.
+    tarea_indices = asyncio.create_task(asyncio.to_thread(_asegurar_indices))
     yield
     tarea_poller.cancel()
+    tarea_indices.cancel()
 
 
 app = FastAPI(title="API Controles", lifespan=lifespan)

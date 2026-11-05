@@ -1,8 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import extract, func
+from sqlalchemy import case, extract, func
 from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
@@ -80,24 +80,38 @@ def resumen_anual(
     """Total por mes (para la grilla de 12 meses) + variacion vs el mismo
     periodo del anio anterior (para la tarjeta de resumen YTD)."""
 
+    abierto = case((models.BitacoraError.estado_fin == "ERROR", 1), else_=0)
     filas = (
         db.query(
             extract("month", models.BitacoraError.fecha_hora).label("mes"),
             func.count(models.BitacoraError.id).label("total"),
+            func.sum(abierto).label("abiertos"),
         )
         .filter(extract("year", models.BitacoraError.fecha_hora) == anio)
         .group_by("mes")
         .all()
     )
-    totales_por_mes = {int(mes): int(total) for mes, total in filas}
+    por_mes = {int(mes): (int(total), int(abiertos or 0)) for mes, total, abiertos in filas}
     meses = [
         schemas.BitacoraResumenMesOut(
-            mes=m, total=totales_por_mes.get(m, 0), tiene_error=totales_por_mes.get(m, 0) > 0
+            mes=m,
+            total=por_mes.get(m, (0, 0))[0],
+            tiene_error=por_mes.get(m, (0, 0))[0] > 0,
+            abiertos=por_mes.get(m, (0, 0))[1],
         )
         for m in range(1, 13)
     ]
 
-    ahora = datetime.utcnow()
+    # La bitacora guarda hora local Bolivia (naive); comparar contra UTC
+    # corria "hoy" 4 horas y contaba de mas o de menos segun la hora.
+    ahora = datetime.now(BOLIVIA_TZ).replace(tzinfo=None)
+    inicio_hoy = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+    abiertos_ahora = (
+        db.query(func.count(models.BitacoraError.id)).filter(models.BitacoraError.estado_fin == "ERROR").scalar() or 0
+    )
+    hoy = _contar_en_rango(db, inicio_hoy, ahora)
+    ultimos_7_dias = _contar_en_rango(db, inicio_hoy - timedelta(days=6), ahora)
+
     es_anio_actual = anio == ahora.year
     hasta_actual = ahora if es_anio_actual else datetime(anio, 12, 31, 23, 59, 59)
     desde_actual = datetime(anio, 1, 1)
@@ -112,5 +126,11 @@ def resumen_anual(
         variacion_pct = round((total_anual - total_anterior) / total_anterior * 100, 1)
 
     return schemas.BitacoraResumenAnioOut(
-        anio=anio, total_anual=total_anual, variacion_pct=variacion_pct, meses=meses
+        anio=anio,
+        total_anual=total_anual,
+        variacion_pct=variacion_pct,
+        meses=meses,
+        abiertos_ahora=abiertos_ahora,
+        hoy=hoy,
+        ultimos_7_dias=ultimos_7_dias,
     )

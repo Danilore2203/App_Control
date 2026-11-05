@@ -246,8 +246,24 @@ def _intentar_push(
     refresh). Cualquier otro error (red, cuota, etc.) se loggea completo
     para diagnosticar, pero se conserva el token para reintentar."""
 
-    alerta = models.Alerta(control_id=control_id, usuario_id=usuario.id, mensaje=mensaje, nivel="critica" if critica else "normal")
-    db.add(alerta)
+    # Un reintento (el push fallo en un ciclo anterior y este usuario sigue
+    # pendiente) reutiliza la Alerta que ya quedo registrada sin enviar, en
+    # vez de insertar una nueva cada 5 minutos y llenar /alertas de
+    # duplicados de la misma falla.
+    alerta = (
+        db.query(models.Alerta)
+        .filter(
+            models.Alerta.control_id == control_id,
+            models.Alerta.usuario_id == usuario.id,
+            models.Alerta.mensaje == mensaje,
+            models.Alerta.enviada.is_(False),
+        )
+        .order_by(models.Alerta.id.desc())
+        .first()
+    )
+    if alerta is None:
+        alerta = models.Alerta(control_id=control_id, usuario_id=usuario.id, mensaje=mensaje, nivel="critica" if critica else "normal")
+        db.add(alerta)
     try:
         enviar_alerta_push(
             token_row.fcm_token, titulo=titulo, cuerpo=mensaje, critica=critica, es_demorado=es_demorado,
@@ -415,12 +431,12 @@ def _vista_evento(db: Session, evento: models.CatalogoCambio):
     ver los dos pasos, cada uno con su hora."""
 
     modelo = models.Control if evento.tipo == "PROCESO" else models.Tabla
-    fila = (
-        db.query(modelo)
-        .filter(modelo.nombre == evento.nombre, modelo.snapshot_fecha == evento.ts.date())
-        .order_by(modelo.snapshot_ts.desc())
-        .first()
-    )
+    consulta = db.query(modelo).filter(modelo.nombre == evento.nombre, modelo.snapshot_fecha == evento.ts.date())
+    if evento.fuente:
+        # Un mismo nombre puede existir en dos fuentes (AIRFLOW y DATASTAGE):
+        # sin esto se evaluaba la incoherencia contra el proceso equivocado.
+        consulta = consulta.filter(modelo.fuente == evento.fuente)
+    fila = consulta.order_by(modelo.snapshot_ts.desc()).first()
     if fila is not None:
         datos = {c.name: getattr(fila, c.name) for c in modelo.__table__.columns}
     else:

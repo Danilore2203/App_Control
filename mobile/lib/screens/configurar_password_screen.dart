@@ -4,6 +4,7 @@ import "../services/auth_service.dart";
 import "../services/notification_service.dart";
 import "../theme.dart";
 import "../widgets/dotted_background.dart";
+import "../widgets/version_app.dart";
 import "dashboard_screen.dart";
 
 /// Para cuentas (tipicamente AD) que todavia no tienen una contraseña local
@@ -127,8 +128,7 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                                 color: colorScheme.primaryContainer,
                                 borderRadius: BorderRadius.circular(20),
                               ),
-                              child: Text(
-                                "v0.1.0",
+                              child: VersionApp(
                                 style: AppTextStyles.tech(
                                   color: colorScheme.onPrimaryContainer,
                                   fontSize: 10,

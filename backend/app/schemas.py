@@ -73,9 +73,14 @@ class ConfigurarPasswordIn(BaseModel):
         return valor
 
     @model_validator(mode="after")
-    def _requiere_alguna_verificacion(self) -> "ConfigurarPasswordIn":
-        if not self.password_actual and not self.correo_verificacion:
-            raise ValueError("Debes indicar tu contrasena actual o tu correo de verificacion")
+    def _requiere_password_actual(self) -> "ConfigurarPasswordIn":
+        # correo_verificacion se acepta por compatibilidad con la app, pero
+        # ya no verifica nada (ver auth.configurar_password_local).
+        if not self.password_actual:
+            raise ValueError(
+                "Debes indicar tu contrasena actual. Si todavia no tienes una, entra con Google "
+                "o pide a un administrador que te asigne una."
+            )
         return self
 
 
@@ -218,6 +223,7 @@ class BitacoraResumenMesOut(BaseModel):
     mes: int
     total: int
     tiene_error: bool
+    abiertos: int = 0  # episodios de ese mes que siguen sin resolver
 
 
 class BitacoraResumenAnioOut(BaseModel):
@@ -225,6 +231,11 @@ class BitacoraResumenAnioOut(BaseModel):
     total_anual: int
     variacion_pct: Optional[float] = None
     meses: list[BitacoraResumenMesOut]
+    # Indicadores del momento (no dependen del anio consultado), para la
+    # cabecera de la bitacora: lo que importa hoy, no el acumulado del anio.
+    abiertos_ahora: int = 0
+    hoy: int = 0
+    ultimos_7_dias: int = 0
 
 
 # ---- Catalogos empujados por OP_PROD (POST /internal/catalogos) ----
@@ -395,6 +406,10 @@ class CatalogoPushOut(BaseModel):
     usuarios: Optional[UsuariosOut] = None
     bitacora: Optional[BitacoraOut] = None
     relaciones: Optional[CatalogoSeccionOut] = None
+
+
+class PasswordAdminIn(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
 
 
 class AdministradorIn(BaseModel):

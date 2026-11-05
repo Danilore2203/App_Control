@@ -1,25 +1,13 @@
 import "package:flutter/material.dart";
 
 import "../models/bitacora_error.dart";
+import "../services/actualizaciones_service.dart";
 import "../services/api_service.dart";
 import "../theme.dart";
+import "../utils/meses_es.dart";
 import "../widgets/estado_vacio.dart";
+import "../widgets/titulo_seccion.dart";
 import "bitacora_mes_screen.dart";
-
-const _mesesAbrev = [
-  "ENE",
-  "FEB",
-  "MAR",
-  "ABR",
-  "MAY",
-  "JUN",
-  "JUL",
-  "AGO",
-  "SEP",
-  "OCT",
-  "NOV",
-  "DIC",
-];
 
 /// Version con AppBar propio, para abrir desde el menu lateral. El contenido
 /// vive en [BitacoraContenido] para poder reusarlo tambien como pestana.
@@ -28,20 +16,17 @@ class BitacoraScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: Text("BITÁCORA",
-            style:
-                AppTextStyles.tech(color: colorScheme.onSurface, fontSize: 14)),
-      ),
+      appBar: AppBar(title: const Text("Bitácora")),
       body: const BitacoraContenido(),
     );
   }
 }
 
-/// Bitacora de errores: registro manual de fallas de procesos (AIRFLOW,
-/// DATASTAGE, PENTAHO) y de tablas (QA_CONTROL, PG_PROD), agrupado por mes.
+/// Bitácora de errores: la misma que ve el monitor web (replicada desde
+/// OP_PROD), más las entradas manuales e incoherencias propias de la app.
+/// Arriba, lo que importa ahora (abiertos, hoy, semana); abajo, el año mes
+/// a mes con volumen relativo y cuántos episodios siguen abiertos.
 class BitacoraContenido extends StatefulWidget {
   const BitacoraContenido({super.key});
 
@@ -53,16 +38,35 @@ class _BitacoraContenidoState extends State<BitacoraContenido> {
   final _apiService = ApiService();
   late int _anio;
   late Future<BitacoraResumenAnio> _resumenFuture;
+  late final SuscripcionActualizaciones _actualizaciones;
 
   @override
   void initState() {
     super.initState();
     _anio = DateTime.now().year;
     _cargar();
+    _actualizaciones = SuscripcionActualizaciones(() {
+      if (mounted) setState(_cargar);
+    });
+  }
+
+  @override
+  void dispose() {
+    _actualizaciones.cancelar();
+    super.dispose();
   }
 
   void _cargar() {
     _resumenFuture = _apiService.obtenerBitacoraResumen(_anio);
+  }
+
+  Future<void> _recargar() async {
+    setState(_cargar);
+    try {
+      await _resumenFuture;
+    } catch (_) {
+      // El FutureBuilder muestra el error.
+    }
   }
 
   void _cambiarAnio(int delta) {
@@ -77,7 +81,7 @@ class _BitacoraContenidoState extends State<BitacoraContenido> {
       MaterialPageRoute(
           builder: (_) => BitacoraMesScreen(anio: _anio, mes: mes)),
     );
-    setState(_cargar);
+    if (mounted) setState(_cargar);
   }
 
   @override
@@ -96,264 +100,296 @@ class _BitacoraContenidoState extends State<BitacoraContenido> {
             icono: Icons.error_outline,
             mensaje: "No se pudo cargar la bitácora.",
             colorIcono: colorScheme.error,
+            onReintentar: _recargar,
           );
         }
 
         final resumen = snapshot.data!;
+        final esAnioActual = resumen.anio == ahora.year;
+        final maximoMes = resumen.meses.fold<int>(0, (m, e) => e.total > m ? e.total : m);
 
-        return ListView(
-            padding: const EdgeInsets.all(16),
+        return RefreshIndicator(
+          onRefresh: _recargar,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "PERIODO ACTUAL",
-                        style: AppTextStyles.tech(
-                            color: colorScheme.onSurfaceVariant, fontSize: 10),
-                      ),
-                      Text(
-                        "${resumen.anio}",
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineMedium
-                            ?.copyWith(
-                                color: colorScheme.primary,
-                                fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      IconButton.outlined(
-                        onPressed: () => _cambiarAnio(-1),
-                        icon: const Icon(Icons.chevron_left),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton.outlined(
-                        onPressed: resumen.anio >= ahora.year
-                            ? null
-                            : () => _cambiarAnio(1),
-                        icon: const Icon(Icons.chevron_right),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "TOTAL ERRORES ${resumen.anio == ahora.year ? 'YTD' : ''}",
-                          style: AppTextStyles.tech(
-                              color: colorScheme.onSurfaceVariant,
-                              fontSize: 10),
-                        ),
-                        Text(
-                          "${resumen.totalAnual}",
-                          style: AppTextStyles.tech(
-                              color: colorScheme.primary,
-                              fontSize: 26,
-                              fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
-                    if (resumen.variacionPct != null)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: (resumen.variacionPct! >= 0
-                                      ? StatusColors.critico
-                                      : StatusColors.exitoso)
-                                  .withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  resumen.variacionPct! >= 0
-                                      ? Icons.trending_up
-                                      : Icons.trending_down,
-                                  size: 14,
-                                  color: resumen.variacionPct! >= 0
-                                      ? StatusColors.critico
-                                      : StatusColors.exitoso,
-                                ),
-                                const SizedBox(width: 2),
-                                Text(
-                                  "${resumen.variacionPct! >= 0 ? '+' : ''}${resumen.variacionPct}%",
-                                  style: TextStyle(
-                                    color: resumen.variacionPct! >= 0
-                                        ? StatusColors.critico
-                                        : StatusColors.exitoso,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text("vs ${resumen.anio - 1}",
-                              style: TextStyle(
-                                  color: colorScheme.onSurfaceVariant,
-                                  fontSize: 11)),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
+              _IndicadoresAhora(resumen: resumen, onVerHoy: () => _abrirMes(ahora.month)),
               const SizedBox(height: 24),
-              Text(
-                "BITÁCORA MENSUAL",
-                style: AppTextStyles.tech(
-                    color: colorScheme.onSurfaceVariant, fontSize: 10),
-              ),
-              const SizedBox(height: 10),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: 12,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 0.95,
+              TituloSeccion(
+                "Por mes",
+                accion: _SelectorAnio(
+                  anio: resumen.anio,
+                  puedeAvanzar: !esAnioActual,
+                  onCambiar: _cambiarAnio,
                 ),
-                itemBuilder: (context, index) {
-                  final mesInfo = resumen.meses[index];
-                  final esHoy =
-                      resumen.anio == ahora.year && mesInfo.mes == ahora.month;
-                  return _TarjetaMes(
-                    etiqueta: _mesesAbrev[index],
-                    tieneError: mesInfo.tieneError,
-                    total: mesInfo.total,
-                    esHoy: esHoy,
-                    onTap: () => _abrirMes(mesInfo.mes),
-                  );
-                },
               ),
+              const SizedBox(height: 4),
+              _ResumenAnio(resumen: resumen, esAnioActual: esAnioActual),
+              const SizedBox(height: 12),
+              for (final mesInfo in resumen.meses) ...[
+                _FilaMes(
+                  nombre: nombresMesEs[mesInfo.mes - 1],
+                  info: mesInfo,
+                  maximo: maximoMes,
+                  esActual: esAnioActual && mesInfo.mes == ahora.month,
+                  esFuturo: esAnioActual && mesInfo.mes > ahora.month ||
+                      resumen.anio > ahora.year,
+                  onTap: () => _abrirMes(mesInfo.mes),
+                ),
+                const SizedBox(height: 8),
+              ],
             ],
-          );
-        },
-      );
+          ),
+        );
+      },
+    );
   }
 }
 
-class _TarjetaMes extends StatelessWidget {
-  final String etiqueta;
-  final bool tieneError;
-  final int total;
-  final bool esHoy;
-  final VoidCallback onTap;
+class _IndicadoresAhora extends StatelessWidget {
+  const _IndicadoresAhora({required this.resumen, required this.onVerHoy});
 
-  const _TarjetaMes({
-    required this.etiqueta,
-    required this.tieneError,
-    required this.total,
-    required this.esHoy,
-    required this.onTap,
-  });
+  final BitacoraResumenAnio resumen;
+  final VoidCallback onVerHoy;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final color = esHoy
-        ? colorScheme.primary
-        : tieneError
-            ? StatusColors.critico
-            : colorScheme.onSurfaceVariant.withValues(alpha: 0.4);
+    final hayAbiertos = resumen.abiertosAhora > 0;
+    return Row(
+      children: [
+        Expanded(
+          child: IndicadorTile(
+            etiqueta: "Abiertos",
+            valor: "${resumen.abiertosAhora}",
+            icono: hayAbiertos ? Icons.error_outline : Icons.check_circle_outline,
+            color: hayAbiertos ? StatusColors.critico : StatusColors.exitoso,
+            onTap: onVerHoy,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: IndicadorTile(
+            etiqueta: "Hoy",
+            valor: "${resumen.hoy}",
+            icono: Icons.today_outlined,
+            onTap: onVerHoy,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: IndicadorTile(
+            etiqueta: "7 días",
+            valor: "${resumen.ultimos7Dias}",
+            icono: Icons.date_range_outlined,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
-    return Material(
-      color: esHoy
-          ? colorScheme.primary.withValues(alpha: 0.1)
-          : colorScheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: esHoy
-                  ? colorScheme.primary.withValues(alpha: 0.4)
-                  : tieneError
-                      ? StatusColors.critico.withValues(alpha: 0.35)
-                      : Colors.transparent,
+class _ResumenAnio extends StatelessWidget {
+  const _ResumenAnio({required this.resumen, required this.esAnioActual});
+
+  final BitacoraResumenAnio resumen;
+  final bool esAnioActual;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final variacion = resumen.variacionPct;
+    final sube = variacion != null && variacion >= 0;
+    return Row(
+      children: [
+        Text(
+          "${_formatearMiles(resumen.totalAnual)} episodios en ${resumen.anio}"
+          "${esAnioActual ? ' hasta hoy' : ''}",
+          style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+        ),
+        if (variacion != null) ...[
+          const SizedBox(width: 8),
+          Icon(
+            sube ? Icons.trending_up : Icons.trending_down,
+            size: 14,
+            color: sube ? StatusColors.critico : StatusColors.exitoso,
+          ),
+          const SizedBox(width: 2),
+          Text(
+            "${sube ? '+' : ''}$variacion% vs ${resumen.anio - 1}",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: sube ? StatusColors.critico : StatusColors.exitoso,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          child: Stack(
+        ],
+      ],
+    );
+  }
+}
+
+class _SelectorAnio extends StatelessWidget {
+  const _SelectorAnio({
+    required this.anio,
+    required this.puedeAvanzar,
+    required this.onCambiar,
+  });
+
+  final int anio;
+  final bool puedeAvanzar;
+  final void Function(int delta) onCambiar;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          onPressed: () => onCambiar(-1),
+          icon: const Icon(Icons.chevron_left),
+          tooltip: "Año anterior",
+        ),
+        Text(
+          "$anio",
+          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          onPressed: puedeAvanzar ? () => onCambiar(1) : null,
+          icon: const Icon(Icons.chevron_right),
+          tooltip: "Año siguiente",
+        ),
+      ],
+    );
+  }
+}
+
+/// Una fila por mes: nombre, barra proporcional al mes con más episodios,
+/// total y cuántos siguen abiertos. Reemplaza a la grilla de 12 cuadrados
+/// con un punto de color, que no decía cuánto ni qué quedaba pendiente.
+class _FilaMes extends StatelessWidget {
+  const _FilaMes({
+    required this.nombre,
+    required this.info,
+    required this.maximo,
+    required this.esActual,
+    required this.esFuturo,
+    required this.onTap,
+  });
+
+  final String nombre;
+  final BitacoraResumenMes info;
+  final int maximo;
+  final bool esActual;
+  final bool esFuturo;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final sinDatos = info.total == 0;
+    final proporcion = maximo == 0 ? 0.0 : info.total / maximo;
+    final colorBarra = info.abiertos > 0
+        ? StatusColors.critico
+        : sinDatos
+            ? colorScheme.outlineVariant
+            : colorScheme.primary;
+    final colorTexto = esFuturo
+        ? colorScheme.onSurfaceVariant.withValues(alpha: 0.45)
+        : colorScheme.onSurface;
+
+    return Material(
+      color: esActual
+          ? colorScheme.primary.withValues(alpha: 0.10)
+          : colorScheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: esFuturo ? null : onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+          child: Row(
             children: [
-              if (tieneError && !esHoy)
-                const Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Text("!",
-                      style: TextStyle(
-                          color: StatusColors.critico,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12)),
-                ),
-              Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      etiqueta,
-                      style: AppTextStyles.tech(
-                        color:
-                            esHoy ? colorScheme.primary : colorScheme.onSurface,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration:
-                          BoxDecoration(shape: BoxShape.circle, color: color),
-                    ),
-                  ],
-                ),
-              ),
-              if (esHoy)
-                Positioned(
-                  bottom: 8,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: Text(
-                      "HOY",
-                      style: AppTextStyles.tech(
-                          color: colorScheme.primary.withValues(alpha: 0.7),
-                          fontSize: 8),
-                    ),
+              SizedBox(
+                width: 92,
+                child: Text(
+                  nombre,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorTexto,
+                    fontWeight: esActual ? FontWeight.w800 : FontWeight.w600,
                   ),
                 ),
+              ),
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: proporcion,
+                    minHeight: 8,
+                    backgroundColor: colorScheme.outlineVariant.withValues(alpha: 0.35),
+                    color: colorBarra,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 58,
+                child: Text(
+                  sinDatos ? "–" : _formatearMiles(info.total),
+                  textAlign: TextAlign.right,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorTexto,
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 54,
+                child: info.abiertos > 0
+                    ? Align(
+                        alignment: Alignment.centerRight,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: StatusColors.critico.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            "${info.abiertos}",
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: StatusColors.critico,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      )
+                    : Icon(
+                        Icons.chevron_right,
+                        size: 18,
+                        color: esFuturo
+                            ? Colors.transparent
+                            : colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                      ),
+              ),
             ],
           ),
         ),
       ),
     );
   }
+}
+
+String _formatearMiles(int n) {
+  final texto = n.toString();
+  final buffer = StringBuffer();
+  for (var i = 0; i < texto.length; i++) {
+    final restantes = texto.length - i;
+    buffer.write(texto[i]);
+    if (restantes > 1 && restantes % 3 == 1) buffer.write(".");
+  }
+  return buffer.toString();
 }

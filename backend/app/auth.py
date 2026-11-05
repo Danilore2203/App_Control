@@ -155,11 +155,15 @@ def configurar_password_local(
     password_nueva: str,
     db: Session,
 ) -> Optional[models.Usuario]:
-    """Permite a un usuario definir su contrasena local. Si la cuenta ya tiene
-    password_hash (quiere cambiarla), exige la actual (contra el monitor/AD, o
-    contra el password_hash). Si es la primera vez (password_hash aun None),
-    alcanza con que el correo ingresado coincida con el que ya tiene la cuenta
-    en la base (verificacion mas debil, sin correo real de por medio)."""
+    """Permite a un usuario definir su contrasena local probando que es el:
+    con su contrasena actual (contra el monitor/AD si esta configurado, o
+    contra el password_hash local).
+
+    Ya NO alcanza con "escribir el correo que figura en la cuenta": los
+    correos corporativos son predecibles (nombre.apellido@...) y cualquiera
+    podia apropiarse de una cuenta sin contrasena. Quien todavia no tiene
+    contrasena local entra con Google o le pide a un administrador que le
+    asigne una (POST /admin/usuarios/{id}/password)."""
 
     usuario = buscar_usuario_por_identificador(identificador, db)
     if usuario is None or not usuario.activo:
@@ -167,11 +171,7 @@ def configurar_password_local(
 
     verificada = False
 
-    if not usuario.password_hash and correo_verificacion:
-        if usuario.email and usuario.email.strip().lower() == correo_verificacion.strip().lower():
-            verificada = True
-
-    if not verificada and password_actual:
+    if password_actual:
         verificada = autenticar_contra_monitor(usuario.username, password_actual)
         if not verificada and usuario.password_hash:
             verificada = verificar_password(password_actual, usuario.password_hash)

@@ -35,7 +35,9 @@ def _construir_control_out(control: models.Control) -> schemas.ControlOut:
 
 @router.get("", response_model=List[schemas.ControlOut])
 def listar_controles(
-    limit: int = 2000,
+    # Techo de seguridad, no paginacion: la app pide todo. Con 2000 se
+    # cortaban por orden alfabetico los procesos de mas, sin aviso ni alarma.
+    limit: int = 10000,
     db: Session = Depends(get_db),
     usuario_actual: models.Usuario = Depends(auth.obtener_usuario_actual),
 ):

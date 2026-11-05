@@ -134,8 +134,11 @@ class _AlertasScreenState extends State<AlertasScreen> {
       final ts = control.snapshotTs;
       return "${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')}";
     }
-    if (texto.contains(" ")) return texto.split(" ").last.substring(0, 5);
-    return texto.length >= 5 ? texto.substring(0, 5) : texto;
+    // "2026-11-05 08:47:00" -> "08:47"; si la parte de la hora viene mas
+    // corta ("8:47", "N/A"), se devuelve tal cual: substring(0, 5) a ciegas
+    // tiraba RangeError y rompia toda la pestana.
+    final parte = texto.contains(" ") ? texto.split(" ").last : texto;
+    return parte.length >= 5 ? parte.substring(0, 5) : parte;
   }
 
   Widget _buildResumenCore(List<Control> controles) {
