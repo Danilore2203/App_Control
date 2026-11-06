@@ -12,14 +12,50 @@ class BrandColors {
 
 /// Colores funcionales de estado (error/advertencia/exito/info), fijos e
 /// independientes del tema claro/oscuro para que un proceso "en error" se
-/// vea siempre igual de critico.
+/// vea siempre igual de critico. Son los mismos tokens --pm-* del monitor
+/// web de OP (procesos.css), para que app y web se lean igual.
 class StatusColors {
-  static const critico = Color(0xFFFF5252);
-  static const advertencia = Color(0xFFFFB300);
-  static const exitoso = Color(0xFF4CAF50);
-  static const info = Color(0xFF2196F3);
-  static const demorado = Color(0xFFFFD600);
-  static const neutral = Color(0xFF9E9E9E);
+  static const critico = Color(0xFFD93448);
+  static const advertencia = Color(0xFFC97F05);
+  static const exitoso = Color(0xFF1F9D55);
+  static const info = Color(0xFF1F6FD0);
+  static const demorado = Color(0xFFE0A526);
+  static const neutral = Color(0xFF7C877A);
+}
+
+/// Tokens del monitor web de OP (--pm-* en procesos.css), portados tal cual
+/// para que la app se vea como la web: superficies "vidrio" translucidas
+/// sobre un fondo con brillo lima, bordes finos, radio 16.
+class OpTokens {
+  // Claro
+  static const surfaceLight = Color(0xFFFFFFFF);
+  static const surface2Light = Color(0xFFF6F8F3);
+  static const surface3Light = Color(0xFFEEF2EA);
+  static const pageLight = Color(0xFFEEF0F4);
+  static const borderLight = Color(0x171F241F); // rgba(31,36,31,.09)
+  static const borderStrongLight = Color(0x291F241F); // .16
+  static const textLight = Color(0xFF1C211C);
+  static const text2Light = Color(0xFF4A5549);
+  static const text3Light = Color(0xFF7C877A);
+  static const accentLight = Color(0xFFBFD730);
+  static const accentInkLight = Color(0xFF55731A);
+  static const glassLight = Color(0xC4FFFFFF); // rgba(255,255,255,.77)
+
+  // Oscuro
+  static const surfaceDark = Color(0xFF2B302E);
+  static const surface2Dark = Color(0xFF333937);
+  static const surface3Dark = Color(0xFF3A413E);
+  static const pageDark = Color(0xFF141414);
+  static const borderDark = Color(0x14E8EEE4); // rgba(232,238,228,.08)
+  static const borderStrongDark = Color(0x29E8EEE4); // .16
+  static const textDark = Color(0xFFE9EFE5);
+  static const text2Dark = Color(0xFFC3CCBF);
+  static const text3Dark = Color(0xFF8F9A8C);
+  static const accentDark = Color(0xFFCFE24A);
+  static const accentInkDark = Color(0xFFD7EB55);
+  static const glassDark = Color(0xB32B302E); // rgba(43,48,46,.70)
+
+  static const radius = 16.0;
 }
 
 /// Esquema de color exacto "VIVA Operational Control" (NOC Control Room)
@@ -82,6 +118,10 @@ class AppTextStyles {
 /// Tema de la app: sigue automaticamente el modo claro/oscuro del celular
 /// (ThemeMode.system en main.dart), usando siempre los colores de marca.
 class AppTheme {
+  /// Las pruebas lo ponen en false: google_fonts intenta descargar Inter y
+  /// en el entorno de test no hay red ni assets, y falla el test entero.
+  static bool usarGoogleFonts = true;
+
   static ThemeData get light => _build(Brightness.light);
 
   static ThemeData get dark => _build(Brightness.dark);
@@ -95,75 +135,142 @@ class AppTheme {
     final base = ColorScheme.fromSeed(
         seedColor: BrandColors.lima, brightness: brightness);
 
+    // Mapa de los tokens --pm-* del monitor web a los roles de Material:
+    //   surface               -> fondo de pagina (se pinta con FondoApp)
+    //   surfaceContainerHigh  -> "vidrio": tarjetas translucidas
+    //   surfaceContainerHighest -> superficie 3 (chips, pills, inputs)
+    //   onSurface / onSurfaceVariant / outline -> text / text-2 / text-3
+    //   outlineVariant        -> borde fino
     final colorScheme = isDark
         ? base.copyWith(
-            primary: VivaColors.primary,
-            onPrimary: VivaColors.onPrimary,
-            primaryContainer: VivaColors.primaryContainer,
-            onPrimaryContainer: VivaColors.onPrimaryContainer,
-            secondary: VivaColors.secondary,
-            onSecondary: VivaColors.onSecondary,
-            secondaryContainer: VivaColors.secondaryContainer,
-            onSecondaryContainer: VivaColors.onSecondaryContainer,
-            tertiary: VivaColors.tertiary,
-            onTertiary: VivaColors.onTertiary,
-            tertiaryContainer: VivaColors.tertiaryContainer,
-            onTertiaryContainer: VivaColors.onTertiaryContainer,
-            error: VivaColors.error,
-            onError: VivaColors.onError,
-            errorContainer: VivaColors.errorContainer,
-            onErrorContainer: VivaColors.onErrorContainer,
-            surface: VivaColors.surface,
-            onSurface: VivaColors.onSurface,
-            surfaceDim: VivaColors.surfaceDim,
-            surfaceBright: VivaColors.surfaceBright,
-            surfaceContainerLowest: VivaColors.surfaceContainerLowest,
-            surfaceContainerLow: VivaColors.surfaceContainerLow,
-            surfaceContainer: VivaColors.surfaceContainer,
-            surfaceContainerHigh: VivaColors.surfaceContainerHigh,
-            surfaceContainerHighest: VivaColors.surfaceContainerHighest,
-            onSurfaceVariant: VivaColors.onSurfaceVariant,
-            outline: VivaColors.outline,
-            outlineVariant: VivaColors.outlineVariant,
-            inverseSurface: VivaColors.inverseSurface,
-            onInverseSurface: VivaColors.inverseOnSurface,
-            inversePrimary: VivaColors.inversePrimary,
-            surfaceTint: VivaColors.surfaceTint,
+            primary: OpTokens.accentDark,
+            onPrimary: OpTokens.textLight,
+            primaryContainer: OpTokens.accentDark.withValues(alpha: 0.18),
+            onPrimaryContainer: OpTokens.accentInkDark,
+            secondary: OpTokens.accentInkDark,
+            onSecondary: OpTokens.textLight,
+            secondaryContainer: OpTokens.surface3Dark,
+            onSecondaryContainer: OpTokens.textDark,
+            tertiary: OpTokens.text2Dark,
+            error: const Color(0xFFFF8B98),
+            onError: const Color(0xFF2A0D10),
+            errorContainer: const Color(0x33D93448),
+            onErrorContainer: const Color(0xFFFF8B98),
+            surface: OpTokens.pageDark,
+            onSurface: OpTokens.textDark,
+            surfaceDim: OpTokens.pageDark,
+            surfaceBright: OpTokens.surface3Dark,
+            surfaceContainerLowest: OpTokens.pageDark,
+            surfaceContainerLow: OpTokens.surfaceDark,
+            surfaceContainer: OpTokens.surface2Dark,
+            surfaceContainerHigh: OpTokens.glassDark,
+            surfaceContainerHighest: OpTokens.surface3Dark,
+            onSurfaceVariant: OpTokens.text2Dark,
+            outline: OpTokens.text3Dark,
+            outlineVariant: OpTokens.borderStrongDark,
+            inverseSurface: OpTokens.textDark,
+            onInverseSurface: OpTokens.surfaceDark,
+            inversePrimary: OpTokens.accentInkLight,
+            surfaceTint: Colors.transparent,
           )
         : base.copyWith(
-            primary: BrandColors.lima,
-            onPrimary: BrandColors.negroVerdoso,
-            primaryContainer: BrandColors.limaClaro,
-            onPrimaryContainer: BrandColors.negroVerdoso,
-            secondary: BrandColors.verdeOliva,
+            primary: OpTokens.accentLight,
+            onPrimary: OpTokens.textLight,
+            primaryContainer: OpTokens.accentLight.withValues(alpha: 0.2),
+            onPrimaryContainer: OpTokens.accentInkLight,
+            secondary: OpTokens.accentInkLight,
             onSecondary: Colors.white,
-            secondaryContainer: BrandColors.limaClaro,
-            onSecondaryContainer: BrandColors.negroVerdoso,
-            surface: Colors.white,
-            onSurface: BrandColors.negroVerdoso,
-            surfaceContainerHigh: const Color(0xFFF3F5EA),
-            surfaceContainerHighest: const Color(0xFFEAEDD9),
-            onSurfaceVariant: BrandColors.verdeOscuro,
-            outline: BrandColors.verdeOscuro.withValues(alpha: 0.4),
+            secondaryContainer: OpTokens.surface3Light,
+            onSecondaryContainer: OpTokens.textLight,
+            tertiary: OpTokens.text2Light,
+            error: const Color(0xFFD93448),
+            onError: Colors.white,
+            errorContainer: const Color(0xFFFDEAED),
+            onErrorContainer: const Color(0xFFD93448),
+            surface: OpTokens.pageLight,
+            onSurface: OpTokens.textLight,
+            surfaceDim: OpTokens.surface3Light,
+            surfaceBright: Colors.white,
+            surfaceContainerLowest: Colors.white,
+            surfaceContainerLow: OpTokens.surface2Light,
+            surfaceContainer: OpTokens.surfaceLight,
+            surfaceContainerHigh: OpTokens.glassLight,
+            surfaceContainerHighest: OpTokens.surface3Light,
+            onSurfaceVariant: OpTokens.text2Light,
+            outline: OpTokens.text3Light,
+            outlineVariant: OpTokens.borderStrongLight,
+            inverseSurface: OpTokens.textLight,
+            onInverseSurface: Colors.white,
+            inversePrimary: OpTokens.accentInkDark,
+            surfaceTint: Colors.transparent,
           );
 
-    final camposFillColor =
-        isDark ? VivaColors.surfaceContainerLow : const Color(0xFFF3F5EA);
+    final camposFillColor = isDark ? OpTokens.surface2Dark : Colors.white;
+
+    // Tipografia de toda la app: Inter, la misma del monitor web. La
+    // monoespaciada (AppTextStyles.tech) queda solo para datos tecnicos
+    // chicos, no para la jerarquia de las pantallas.
+    final baseTextTheme = ThemeData(brightness: brightness, useMaterial3: true).textTheme;
+    final textTheme = (usarGoogleFonts ? GoogleFonts.interTextTheme(baseTextTheme) : baseTextTheme).apply(
+      bodyColor: colorScheme.onSurface,
+      displayColor: colorScheme.onSurface,
+    );
 
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
-      scaffoldBackgroundColor: colorScheme.surface,
+      textTheme: textTheme,
+      // El fondo real lo pinta FondoApp (gradiente + brillo lima + puntos),
+      // envolviendo cada pantalla desde MaterialApp.builder: el Scaffold va
+      // transparente para que las tarjetas "vidrio" dejen verlo.
+      scaffoldBackgroundColor: Colors.transparent,
       appBarTheme: AppBarTheme(
-        backgroundColor: colorScheme.surface,
+        backgroundColor: Colors.transparent,
         foregroundColor: colorScheme.onSurface,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        titleTextStyle: textTheme.titleLarge?.copyWith(
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.5,
+          color: colorScheme.onSurface,
+        ),
       ),
+      // Tarjetas translucidas con borde fino, como .pm-panel en la web.
       cardTheme: CardThemeData(
         color: colorScheme.surfaceContainerHigh,
-        elevation: isDark ? 0 : 8,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(OpTokens.radius),
+          side: BorderSide(color: colorScheme.outlineVariant),
+        ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: isDark ? OpTokens.glassDark : OpTokens.glassLight,
+        surfaceTintColor: Colors.transparent,
+        indicatorColor: colorScheme.primary,
+        labelTextStyle: WidgetStatePropertyAll(
+          textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
+        ),
+      ),
+      drawerTheme: DrawerThemeData(
+        backgroundColor: isDark ? OpTokens.surfaceDark : Colors.white,
         surfaceTintColor: Colors.transparent,
       ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: isDark ? OpTokens.surfaceDark : Colors.white,
+        surfaceTintColor: Colors.transparent,
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: isDark ? OpTokens.surfaceDark : Colors.white,
+        surfaceTintColor: Colors.transparent,
+      ),
+      chipTheme: ChipThemeData(
+        shape: const StadiumBorder(),
+        side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.6)),
+        labelStyle: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+      ),
+      dividerTheme: DividerThemeData(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: camposFillColor,

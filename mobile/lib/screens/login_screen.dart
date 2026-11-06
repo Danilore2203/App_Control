@@ -5,11 +5,10 @@ import "../services/biometric_service.dart";
 import "../services/notification_service.dart";
 import "../theme.dart";
 import "../widgets/dotted_background.dart";
+import "../widgets/version_app.dart";
 import "configurar_password_screen.dart";
 import "dashboard_screen.dart";
 import "register_screen.dart";
-
-const String _version = "v0.1.0";
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -357,8 +356,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             ),
                             const SizedBox(height: 24),
-                            Text(
-                              _version.toUpperCase(),
+                            VersionApp(
                               style: AppTextStyles.tech(
                                 color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
                                 fontSize: 10,

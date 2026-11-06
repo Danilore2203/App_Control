@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 
 import "../models/control.dart";
 import "../theme.dart";
+import "titulo_seccion.dart";
 
 /// Tarjeta de resumen: porcentaje de exito (anillo) + conteos por estado.
 class SaludSistema extends StatelessWidget {
@@ -42,13 +43,7 @@ class SaludSistema extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
         child: Column(
           children: [
-            Text(
-              "SALUD DEL SISTEMA",
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    letterSpacing: 1.2,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-            ),
+            const Eyebrow("Salud del sistema"),
             const SizedBox(height: 20),
             TweenAnimationBuilder<double>(
               tween: Tween(begin: 0, end: total == 0 ? 0 : porcentaje),

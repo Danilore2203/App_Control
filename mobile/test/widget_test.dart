@@ -11,6 +11,10 @@ import "package:flutter/material.dart";
 import "package:flutter_test/flutter_test.dart";
 
 void main() {
+  // El tema usa google_fonts (Inter); en las pruebas no hay red ni assets,
+  // y la libreria lanza error si intenta descargar la fuente.
+  setUpAll(() => AppTheme.usarGoogleFonts = false);
+
   test("AppTheme expone temas claro y oscuro coherentes", () {
     expect(AppTheme.light.useMaterial3, isTrue);
     expect(AppTheme.dark.useMaterial3, isTrue);

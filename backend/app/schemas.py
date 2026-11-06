@@ -73,9 +73,14 @@ class ConfigurarPasswordIn(BaseModel):
         return valor
 
     @model_validator(mode="after")
-    def _requiere_alguna_verificacion(self) -> "ConfigurarPasswordIn":
-        if not self.password_actual and not self.correo_verificacion:
-            raise ValueError("Debes indicar tu contrasena actual o tu correo de verificacion")
+    def _requiere_password_actual(self) -> "ConfigurarPasswordIn":
+        # correo_verificacion se acepta por compatibilidad con la app, pero
+        # ya no verifica nada (ver auth.configurar_password_local).
+        if not self.password_actual:
+            raise ValueError(
+                "Debes indicar tu contrasena actual. Si todavia no tienes una, entra con Google "
+                "o pide a un administrador que te asigne una."
+            )
         return self
 
 
@@ -121,6 +126,27 @@ class ControlOut(BaseModel):
     snapshot_fecha: date
     snapshot_ts: datetime
     estado_ts: Optional[datetime] = None  # hora real del ultimo cambio de estado
+
+
+class TablaOut(BaseModel):
+    """Estado actual de una tabla (dataops_catalogo_tablas), para la vista
+    Tablas del monitor. Mismo formato que ControlOut donde coincide para
+    que la app pueda listarlas con las mismas tarjetas."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    nombre: str
+    fuente: str
+    estado: str
+    color: str
+    cantidad: int
+    layer: Optional[str] = None
+    hora_programada: Optional[str] = None
+    ultima_fecha: Optional[str] = None
+    snapshot_fecha: date
+    snapshot_ts: datetime
+    estado_ts: Optional[datetime] = None
 
 
 class HistorialFallaOut(BaseModel):
@@ -218,6 +244,7 @@ class BitacoraResumenMesOut(BaseModel):
     mes: int
     total: int
     tiene_error: bool
+    abiertos: int = 0  # episodios de ese mes que siguen sin resolver
 
 
 class BitacoraResumenAnioOut(BaseModel):
@@ -225,6 +252,11 @@ class BitacoraResumenAnioOut(BaseModel):
     total_anual: int
     variacion_pct: Optional[float] = None
     meses: list[BitacoraResumenMesOut]
+    # Indicadores del momento (no dependen del anio consultado), para la
+    # cabecera de la bitacora: lo que importa hoy, no el acumulado del anio.
+    abiertos_ahora: int = 0
+    hoy: int = 0
+    ultimos_7_dias: int = 0
 
 
 # ---- Catalogos empujados por OP_PROD (POST /internal/catalogos) ----
@@ -397,6 +429,10 @@ class CatalogoPushOut(BaseModel):
     relaciones: Optional[CatalogoSeccionOut] = None
 
 
+class PasswordAdminIn(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
+
+
 class AdministradorIn(BaseModel):
     """POST /internal/administradores: deja a este correo como administrador
     (creando el usuario si hace falta). Para la primera cuenta de una base
@@ -421,5 +457,11 @@ class CatalogoEstadoOut(BaseModel):
     episodios_alerta_abiertos: int
     bitacora_total: int = 0  # filas replicadas de MySQL (con origen_id)
     bitacora_ultima_actualizacion: Optional[datetime] = None
+    # Filas propias de la app (origen_id NULL): manuales e incoherencias...
+    bitacora_locales: int = 0
+    # ...y las que genero el poller viejo por su cuenta (episodios de
+    # proceso/tabla sin autor): duplican a las de MySQL y deben borrarse.
+    bitacora_locales_automaticas: int = 0
+    bitacora_hoy_mysql: int = 0  # filas de hoy con origen_id
     relaciones_total: int = 0
     usuarios_total: int = 0

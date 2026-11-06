@@ -41,33 +41,43 @@ class _AlertaBannerState extends State<AlertaBanner> {
         ? "${widget.cantidadCriticos} proceso(s) en estado crítico"
         : "${widget.cantidadCriticos} proceso(s) en estado crítico en ${widget.fuentesAfectadas.join(", ")}";
 
-    return Material(
-      color: Color.lerp(StatusColors.critico, Colors.black, 0.35)!,
-      child: InkWell(
-        onTap: widget.onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            children: [
-              const Icon(Icons.warning_amber_rounded,
-                  color: Colors.white, size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  texto,
-                  style: const TextStyle(
-                      color: Colors.white,
+    // Pill translucida con tono rojo (como .do-hs-badge--err del monitor
+    // web), en vez de una franja roja solida que tapaba la cabecera.
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+      child: Material(
+        color: StatusColors.critico.withValues(alpha: 0.12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: StatusColors.critico.withValues(alpha: 0.35)),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: widget.onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+            child: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: StatusColors.critico, size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    texto,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurface,
                       fontWeight: FontWeight.w600,
-                      fontSize: 13),
+                    ),
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.white, size: 18),
-                onPressed: () => setState(() => _cerrado = true),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
-            ],
+                IconButton(
+                  icon: Icon(Icons.close, color: theme.colorScheme.onSurfaceVariant, size: 18),
+                  onPressed: () => setState(() => _cerrado = true),
+                  visualDensity: VisualDensity.compact,
+                  tooltip: "Cerrar",
+                ),
+              ],
+            ),
           ),
         ),
       ),

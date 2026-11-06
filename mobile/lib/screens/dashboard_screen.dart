@@ -16,8 +16,10 @@ import "../widgets/app_drawer.dart";
 import "../widgets/detalle_proceso_sheet.dart";
 import "../widgets/estado_vacio.dart";
 import "../widgets/monitoreo_por_fuente.dart";
+import "../widgets/pestanas.dart";
 import "../widgets/salud_sistema.dart";
 import "../widgets/tarjeta_proceso.dart";
+import "../widgets/titulo_seccion.dart";
 import "alertas_screen.dart";
 
 class DashboardScreen extends StatefulWidget {
@@ -32,7 +34,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int _tabActual = 0;
   final _apiService = ApiService();
   final _infraService = InfraService();
-  late Future<List<Control>> _controlesFuture;
+  late Future<_Catalogo> _controlesFuture;
+  // General / Procesos / Tablas, como el monitor web. Arranca en Procesos:
+  // es lo que la app mostro siempre y lo que mas se mira.
+  String _vista = "PROCESOS";
   String? _filtroColor;
   String? _filtroFuente;
   bool _filtroSoloCore = false;
@@ -50,7 +55,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    _controlesFuture = _apiService.obtenerControles();
+    _controlesFuture = _cargarCatalogo();
     _iniciarVigiaBloqueosProd();
     // Refresca cuando el backend avisa que hay catalogos nuevos (y al volver
     // a primer plano), en vez de preguntar cada 60 s aunque no haya nada.
@@ -59,7 +64,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // del usuario).
     _actualizaciones = SuscripcionActualizaciones(() {
       if (!mounted) return;
-      setState(() => _controlesFuture = _apiService.obtenerControles());
+      setState(() => _controlesFuture = _cargarCatalogo());
     });
     _apiService.obtenerPerfil().then((usuario) {
       if (mounted) setState(() => _usuario = usuario);
@@ -142,8 +147,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   String _bucketDe(Control c) => c.esDemorado ? "orange" : c.color;
 
+  /// Procesos y tablas en paralelo (dos endpoints), para que el selector
+  /// General / Procesos / Tablas cambie de vista sin volver a pedir nada.
+  Future<_Catalogo> _cargarCatalogo() async {
+    final resultados = await Future.wait([
+      _apiService.obtenerControles(),
+      // Si fallan solo las tablas (backend viejo sin /tablas, timeout), los
+      // procesos se muestran igual y la pestana Tablas queda en 0.
+      _apiService.obtenerTablas().catchError((_) => <Control>[]),
+    ]);
+    return _Catalogo(procesos: resultados[0], tablas: resultados[1]);
+  }
+
+  List<Control> _segunVista(_Catalogo catalogo) {
+    switch (_vista) {
+      case "PROCESOS":
+        return catalogo.procesos;
+      case "TABLAS":
+        return catalogo.tablas;
+      default:
+        return [...catalogo.procesos, ...catalogo.tablas];
+    }
+  }
+
+  String get _tituloLista {
+    switch (_vista) {
+      case "PROCESOS":
+        return "Procesos";
+      case "TABLAS":
+        return "Tablas";
+      default:
+        return "Procesos y tablas";
+    }
+  }
+
   Future<void> _recargarControles() async {
-    final future = _apiService.obtenerControles();
+    final future = _cargarCatalogo();
     setState(() {
       _controlesFuture = future;
       _filtroColor = null;
@@ -236,7 +275,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onChanged: (valor) =>
             setState(() => _busqueda = valor.trim().toLowerCase()),
         decoration: InputDecoration(
-          hintText: "Buscar procesos o ETLs...",
+          hintText: _vista == "TABLAS"
+              ? "Buscar tablas..."
+              : "Buscar procesos, ETLs o tablas...",
           prefixIcon: const Icon(Icons.search),
           suffixIcon: _busqueda.isEmpty
               ? null
@@ -255,10 +296,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildEncabezadoLista(ColorScheme colorScheme) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Text(
-        "RECIENTES (HOY)",
-        style: AppTextStyles.tech(
-            color: colorScheme.onSurfaceVariant, fontSize: 10),
+      child: TituloSeccion(_tituloLista),
+    );
+  }
+
+  Widget _buildPestanas(_Catalogo catalogo) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: Pestanas(
+        seleccionada: _vista,
+        opciones: [
+          ("GENERAL", "General",
+              catalogo.procesos.length + catalogo.tablas.length),
+          ("PROCESOS", "Procesos", catalogo.procesos.length),
+          ("TABLAS", "Tablas", catalogo.tablas.length),
+        ],
+        onCambiar: (vista) => setState(() {
+          _vista = vista;
+          // Los filtros de fuente/core/estado eran de la vista anterior.
+          _filtroColor = null;
+          _filtroFuente = null;
+          _filtroSoloCore = false;
+        }),
       ),
     );
   }
@@ -266,7 +325,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildControles() {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return FutureBuilder<List<Control>>(
+    return FutureBuilder<_Catalogo>(
       future: _controlesFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -281,14 +340,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           );
         }
 
-        final todos = snapshot.data ?? [];
-        if (todos.isEmpty) {
+        final catalogo = snapshot.data ?? const _Catalogo();
+        if (catalogo.procesos.isEmpty && catalogo.tablas.isEmpty) {
           return EstadoVacio(
             icono: Icons.checklist_rtl,
             mensaje: "Todavía no hay controles registrados",
             colorIcono: colorScheme.onSurfaceVariant,
           );
         }
+        final todos = _segunVista(catalogo);
 
         final segunFuente = _filtroFuente == null
             ? todos
@@ -326,6 +386,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     SliverToBoxAdapter(
                       child: Column(
                         children: [
+                          _buildPestanas(catalogo),
                           SaludSistema(controles: todos),
                           MonitoreoPorFuente(
                             controles: todos,
@@ -388,16 +449,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             Text(
               switch (_tabActual) {
-                0 => "MONITOR DE PROCESOS",
-                1 => "CENTRO DE ALERTAS",
-                2 => "CONFIGURACIÓN DE GUARDIA",
-                _ => "BITÁCORA",
+                0 => "Monitor de procesos",
+                1 => "Alertas",
+                2 => "Guardia",
+                _ => "Bitácora",
               },
-              style: AppTextStyles.tech(
-                color: colorScheme.primary,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: colorScheme.onSurface,
+                  ),
             ),
             if (_tabActual == 0) ...[
               const SizedBox(height: 2),
@@ -476,6 +536,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
+}
+
+/// Procesos y tablas tal como los devuelve la API, ya separados; la vista
+/// elegida decide cuales se muestran.
+class _Catalogo {
+  final List<Control> procesos;
+  final List<Control> tablas;
+
+  const _Catalogo({this.procesos = const [], this.tablas = const []});
 }
 
 /// Banner persistente en toda la app (no solo en Infraestructura) cuando hay

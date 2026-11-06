@@ -2,10 +2,20 @@ import "package:flutter/material.dart";
 
 import "../models/control.dart";
 import "../theme.dart";
+import "titulo_seccion.dart";
 
 /// Fila de tarjetas, una por cada fuente (DataStage/Pentaho/Airflow/Otro),
 /// cada una con un medidor circular chico mostrando % de exito.
 bool esCore(Control control) => control.core?.trim().toLowerCase() == "si";
+
+/// "proceso", "tabla" o "elemento" segun lo que agrupa la tarjeta (en la
+/// vista General una fuente puede mezclar procesos y tablas).
+String _unidad(List<Control> grupo) {
+  final tablas = grupo.where((c) => c.esTabla).length;
+  if (tablas == 0) return "proceso";
+  if (tablas == grupo.length) return "tabla";
+  return "elemento";
+}
 
 class MonitoreoPorFuente extends StatelessWidget {
   final List<Control> controles;
@@ -25,8 +35,6 @@ class MonitoreoPorFuente extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     final porFuente = <String, List<Control>>{};
     for (final control in controles) {
       porFuente.putIfAbsent(control.fuente, () => []).add(control);
@@ -42,13 +50,9 @@ class MonitoreoPorFuente extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: Text(
-            "MONITOREO POR FUENTE",
-            style: AppTextStyles.tech(
-                color: colorScheme.onSurfaceVariant, fontSize: 10),
-          ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: TituloSeccion("Por fuente"),
         ),
         SizedBox(
           height: 118,
@@ -72,6 +76,7 @@ class MonitoreoPorFuente extends StatelessWidget {
                   child: _TarjetaFuente(
                     nombre: fuente,
                     total: porFuente[fuente]!.length,
+                    unidad: _unidad(porFuente[fuente]!),
                     porcentaje: porFuente[fuente]!.isEmpty
                         ? 0.0
                         : porFuente[fuente]!
@@ -181,6 +186,7 @@ class _TarjetaCore extends StatelessWidget {
 class _TarjetaFuente extends StatelessWidget {
   final String nombre;
   final int total;
+  final String unidad;
   final double porcentaje;
   final bool seleccionada;
   final VoidCallback? onTap;
@@ -188,6 +194,7 @@ class _TarjetaFuente extends StatelessWidget {
   const _TarjetaFuente({
     required this.nombre,
     required this.total,
+    required this.unidad,
     required this.porcentaje,
     this.seleccionada = false,
     this.onTap,
@@ -266,7 +273,7 @@ class _TarjetaFuente extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                "$total proceso${total == 1 ? '' : 's'}",
+                "$total $unidad${total == 1 ? '' : 's'}",
                 style: TextStyle(
                     fontSize: 11, color: colorScheme.onSurfaceVariant),
               ),
