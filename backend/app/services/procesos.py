@@ -40,3 +40,49 @@ def recuperado_confirmado(proceso) -> bool:
     real. Mejor seguir alertando de mas que cerrar un fallo que en realidad
     sigue."""
     return color_efectivo(proceso) == "green" and (proceso.estado or "").strip().upper() == "OK"
+
+
+# Vigencia de la ultima corrida recibida del Monitor Airflow: si hace mas de
+# esto que no llega nada, se vuelve a lo que diga el catalogo.
+VIGENCIA_ESTADO_AIRFLOW_MINUTOS = 30
+
+
+def clasificar_por_ultima_corrida(last_state: str | None) -> tuple[str, str] | None:
+    """(color, estado) segun la ultima corrida, como el Monitor Airflow; None
+    si no hay corrida que clasifique (queda lo del catalogo)."""
+    estado = (last_state or "").strip().lower()
+    if estado == "success":
+        return "green", "OK"
+    if estado == "failed":
+        return "red", "ERROR"
+    if estado == "running":
+        return "blue", "RUNNING"
+    return None
+
+
+def aplicar_estados_airflow(db, controles: list, ahora=None) -> int:
+    """Sobre la salida de /controles: a los DAGs de AIRFLOW que el catalogo
+    dejo en gris (PAUSADO / SIN EJECUCION) les aplica la ultima corrida
+    recibida del Monitor Airflow, si esa informacion es reciente. Devuelve
+    cuantos cambiaron."""
+    from datetime import datetime, timedelta
+
+    from app import models
+
+    ahora = ahora or datetime.utcnow()
+    grises = [c for c in controles if c.fuente == "AIRFLOW" and (c.color or "").lower() == "gray"]
+    if not grises:
+        return 0
+    ultimo = db.query(models.AirflowEstado.actualizado_en).order_by(models.AirflowEstado.actualizado_en.desc()).first()
+    if not ultimo or ultimo[0] < ahora - timedelta(minutes=VIGENCIA_ESTADO_AIRFLOW_MINUTOS):
+        return 0
+    nombres = [c.nombre for c in grises]
+    estados = {e.dag_id: e.last_state for e in db.query(models.AirflowEstado).filter(models.AirflowEstado.dag_id.in_(nombres)).all()}
+    cambiados = 0
+    for c in grises:
+        nuevo = clasificar_por_ultima_corrida(estados.get(c.nombre))
+        if nuevo is None:
+            continue
+        c.color, c.estado = nuevo
+        cambiados += 1
+    return cambiados

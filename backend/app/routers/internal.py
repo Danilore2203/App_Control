@@ -4,7 +4,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from app import auth, schemas
+from app import auth, models, schemas
 from app.database import get_db
 from app.services.catalogos import aplicar_push_catalogos, eliminar_bitacora_local_automatica, estado_catalogos
 from app.services.ciclo import ejecutar_ciclo_en_segundo_plano
@@ -114,3 +114,19 @@ def aprobar_solicitud_registro_interno(solicitud_id: int, db: Session = Depends(
     vez de un JWT de admin humano) cuando resuelve la solicitud reflejada en
     su propio panel de Usuarios."""
     return aprobar_solicitud_registro(db, solicitud_id)
+
+
+@router.post(
+    "/airflow/estados",
+    response_model=schemas.AirflowEstadosOut,
+    dependencies=[Depends(auth.verificar_internal_key)],
+)
+def recibir_estados_airflow(payload: schemas.AirflowEstadosIn, db: Session = Depends(get_db)):
+    """Ultima corrida de cada DAG segun el Monitor Airflow de OP (ver
+    models.AirflowEstado). Reemplaza la lista completa."""
+    ahora = datetime.utcnow()
+    db.query(models.AirflowEstado).delete(synchronize_session=False)
+    for e in payload.estados:
+        db.add(models.AirflowEstado(dag_id=e.dag_id, last_state=e.last_state, is_paused=e.is_paused, actualizado_en=ahora))
+    db.commit()
+    return schemas.AirflowEstadosOut(recibidos=len(payload.estados), actualizado_en=ahora)

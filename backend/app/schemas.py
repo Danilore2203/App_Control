@@ -481,3 +481,21 @@ class CatalogoEstadoOut(BaseModel):
     ultimos_envios: list[dict] = Field(default_factory=list)
     relaciones_total: int = 0
     usuarios_total: int = 0
+
+
+class AirflowEstadoIn(BaseModel):
+    dag_id: str
+    last_state: Optional[str] = None
+    is_paused: bool = False
+
+
+class AirflowEstadosIn(BaseModel):
+    """POST /internal/airflow/estados: la ultima corrida de todos los DAGs
+    (reemplaza la lista anterior completa)."""
+
+    estados: list[AirflowEstadoIn] = Field(default_factory=list)
+
+
+class AirflowEstadosOut(BaseModel):
+    recibidos: int
+    actualizado_en: datetime

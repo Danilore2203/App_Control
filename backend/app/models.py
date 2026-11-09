@@ -285,3 +285,20 @@ class EpisodioAlertaUsuario(Base):
     notificado_en = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     episodio = relationship("EpisodioAlerta", back_populates="notificados")
+
+
+class AirflowEstado(Base):
+    """Ultima corrida de cada DAG, tal como la ve el Monitor Airflow de OP
+    (dag_id -> last_state/is_paused), empujada aparte del catalogo. El
+    catalogo que manda el servidor puede clasificar un DAG pausado como
+    PAUSADO aunque su ultima corrida haya sido OK; con esto /controles lo
+    muestra como el monitor web (OK/ERROR/RUNNING) sin depender de que el
+    servidor tenga esa regla. Se ignora si quedo vieja (ver
+    services/procesos.py)."""
+
+    __tablename__ = "airflow_estados"
+
+    dag_id = Column(String(250), primary_key=True)
+    last_state = Column(String(30), nullable=True)
+    is_paused = Column(Boolean, nullable=False, default=False)
+    actualizado_en = Column(DateTime, nullable=False)
