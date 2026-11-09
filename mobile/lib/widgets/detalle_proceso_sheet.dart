@@ -65,16 +65,39 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
     try {
       // El avance se ve en la barra flotante del monitor (IndicadorEjecucion)
       // y aca abajo mientras la hoja este abierta.
-      final r = await ComandosService().ejecutar(tipo, payload: payload, titulo: titulo, anunciarFinal: !seguir);
+      final inicio = DateTime.now();
+      // Un job DataStage se ejecuta de verdad y OP_PROD responde recien
+      // cuando termina (puede tardar minutos): la barra muestra el
+      // cronometro mientras tanto.
+      final r = await ComandosService().ejecutar(
+        tipo,
+        payload: payload,
+        titulo: titulo,
+        anunciarFinal: !seguir,
+        espera: seguir ? const Duration(hours: 2) : const Duration(seconds: 90),
+      );
       if (seguir) {
-        // OP_PROD ya lanzo el proceso; ahora se cuenta el tiempo hasta que termine.
-        final lanzadoEn = (r.resultado["lanzado_en"] ?? "").toString();
-        await SeguimientoLanzamiento().seguir(
-          titulo: titulo,
-          nombre: payload["nombre"].toString(),
-          lanzadoEnServidor: lanzadoEn,
-          runId: r.resultado["run_id"]?.toString(),
-        );
+        if (r.resultado["modo"] == "datastage") {
+          // Ya termino: resultado, duracion y log vienen en la respuesta.
+          final (texto, ok) = SeguimientoLanzamiento.resumenFinal(
+            r.resultado,
+            DateTime.now().difference(inicio),
+          );
+          EjecucionActual.mostrar(EstadoEjecucion(
+            titulo: titulo,
+            detalle: texto,
+            fase: ok ? FaseEjecucion.listo : FaseEjecucion.error,
+            progreso: 1,
+          ));
+        } else {
+          // «Actualizar proceso» (Pentaho): OP_PROD lo lanzo; se sigue la tarea.
+          final lanzadoEn = (r.resultado["lanzado_en"] ?? "").toString();
+          await SeguimientoLanzamiento().seguir(
+            titulo: titulo,
+            nombre: payload["nombre"].toString(),
+            lanzadoEnServidor: lanzadoEn,
+          );
+        }
       }
     } catch (_) {
       // El indicador ya muestra el error.

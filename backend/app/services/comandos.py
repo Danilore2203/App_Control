@@ -44,7 +44,7 @@ TIPOS_COMANDO: dict[str, bool] = {
 # tiene que quedarse esperando para siempre.
 EXPIRA_PENDIENTE_SEGUNDOS = 120
 # Y si lo retiro pero nunca contesto (se reinicio en el medio).
-EXPIRA_EN_CURSO_SEGUNDOS = 600
+EXPIRA_EN_CURSO_SEGUNDOS = 3 * 3600  # un job DataStage puede tardar mucho; OP_PROD responde al terminar
 
 
 def _a_salida(c: models.Comando) -> schemas.ComandoOut:
