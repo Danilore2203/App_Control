@@ -5,6 +5,7 @@ import "../screens/ajustes_screen.dart";
 import "../screens/infraestructura_screen.dart";
 import "../screens/login_screen.dart";
 import "../screens/mi_cuenta_screen.dart";
+import "../screens/ra_screen.dart";
 import "../screens/solicitudes_screen.dart";
 import "../services/auth_service.dart";
 import "../theme.dart";
@@ -135,6 +136,12 @@ class AppDrawer extends StatelessWidget {
                   ),
                   if (usuario?.esAdmin ?? false) ...[
                     const _SeccionMenu("Administración"),
+                    _ItemMenu(
+                      icono: Icons.sync_rounded,
+                      texto: "Monitor RA",
+                      subtitulo: "Archivos FTP y actualizar ahora",
+                      onTap: () => _abrir(context, const RaScreen()),
+                    ),
                     _ItemMenu(
                       icono: Icons.how_to_reg_outlined,
                       texto: "Solicitudes de acceso",

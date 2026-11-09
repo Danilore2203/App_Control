@@ -38,6 +38,9 @@ TIPOS_COMANDO: dict[str, bool] = {
     # Airflow
     "airflow.trigger": True,  # payload: {"dag_id": str}
     "airflow.pausar": True,  # payload: {"dag_id": str, "pausar": bool}
+    # RA (archivos FTP -> MySQL, el «Actualizar» del Monitor RA de la web)
+    "ra.resumen": False,  # devuelve filas del monitor RA + contadores por estado
+    "ra.actualizar_todos": True,  # sincroniza todas las configuraciones FTP activas y devuelve el resumen
 }
 
 # Si OP_PROD no lo retiro en este tiempo esta caido o sin red: la app no
