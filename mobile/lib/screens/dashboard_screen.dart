@@ -155,6 +155,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// Procesos y tablas en paralelo (dos endpoints), para que el selector
   /// General / Procesos / Tablas cambie de vista sin volver a pedir nada.
+  /// Fuentes de tablas que muestra el monitor: las del "Control de tablas"
+  /// (QA_CONTROL, 290 tablas con OK/Error como en la web). El catalogo trae
+  /// ademas ~1.500 tablas de PG_PROD (medallion) que la web no lista en ese
+  /// monitor; se dejan afuera para que la app cuente lo mismo que la web.
+  static const _fuentesTablasMonitor = {"QA_CONTROL"};
+
   Future<_Catalogo> _cargarCatalogo() async {
     final resultados = await Future.wait([
       _apiService.obtenerControles(),
@@ -162,7 +168,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // procesos se muestran igual y la pestana Tablas queda en 0.
       _apiService.obtenerTablas().catchError((_) => <Control>[]),
     ]);
-    return _Catalogo(procesos: resultados[0], tablas: resultados[1]);
+    return _Catalogo(
+      procesos: resultados[0],
+      tablas: resultados[1].where((t) => _fuentesTablasMonitor.contains(t.fuente)).toList(),
+    );
   }
 
   List<Control> _segunVista(_Catalogo catalogo) {
