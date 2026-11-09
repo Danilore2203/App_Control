@@ -137,3 +137,26 @@ def recibir_estados_airflow(payload: schemas.AirflowEstadosIn, db: Session = Dep
     if nuevo != anterior:
         ejecutar_ciclo_en_segundo_plano(avisar_app=True)
     return schemas.AirflowEstadosOut(recibidos=len(payload.estados), actualizado_en=ahora)
+
+
+@router.get(
+    "/comandos/pendientes",
+    response_model=list[schemas.ComandoOut],
+    dependencies=[Depends(auth.verificar_internal_key)],
+)
+def comandos_pendientes(limite: int = 10, db: Session = Depends(get_db)):
+    """OP_PROD retira los comandos que la app dejo (quedan en curso)."""
+    from app.services import comandos as servicio
+
+    return servicio.tomar_pendientes(db, min(limite, 50))
+
+
+@router.post(
+    "/comandos/{comando_id}/resultado",
+    response_model=schemas.ComandoOut,
+    dependencies=[Depends(auth.verificar_internal_key)],
+)
+def comando_resultado(comando_id: int, payload: schemas.ComandoResultadoIn, db: Session = Depends(get_db)):
+    from app.services import comandos as servicio
+
+    return servicio.registrar_resultado(db, comando_id, payload)
