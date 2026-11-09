@@ -46,9 +46,9 @@ def test_primera_carga_inserta_todo(db):
         tablas=[tabla(10, "t_a")],
     ))
 
-    assert out.procesos.model_dump() == {"insertadas": 2, "actualizadas": 0, "eliminadas": 0, "omitidas": 0}
-    assert out.tablas.model_dump() == {"insertadas": 1, "actualizadas": 0, "eliminadas": 0, "omitidas": 0}
-    assert out.eventos.model_dump() == {"insertados": 0, "ignorados": 0}
+    assert out.procesos.model_dump(exclude_none=True) == {"insertadas": 2, "actualizadas": 0, "eliminadas": 0, "omitidas": 0}
+    assert out.tablas.model_dump(exclude_none=True) == {"insertadas": 1, "actualizadas": 0, "eliminadas": 0, "omitidas": 0}
+    assert out.eventos.model_dump(exclude_none=True) == {"insertados": 0, "ignorados": 0}
     assert db.query(models.Control).count() == 2
     assert db.query(models.Tabla).count() == 1
 
@@ -62,7 +62,7 @@ def test_reintento_del_mismo_envio_es_idempotente(db):
     out = aplicar_push_catalogos(db, envio)
 
     assert out.procesos.insertadas == 0 and out.procesos.actualizadas == 1
-    assert out.eventos.model_dump() == {"insertados": 0, "ignorados": 1}
+    assert out.eventos.model_dump(exclude_none=True) == {"insertados": 0, "ignorados": 1}
     assert db.query(models.Control).count() == 1
     assert db.query(models.CatalogoCambio).count() == 1
 
@@ -76,7 +76,7 @@ def test_cambio_incremental_actualiza_en_el_lugar_y_guarda_evento(db):
         eventos=[evento(100, "carga_a", "OK", "ERROR", ts=ts_error)],
     ))
 
-    assert out.procesos.model_dump() == {"insertadas": 0, "actualizadas": 1, "eliminadas": 0, "omitidas": 0}
+    assert out.procesos.model_dump(exclude_none=True) == {"insertadas": 0, "actualizadas": 1, "eliminadas": 0, "omitidas": 0}
     fila = db.get(models.Control, 1)
     assert (fila.estado, fila.color, fila.estado_ts) == ("ERROR", "red", ts_error)
     # El otro proceso no se toco y el id sigue siendo el mismo.
@@ -104,7 +104,7 @@ def test_completo_elimina_lo_que_no_viene_solo_de_ese_dia(db):
 
     out = aplicar_push_catalogos(db, push(completo=True, procesos=[proceso(1, "a"), proceso(4, "d")]))
 
-    assert out.procesos.model_dump() == {"insertadas": 1, "actualizadas": 1, "eliminadas": 2, "omitidas": 0}
+    assert out.procesos.model_dump(exclude_none=True) == {"insertadas": 1, "actualizadas": 1, "eliminadas": 2, "omitidas": 0}
     assert sorted(c.id for c in db.query(models.Control).all()) == [1, 4, 90]
 
 
@@ -115,7 +115,7 @@ def test_no_borra_un_proceso_que_tiene_alertas(db):
 
     out = aplicar_push_catalogos(db, push(bajas_procesos=[1, 2]))
 
-    assert out.procesos.model_dump() == {"insertadas": 0, "actualizadas": 0, "eliminadas": 1, "omitidas": 1}
+    assert out.procesos.model_dump(exclude_none=True) == {"insertadas": 0, "actualizadas": 0, "eliminadas": 1, "omitidas": 1}
     assert [c.id for c in db.query(models.Control).all()] == [2]
 
 
@@ -165,7 +165,7 @@ def test_usuarios_de_mysql_se_replican_por_username_sin_tocar_lo_local(db):
     )
     out = aplicar_push_catalogos(db, envio)
 
-    assert out.usuarios.model_dump() == {"insertados": 3, "actualizados": 0, "administradores_nuevos": 1, "omitidos": []}
+    assert out.usuarios.model_dump(exclude_none=True) == {"insertados": 3, "actualizados": 0, "administradores_nuevos": 1, "omitidos": []}
     darejas = db.query(models.Usuario).filter_by(username="darejas").one()
     assert (darejas.password_hash, darejas.email) == ("$2b$12$x", "Danilo.Rejas@nuevatel.com")
     assert db.query(models.Usuario).filter_by(username="jebutron").one().password_hash is None
@@ -204,7 +204,7 @@ def test_bitacora_de_mysql_se_replica_por_origen_id_sin_tocar_lo_propio(db):
     envio = push()
     envio.bitacora = schemas.BitacoraIn(upsert=[fila])
     out = aplicar_push_catalogos(db, envio)
-    assert out.bitacora.model_dump() == {"insertadas": 1, "actualizadas": 0, "eliminadas": 0}
+    assert out.bitacora.model_dump(exclude_none=True) == {"insertadas": 1, "actualizadas": 0, "eliminadas": 0}
 
     # Cierre del episodio alla: misma fila (mismo id local), actualizada.
     id_local = db.query(models.BitacoraError).filter_by(origen_id=500).one().id
@@ -212,7 +212,7 @@ def test_bitacora_de_mysql_se_replica_por_origen_id_sin_tocar_lo_propio(db):
     fila.fecha_actualizacion = datetime(2026, 11, 5, 9, 3)
     fila.descripcion = "Proceso en error. Solucionado"
     out2 = aplicar_push_catalogos(db, envio)
-    assert out2.bitacora.model_dump() == {"insertadas": 0, "actualizadas": 1, "eliminadas": 0}
+    assert out2.bitacora.model_dump(exclude_none=True) == {"insertadas": 0, "actualizadas": 1, "eliminadas": 0}
     cerrada = db.query(models.BitacoraError).filter_by(origen_id=500).one()
     assert (cerrada.id, cerrada.estado_fin, cerrada.fecha_actualizacion) == (id_local, "OK", datetime(2026, 11, 5, 9, 3))
     assert db.query(models.BitacoraError).filter_by(nombre="manual").one().estado_fin == "ERROR"
@@ -251,7 +251,7 @@ def test_relaciones_proceso_tabla_completo_reemplaza(db):
 
     out = aplicar_push_catalogos(db, envio)
 
-    assert out.relaciones.model_dump() == {"insertadas": 2, "actualizadas": 0, "eliminadas": 1, "omitidas": 0}
+    assert out.relaciones.model_dump(exclude_none=True) == {"insertadas": 2, "actualizadas": 0, "eliminadas": 1, "omitidas": 0}
     assert sorted(r.id for r in db.query(models.ProcesoTabla).all()) == [1, 2]
 
 
@@ -297,6 +297,49 @@ def test_los_ids_vigentes_borran_lo_que_mysql_ya_no_tiene(db):
     )
     out = aplicar_push_catalogos(db, envio)
 
-    assert out.bitacora.model_dump() == {"insertadas": 0, "actualizadas": 0, "eliminadas": 1}
+    assert out.bitacora.model_dump(exclude_none=True) == {"insertadas": 0, "actualizadas": 0, "eliminadas": 1}
     restantes = {(e.origen_id, e.nombre) for e in db.query(models.BitacoraError).all()}
     assert restantes == {(1, "p"), (3, "p"), (None, "manual"), (None, "incoherencia")}
+
+
+def test_un_completo_con_una_fraccion_de_lo_que_hay_no_borra_el_dia(db):
+    # 40 procesos de hoy en la base; llega un "completo" con 3: se aplican
+    # los 3 pero no se borran los otros 37 (el 9/11 un envio asi vacio la app).
+    aplicar_push_catalogos(db, push(completo=True, procesos=[proceso(i, f"p{i}") for i in range(1, 41)]))
+    out = aplicar_push_catalogos(db, push(completo=True, procesos=[proceso(i, f"p{i}", estado="ERROR", color="red") for i in (1, 2, 3)]))
+    assert out.procesos.eliminadas == 0
+    assert "no se borra nada" in (out.procesos.advertencia or "")
+    assert db.query(models.Control).count() == 40
+
+    # Con un completo razonable (la mitad o mas), las bajas si se aplican.
+    out2 = aplicar_push_catalogos(db, push(completo=True, procesos=[proceso(i, f"p{i}") for i in range(1, 31)]))
+    assert (out2.procesos.eliminadas, out2.procesos.advertencia) == (10, None)
+    assert db.query(models.Control).count() == 30
+
+
+def test_una_lista_vigente_a_medias_no_borra_la_bitacora(db):
+    for i in range(1, 41):
+        db.add(models.BitacoraError(origen_id=i, fecha_hora=TS, nombre=f"p{i}", tecnologia="AIRFLOW",
+                                    descripcion="x", estado="ERROR", estado_fin="ERROR", tipo="PROCESO"))
+    db.commit()
+    envio = push()
+    envio.bitacora = schemas.BitacoraIn(vigentes=schemas.BitacoraVigentesIn(desde=date(2026, 11, 1), ids=[]))
+    assert aplicar_push_catalogos(db, envio).bitacora.eliminadas == 0
+    envio.bitacora = schemas.BitacoraIn(vigentes=schemas.BitacoraVigentesIn(desde=date(2026, 11, 1), ids=[1, 2, 3]))
+    assert aplicar_push_catalogos(db, envio).bitacora.eliminadas == 0
+    assert db.query(models.BitacoraError).count() == 40
+    # Una lista que cubre casi todo si borra lo que falta.
+    envio.bitacora = schemas.BitacoraIn(vigentes=schemas.BitacoraVigentesIn(desde=date(2026, 11, 1), ids=list(range(1, 39))))
+    assert aplicar_push_catalogos(db, envio).bitacora.eliminadas == 2
+
+
+def test_un_completo_sin_relaciones_no_las_borra(db):
+    from app.schemas import RelacionImportIn, RelacionesIn
+
+    envio = push(completo=True)
+    envio.relaciones = RelacionesIn(upsert=[RelacionImportIn(id=i, proceso_nombre=f"p{i}", tabla_nombre="t") for i in range(1, 31)])
+    aplicar_push_catalogos(db, envio)
+    envio.relaciones = RelacionesIn(upsert=[])
+    out = aplicar_push_catalogos(db, envio)
+    assert out.relaciones.eliminadas == 0 and "no se borra nada" in out.relaciones.advertencia
+    assert db.query(models.ProcesoTabla).count() == 30

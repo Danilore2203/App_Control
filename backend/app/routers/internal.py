@@ -1,6 +1,7 @@
+import logging
 from datetime import date, datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app import auth, schemas
@@ -11,6 +12,8 @@ from app.services.poller import BOLIVIA_TZ
 from app.services.solicitudes import aprobar_solicitud_registro
 from app.services.usuarios import designar_administrador
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/internal", tags=["internal"])
 
 
@@ -19,7 +22,7 @@ router = APIRouter(prefix="/internal", tags=["internal"])
     response_model=schemas.CatalogoPushOut,
     dependencies=[Depends(auth.verificar_internal_key)],
 )
-def recibir_catalogos(push: schemas.CatalogoPushIn, db: Session = Depends(get_db)):
+def recibir_catalogos(push: schemas.CatalogoPushIn, request: Request, db: Session = Depends(get_db)):
     """Punto de entrada de los catalogos: OP_PROD lo llama al final de cada
     snapshot con lo que cambio en ese ciclo (ver app/services/catalogos.py
     para el contrato). Reemplaza a la replica MySQL -> Supabase y al sondeo
@@ -30,6 +33,14 @@ def recibir_catalogos(push: schemas.CatalogoPushIn, db: Session = Depends(get_db
     los celulares para que refresquen: asi la app se entera en el mismo
     minuto en que OP_PROD vio el cambio, sin sondear."""
     resultado = aplicar_push_catalogos(db, push)
+    logger.info(
+        "push de %s: completo=%s procesos=%s tablas=%s bitacora=%s vigentes=%s -> %s",
+        request.headers.get("x-forwarded-for") or (request.client.host if request.client else "?"),
+        push.completo, len(push.procesos.upsert), len(push.tablas.upsert),
+        len(push.bitacora.upsert) if push.bitacora else None,
+        len(push.bitacora.vigentes.ids) if push.bitacora and push.bitacora.vigentes else None,
+        resultado.model_dump(exclude_none=True),
+    )
     hubo_cambios = any(
         v for seccion in (resultado.procesos, resultado.tablas) for v in seccion.model_dump().values()
     ) or resultado.eventos.insertados > 0

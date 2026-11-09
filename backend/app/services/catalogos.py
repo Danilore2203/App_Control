@@ -22,6 +22,7 @@ import logging
 from datetime import datetime
 from typing import Iterable, Type
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models, schemas
@@ -70,11 +71,23 @@ def _aplicar_catalogo(
     db.flush()
 
     a_borrar: set[int] = set(seccion.bajas)
+    advertencia = None
     if completo:
         consulta = db.query(modelo.id).filter(modelo.snapshot_fecha == fecha)
         if ids_enviados:
             consulta = consulta.filter(modelo.id.notin_(ids_enviados))
-        a_borrar.update(id_ for (id_,) in consulta.all())
+        faltantes = [id_ for (id_,) in consulta.all()]
+        if _envio_sospechosamente_chico(len(ids_enviados), len(ids_enviados) + len(faltantes)):
+            # Un "completo" con una fraccion de lo que hay (origen a medias,
+            # otra copia de OP_PROD contra una base vacia) vaciaria el dia
+            # entero. Se aplican las altas/cambios pero no las bajas.
+            advertencia = (
+                f"completo con {len(ids_enviados)} filas contra {len(ids_enviados) + len(faltantes)} existentes: "
+                "no se borra nada"
+            )
+            logger.warning("%s: %s", modelo.__tablename__, advertencia)
+        else:
+            a_borrar.update(faltantes)
 
     omitidas: set[int] = set()
     if a_borrar and modelo is models.Control:
@@ -92,7 +105,20 @@ def _aplicar_catalogo(
         actualizadas=actualizadas,
         eliminadas=eliminadas,
         omitidas=len(omitidas),
+        advertencia=advertencia,
     )
+
+
+# Un envio que reemplaza "todo" pero trae menos de la mitad de lo que ya hay
+# (con al menos este minimo existente) se trata como incompleto: se aplica
+# lo que trae y no se borra lo demas. Evita que una copia de OP_PROD contra
+# una base vacia, o un snapshot a medias, vacie la app (paso el 9/11/2026:
+# un completo con 20 procesos y 0 ids de bitacora borro el dia y un mes).
+_MINIMO_PARA_COMPARAR = 20
+
+
+def _envio_sospechosamente_chico(enviadas: int, existentes: int) -> bool:
+    return existentes >= _MINIMO_PARA_COMPARAR and enviadas < existentes / 2
 
 
 def _aplicar_eventos(db: Session, eventos: list[schemas.CatalogoEventoIn]) -> schemas.CatalogoEventosOut:
@@ -224,6 +250,14 @@ def _eliminar_bitacora_no_vigente(db: Session, vigentes: schemas.BitacoraVigente
         .all()
     )
     sobrantes = [id_ for id_, origen_id in locales if origen_id not in ids_vigentes]
+    if sobrantes and _envio_sospechosamente_chico(len(locales) - len(sobrantes), len(locales)):
+        # La lista vigente cubre menos de la mitad de lo que hay en la
+        # ventana: viene de una base distinta o a medias. No se borra nada.
+        logger.warning(
+            "bitacora: lista vigente desde %s con %s ids contra %s filas reflejadas: no se borra nada",
+            vigentes.desde, len(ids_vigentes), len(locales),
+        )
+        return 0
     for i in range(0, len(sobrantes), 500):
         lote = sobrantes[i : i + 500]
         db.query(models.BitacoraError).filter(models.BitacoraError.id.in_(lote)).delete(synchronize_session=False)
@@ -252,12 +286,20 @@ def _aplicar_relaciones(db: Session, seccion: schemas.RelacionesIn, completo: bo
             actualizadas += 1
     db.flush()
     eliminadas = 0
+    advertencia = None
     if completo:
-        consulta = db.query(models.ProcesoTabla)
-        if ids:
-            consulta = consulta.filter(models.ProcesoTabla.id.notin_(ids))
-        eliminadas = consulta.delete(synchronize_session=False)
-    return schemas.CatalogoSeccionOut(insertadas=insertadas, actualizadas=actualizadas, eliminadas=eliminadas, omitidas=0)
+        total = db.query(func.count(models.ProcesoTabla.id)).scalar() or 0
+        if _envio_sospechosamente_chico(len(ids), total):
+            advertencia = f"completo con {len(ids)} relaciones contra {total} existentes: no se borra nada"
+            logger.warning("dataops_proceso_tabla: %s", advertencia)
+        else:
+            consulta = db.query(models.ProcesoTabla)
+            if ids:
+                consulta = consulta.filter(models.ProcesoTabla.id.notin_(ids))
+            eliminadas = consulta.delete(synchronize_session=False)
+    return schemas.CatalogoSeccionOut(
+        insertadas=insertadas, actualizadas=actualizadas, eliminadas=eliminadas, omitidas=0, advertencia=advertencia
+    )
 
 
 def filtro_bitacora_local_automatica():
