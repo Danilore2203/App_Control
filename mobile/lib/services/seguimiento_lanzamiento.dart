@@ -56,6 +56,9 @@ class SeguimientoLanzamiento {
     required String nombre,
     required String lanzadoEnServidor,
     DateTime? lanzadoEnLocal,
+    /// Corrida real de DataStage (OP_PROD la devuelve en `run_id`): el estado
+    /// se sigue por ese id, con el resultado y el log del job al terminar.
+    String? runId,
   }) async {
     final inicio = lanzadoEnLocal ?? DateTime.now();
     final limite = inicio.add(maximo);
@@ -82,7 +85,11 @@ class SeguimientoLanzamiento {
         try {
           estado = (await _comandos.ejecutar(
             "procesos.lanzar.estado",
-            payload: {"nombre": nombre, "lanzado_en": lanzadoEnServidor},
+            payload: {
+              "nombre": nombre,
+              "lanzado_en": lanzadoEnServidor,
+              if (runId != null && runId.isNotEmpty) "run_id": runId,
+            },
           ))
               .resultado;
           fallosSeguidos = 0;
