@@ -412,6 +412,7 @@ class CatalogoSeccionOut(BaseModel):
     actualizadas: int
     eliminadas: int
     omitidas: int  # bajas que no se borraron por tener alertas asociadas
+    advertencia: Optional[str] = None  # p.ej. completo sospechosamente chico: no se borro nada
 
 
 class CatalogoEventosOut(BaseModel):
