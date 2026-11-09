@@ -13,11 +13,14 @@ import "configuracion_guardia_screen.dart";
 import "infraestructura_screen.dart";
 import "../widgets/alerta_banner.dart";
 import "../widgets/app_drawer.dart";
+import "../widgets/barra_navegacion.dart";
 import "../widgets/detalle_proceso_sheet.dart";
 import "../widgets/estado_vacio.dart";
 import "../widgets/monitoreo_por_fuente.dart";
+import "../widgets/pestanas.dart";
 import "../widgets/salud_sistema.dart";
 import "../widgets/tarjeta_proceso.dart";
+import "../widgets/titulo_seccion.dart";
 import "alertas_screen.dart";
 
 class DashboardScreen extends StatefulWidget {
@@ -32,7 +35,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int _tabActual = 0;
   final _apiService = ApiService();
   final _infraService = InfraService();
-  late Future<List<Control>> _controlesFuture;
+  late Future<_Catalogo> _controlesFuture;
+  // General / Procesos / Tablas, como el monitor web. Arranca en Procesos:
+  // es lo que la app mostro siempre y lo que mas se mira.
+  String _vista = "PROCESOS";
   String? _filtroColor;
   String? _filtroFuente;
   bool _filtroSoloCore = false;
@@ -50,7 +56,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    _controlesFuture = _apiService.obtenerControles();
+    _controlesFuture = _cargarCatalogo();
     _iniciarVigiaBloqueosProd();
     // Refresca cuando el backend avisa que hay catalogos nuevos (y al volver
     // a primer plano), en vez de preguntar cada 60 s aunque no haya nada.
@@ -59,7 +65,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // del usuario).
     _actualizaciones = SuscripcionActualizaciones(() {
       if (!mounted) return;
-      setState(() => _controlesFuture = _apiService.obtenerControles());
+      setState(() => _controlesFuture = _cargarCatalogo());
     });
     _apiService.obtenerPerfil().then((usuario) {
       if (mounted) setState(() => _usuario = usuario);
@@ -110,8 +116,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     consultar();
   }
 
-  Color _colorEstado(String color) {
-    switch (color) {
+  Color _colorEstado(String categoria) {
+    switch (categoria) {
       case "red":
         return StatusColors.critico;
       case "orange":
@@ -120,30 +126,78 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return StatusColors.exitoso;
       case "blue":
         return StatusColors.info;
+      case "tiempo":
+        return StatusColors.neutral;
       default:
-        return Colors.grey;
+        return StatusColors.neutral;
     }
   }
 
-  String _etiquetaColor(String color) {
-    switch (color) {
+  /// Mismas etiquetas que los contadores del monitor web de procesos.
+  String _etiquetaColor(String categoria) {
+    switch (categoria) {
       case "red":
-        return "Con error";
+        return "Error";
       case "orange":
-        return "Demorados";
+        return "Demorado";
       case "green":
         return "OK";
       case "blue":
-        return "En ejecución";
+        return "Actualizando";
+      case "tiempo":
+        return "En proceso";
       default:
-        return "Otros";
+        return "Sin ejecución";
     }
   }
 
-  String _bucketDe(Control c) => c.esDemorado ? "orange" : c.color;
+  String _bucketDe(Control c) => c.categoria;
+
+  /// Procesos y tablas en paralelo (dos endpoints), para que el selector
+  /// General / Procesos / Tablas cambie de vista sin volver a pedir nada.
+  /// Fuentes de tablas que muestra el monitor: las del "Control de tablas"
+  /// (QA_CONTROL, 290 tablas con OK/Error como en la web). El catalogo trae
+  /// ademas ~1.500 tablas de PG_PROD (medallion) que la web no lista en ese
+  /// monitor; se dejan afuera para que la app cuente lo mismo que la web.
+  static const _fuentesTablasMonitor = {"QA_CONTROL"};
+
+  Future<_Catalogo> _cargarCatalogo() async {
+    final resultados = await Future.wait([
+      _apiService.obtenerControles(),
+      // Si fallan solo las tablas (backend viejo sin /tablas, timeout), los
+      // procesos se muestran igual y la pestana Tablas queda en 0.
+      _apiService.obtenerTablas().catchError((_) => <Control>[]),
+    ]);
+    return _Catalogo(
+      procesos: resultados[0],
+      tablas: resultados[1].where((t) => _fuentesTablasMonitor.contains(t.fuente)).toList(),
+    );
+  }
+
+  List<Control> _segunVista(_Catalogo catalogo) {
+    switch (_vista) {
+      case "PROCESOS":
+        return catalogo.procesos;
+      case "TABLAS":
+        return catalogo.tablas;
+      default:
+        return [...catalogo.procesos, ...catalogo.tablas];
+    }
+  }
+
+  String get _tituloLista {
+    switch (_vista) {
+      case "PROCESOS":
+        return "Procesos";
+      case "TABLAS":
+        return "Tablas";
+      default:
+        return "Procesos y tablas";
+    }
+  }
 
   Future<void> _recargarControles() async {
-    final future = _apiService.obtenerControles();
+    final future = _cargarCatalogo();
     setState(() {
       _controlesFuture = future;
       _filtroColor = null;
@@ -159,10 +213,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final bucket = _bucketDe(control);
       conteos[bucket] = (conteos[bucket] ?? 0) + 1;
     }
-    // Orden fijo: primero lo urgente (rojo/naranja), despues el resto.
-    // Siempre se muestran las 5 (aunque una este en 0), para que "Demorados"
-    // no aparezca y desaparezca segun si hay algun proceso demorado ahora.
-    const ordenColores = ["red", "orange", "blue", "green", "gray"];
+    // Mismo orden que los contadores del monitor web (OK, Error, Demorado,
+    // Actualizando, En proceso); "Sin ejecucion" solo si hay alguno, para no
+    // mostrar una categoria que en DataStage/Pentaho no existe.
+    final ordenColores = [
+      "green",
+      "red",
+      "orange",
+      "blue",
+      "tiempo",
+      if ((conteos["gray"] ?? 0) > 0) "gray",
+    ];
     return SizedBox(
       height: 42,
       child: ListView(
@@ -201,11 +262,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (controles.isEmpty) {
       return SliverToBoxAdapter(
         child: Padding(
-          padding: const EdgeInsets.all(32),
+          padding: const EdgeInsets.all(16),
           child: EstadoVacio(
             icono: Icons.filter_alt_off_outlined,
-            mensaje: "No hay controles con ese estado",
-            colorIcono: colorScheme.onSurfaceVariant,
+            mensaje: "Nada que mostrar con estos filtros",
+            detalle: "Probá con otro estado, fuente o búsqueda.",
+            colorIcono: colorScheme.outline,
           ),
         ),
       );
@@ -236,7 +298,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onChanged: (valor) =>
             setState(() => _busqueda = valor.trim().toLowerCase()),
         decoration: InputDecoration(
-          hintText: "Buscar procesos o ETLs...",
+          hintText: _vista == "TABLAS"
+              ? "Buscar tablas..."
+              : "Buscar procesos, ETLs o tablas...",
           prefixIcon: const Icon(Icons.search),
           suffixIcon: _busqueda.isEmpty
               ? null
@@ -255,10 +319,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildEncabezadoLista(ColorScheme colorScheme) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Text(
-        "RECIENTES (HOY)",
-        style: AppTextStyles.tech(
-            color: colorScheme.onSurfaceVariant, fontSize: 10),
+      child: TituloSeccion(_tituloLista),
+    );
+  }
+
+  Widget _buildPestanas(_Catalogo catalogo) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: Pestanas(
+        seleccionada: _vista,
+        opciones: [
+          ("GENERAL", "General",
+              catalogo.procesos.length + catalogo.tablas.length),
+          ("PROCESOS", "Procesos", catalogo.procesos.length),
+          ("TABLAS", "Tablas", catalogo.tablas.length),
+        ],
+        onCambiar: (vista) => setState(() {
+          _vista = vista;
+          // Los filtros de fuente/core/estado eran de la vista anterior.
+          _filtroColor = null;
+          _filtroFuente = null;
+          _filtroSoloCore = false;
+        }),
       ),
     );
   }
@@ -266,7 +348,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildControles() {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return FutureBuilder<List<Control>>(
+    return FutureBuilder<_Catalogo>(
       future: _controlesFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -274,21 +356,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
         if (snapshot.hasError) {
           return EstadoVacio(
-            icono: Icons.error_outline,
-            mensaje: "No se pudieron cargar los controles.",
+            icono: Icons.cloud_off_rounded,
+            mensaje: "No se pudieron cargar los controles",
+            detalle: "Revisá la conexión e intentá de nuevo.",
             colorIcono: colorScheme.error,
             onReintentar: _recargarControles,
           );
         }
 
-        final todos = snapshot.data ?? [];
-        if (todos.isEmpty) {
+        final catalogo = snapshot.data ?? const _Catalogo();
+        if (catalogo.procesos.isEmpty && catalogo.tablas.isEmpty) {
           return EstadoVacio(
             icono: Icons.checklist_rtl,
             mensaje: "Todavía no hay controles registrados",
             colorIcono: colorScheme.onSurfaceVariant,
           );
         }
+        final todos = _segunVista(catalogo);
 
         final segunFuente = _filtroFuente == null
             ? todos
@@ -307,13 +391,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               .toList();
         }
 
-        final criticos = todos.where((c) => c.color == "red").toList();
+        // Como en el monitor web: "error" es rojo de verdad; un demorado va
+        // aparte (el backend lo pinta rojo para la alarma, pero no se cuenta
+        // como error en el resumen).
+        final criticos = todos.where((c) => c.color == "red" && !c.esDemorado).toList();
         final fuentesCriticas = criticos.map((c) => c.fuente).toSet().toList();
 
         return Column(
           children: [
             AlertaBanner(
               cantidadCriticos: criticos.length,
+              cantidadDemorados: todos.where((c) => c.esDemorado).length,
               fuentesAfectadas: fuentesCriticas,
               onTap: () => setState(() => _filtroColor = "red"),
             ),
@@ -326,7 +414,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     SliverToBoxAdapter(
                       child: Column(
                         children: [
-                          SaludSistema(controles: todos),
+                          _buildPestanas(catalogo),
+                          // La salud responde a la fuente/core elegidos, para
+                          // poder comparar AIRFLOW o DATASTAGE con su monitor.
+                          SaludSistema(controles: segunCore),
                           MonitoreoPorFuente(
                             controles: todos,
                             fuenteSeleccionada: _filtroFuente,
@@ -372,14 +463,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
       key: _scaffoldKey,
       appBar: AppBar(
         titleSpacing: 12,
-        leading: IconButton(
-          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-          icon: Container(
-            decoration: BoxDecoration(
-              color: colorScheme.primary,
-              borderRadius: BorderRadius.circular(10),
+        leading: Center(
+          child: Material(
+            color: colorScheme.surfaceContainerHigh,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: colorScheme.outlineVariant),
             ),
-            child: Icon(Icons.menu, color: colorScheme.onPrimary, size: 20),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _scaffoldKey.currentState?.openDrawer(),
+              child: SizedBox(
+                width: 40,
+                height: 40,
+                child: Icon(Icons.menu_rounded, color: colorScheme.onSurface, size: 22),
+              ),
+            ),
           ),
         ),
         title: Column(
@@ -388,16 +487,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             Text(
               switch (_tabActual) {
-                0 => "MONITOR DE PROCESOS",
-                1 => "CENTRO DE ALERTAS",
-                2 => "CONFIGURACIÓN DE GUARDIA",
-                _ => "BITÁCORA",
+                0 => "Monitor de procesos",
+                1 => "Alertas",
+                2 => "Guardia",
+                _ => "Bitácora",
               },
-              style: AppTextStyles.tech(
-                color: colorScheme.primary,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: colorScheme.onSurface,
+                  ),
             ),
             if (_tabActual == 0) ...[
               const SizedBox(height: 2),
@@ -423,20 +521,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (_tabActual == 0)
             IconButton(
               onPressed: () => _busquedaFocus.requestFocus(),
-              icon: const Icon(Icons.search),
+              icon: const Icon(Icons.search_rounded),
               tooltip: "Buscar",
             ),
           Padding(
-            padding: const EdgeInsets.only(right: 12, left: 4),
-            child: CircleAvatar(
-              radius: 16,
-              backgroundColor: colorScheme.surfaceContainerHighest,
-              child: Text(
-                inicial.isEmpty ? "?" : inicial[0].toUpperCase(),
-                style: TextStyle(
-                    color: colorScheme.onSurface,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13),
+            padding: const EdgeInsets.only(right: 14, left: 2),
+            child: GestureDetector(
+              onTap: () => _scaffoldKey.currentState?.openDrawer(),
+              child: Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colorScheme.primary.withValues(alpha: 0.16),
+                  border: Border.all(color: colorScheme.primary.withValues(alpha: 0.5), width: 1.5),
+                ),
+                child: Text(
+                  inicial.isEmpty ? "?" : inicial[0].toUpperCase(),
+                  style: TextStyle(
+                      color: acentoTinta(context),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14),
+                ),
               ),
             ),
           ),
@@ -460,22 +567,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Expanded(child: vistas[_tabActual]),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tabActual,
-        onDestinationSelected: (index) => setState(() => _tabActual = index),
-        destinations: const [
-          NavigationDestination(
-              icon: Icon(Icons.checklist), label: "Controles"),
-          NavigationDestination(
-              icon: Icon(Icons.notifications_active), label: "Alertas"),
-          NavigationDestination(
-              icon: Icon(Icons.shield_outlined), label: "Guardia"),
-          NavigationDestination(
-              icon: Icon(Icons.menu_book_outlined), label: "Bitácora"),
+      bottomNavigationBar: BarraNavegacion(
+        indice: _tabActual,
+        onSeleccionar: (index) => setState(() => _tabActual = index),
+        destinos: const [
+          DestinoNavegacion(
+              icono: Icons.grid_view_outlined, iconoActivo: Icons.grid_view_rounded, etiqueta: "Controles"),
+          DestinoNavegacion(
+              icono: Icons.notifications_outlined, iconoActivo: Icons.notifications_rounded, etiqueta: "Alertas"),
+          DestinoNavegacion(icono: Icons.shield_outlined, iconoActivo: Icons.shield_rounded, etiqueta: "Guardia"),
+          DestinoNavegacion(
+              icono: Icons.menu_book_outlined, iconoActivo: Icons.menu_book_rounded, etiqueta: "Bitácora"),
         ],
       ),
     );
   }
+}
+
+/// Procesos y tablas tal como los devuelve la API, ya separados; la vista
+/// elegida decide cuales se muestran.
+class _Catalogo {
+  final List<Control> procesos;
+  final List<Control> tablas;
+
+  const _Catalogo({this.procesos = const [], this.tablas = const []});
 }
 
 /// Banner persistente en toda la app (no solo en Infraestructura) cuando hay
@@ -494,33 +609,15 @@ class _BannerBloqueosProd extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: StatusColors.critico,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: InkWell(
+        borderRadius: BorderRadius.circular(14),
         onTap: onVerDetalle,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            children: [
-              const Icon(Icons.lock_clock, color: Colors.white, size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  "PostgreSQL PROD: $cantidad sesión${cantidad == 1 ? '' : 'es'} bloqueada${cantidad == 1 ? '' : 's'}. Revisión urgente.",
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.white, size: 18),
-                onPressed: onCerrar,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
-            ],
-          ),
+        child: MensajeInline(
+          "PostgreSQL PROD: $cantidad sesión${cantidad == 1 ? '' : 'es'} bloqueada${cantidad == 1 ? '' : 's'}. Tocá para revisar.",
+          icono: Icons.lock_clock_rounded,
+          onCerrar: onCerrar,
         ),
       ),
     );

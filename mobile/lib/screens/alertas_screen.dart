@@ -7,9 +7,10 @@ import "../services/actualizaciones_service.dart";
 import "../services/api_service.dart";
 import "../theme.dart";
 import "../widgets/detalle_proceso_sheet.dart";
-import "../widgets/estado_badge.dart";
 import "../widgets/estado_vacio.dart";
+import "../widgets/fondo_app.dart";
 import "../widgets/monitoreo_por_fuente.dart" show esCore;
+import "../widgets/titulo_seccion.dart";
 
 /// Reconstruye, a partir de una entrada de bitacora tipo INCOHERENCIA
 /// ("proceso -> tabla"), un Control sintetico con los datos reales del
@@ -125,7 +126,7 @@ class _AlertasScreenState extends State<AlertasScreen> {
   String _formatearFecha(DateTime fecha) {
     String dosDigitos(int n) => n.toString().padLeft(2, "0");
     return "${dosDigitos(fecha.day)}/${dosDigitos(fecha.month)}/${fecha.year}"
-        "  ${dosDigitos(fecha.hour)}:${dosDigitos(fecha.minute)}";
+        " · ${dosDigitos(fecha.hour)}:${dosDigitos(fecha.minute)}";
   }
 
   String _horaControl(Control control) {
@@ -134,72 +135,61 @@ class _AlertasScreenState extends State<AlertasScreen> {
       final ts = control.snapshotTs;
       return "${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')}";
     }
-    if (texto.contains(" ")) return texto.split(" ").last.substring(0, 5);
-    return texto.length >= 5 ? texto.substring(0, 5) : texto;
+    // "2026-11-05 08:47:00" -> "08:47"; si la parte de la hora viene mas
+    // corta ("8:47", "N/A"), se devuelve tal cual: substring(0, 5) a ciegas
+    // tiraba RangeError y rompia toda la pestana.
+    final parte = texto.contains(" ") ? texto.split(" ").last : texto;
+    return parte.length >= 5 ? parte.substring(0, 5) : parte;
   }
 
-  Widget _buildResumenCore(List<Control> controles) {
-    final colorScheme = Theme.of(context).colorScheme;
+  List<Control> _fallandoCore(List<Control> controles) {
     final core = controles.where(esCore).toList();
     final incoherencias = _incoherenciasHoy
         .map((e) => construirFallaDesdeIncoherencia(e, controles))
         .whereType<Control>()
         .toList();
-    final fallando = [
+    return [
       ...core.where((c) => c.color == "red" || c.color == "orange"),
       ...incoherencias,
     ]..sort((a, b) => a.color == "red" ? -1 : 1);
+  }
 
-    if (fallando.isEmpty) return const SizedBox.shrink();
+  List<Widget> _seccionCore(List<Control> controles) {
+    final core = controles.where(esCore).toList();
+    final fallando = _fallandoCore(controles);
+    final hayFallas = fallando.isNotEmpty;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: _TarjetaResumen(
-                  titulo: "PROCESOS CRÍTICOS",
-                  valor: "${fallando.length}",
-                  subtitulo: "Acción requerida",
-                  color: StatusColors.critico,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _TarjetaResumen(
-                  titulo: "CORE MONITOREADOS",
-                  valor: "${core.length}",
-                  subtitulo: "Total vigilado",
-                  color: colorScheme.primary,
-                ),
-              ),
-            ],
+    return [
+      Row(
+        children: [
+          Expanded(
+            child: IndicadorTile(
+              etiqueta: "Core en falla",
+              valor: "${fallando.length}",
+              icono: hayFallas ? Icons.error_outline_rounded : Icons.check_circle_outline_rounded,
+              color: hayFallas ? StatusColors.critico : StatusColors.exitoso,
+            ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 22, 16, 10),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                "Fallas Críticas",
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              Text("EN VIVO",
-                  style: AppTextStyles.tech(
-                      color: colorScheme.primary, fontSize: 10)),
-            ],
+          const SizedBox(width: 10),
+          Expanded(
+            child: IndicadorTile(
+              etiqueta: "Core vigilados",
+              valor: "${core.length}",
+              icono: Icons.shield_outlined,
+            ),
           ),
+        ],
+      ),
+      if (hayFallas) ...[
+        const SizedBox(height: 22),
+        const TituloSeccion(
+          "Fallas críticas",
+          accion: PillEstado("En vivo", color: StatusColors.critico, icono: Icons.circle),
         ),
+        const SizedBox(height: 10),
         for (final control in fallando)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            padding: const EdgeInsets.only(bottom: 10),
             child: _TarjetaFallaCritica(
               control: control,
               hora: _horaControl(control),
@@ -208,135 +198,134 @@ class _AlertasScreenState extends State<AlertasScreen> {
           ),
         if (!_bannerDescartado)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: _BannerCriticoFlotante(
-              cantidad: fallando.length,
+            padding: const EdgeInsets.only(top: 4),
+            child: MensajeInline(
+              "${fallando.length} proceso${fallando.length == 1 ? '' : 's'} core detenido${fallando.length == 1 ? '' : 's'}. Revisión manual requerida.",
+              icono: Icons.campaign_rounded,
               onCerrar: () => setState(() => _bannerDescartado = true),
             ),
           ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          child:
-              Divider(color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
-        ),
       ],
-    );
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
-    return Column(
-      children: [
-        FutureBuilder<List<Control>>(
-          future: _controlesFuture,
-          builder: (context, snapshot) =>
-              _buildResumenCore(snapshot.data ?? []),
-        ),
-        Expanded(
-          child: FutureBuilder<List<Alerta>>(
-            future: _alertasFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return EstadoVacio(
-                  icono: Icons.error_outline,
-                  mensaje: "No se pudieron cargar las alertas.",
-                  colorIcono: colorScheme.error,
-                );
-              }
+    return FutureBuilder<List<Alerta>>(
+      future: _alertasFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return EstadoVacio(
+            icono: Icons.cloud_off_rounded,
+            mensaje: "No se pudieron cargar las alertas",
+            detalle: "Revisá la conexión e intentá de nuevo.",
+            colorIcono: colorScheme.error,
+            onReintentar: _recargarAlertas,
+          );
+        }
 
-              final alertas = snapshot.data ?? [];
-              if (alertas.isEmpty) {
-                return EstadoVacio(
-                  icono: Icons.notifications_off_outlined,
-                  mensaje: "Sin alertas por ahora",
-                  colorIcono: colorScheme.onSurfaceVariant,
-                );
-              }
+        final alertas = snapshot.data ?? [];
 
-              return RefreshIndicator(
-                onRefresh: _recargarAlertas,
-                child: ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: alertas.length,
-                  itemBuilder: (context, index) {
-                    final alerta = alertas[index];
-                    final esCritica = alerta.nivel == "critica";
-                    final color = esCritica
-                        ? StatusColors.critico
-                        : StatusColors.advertencia;
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        leading: CircleAvatar(
-                          backgroundColor: color.withValues(alpha: 0.15),
-                          child:
-                              Icon(Icons.warning_amber_rounded, color: color),
+        return RefreshIndicator(
+          onRefresh: _recargarAlertas,
+          child: FutureBuilder<List<Control>>(
+            future: _controlesFuture,
+            builder: (context, controlesSnapshot) {
+              final controles = controlesSnapshot.data ?? [];
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                  ..._seccionCore(controles),
+                  const SizedBox(height: 22),
+                  TituloSeccion(
+                    "Historial de alertas",
+                    accion: Text(
+                      "${alertas.length}",
+                      style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.outline, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (alertas.isEmpty)
+                    EstadoVacio(
+                      icono: Icons.notifications_off_outlined,
+                      mensaje: "Sin alertas por ahora",
+                      detalle: "Cuando un proceso core falle, la alerta va a aparecer acá.",
+                      colorIcono: colorScheme.outline,
+                    )
+                  else
+                    for (final alerta in alertas)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _TarjetaAlerta(
+                          alerta: alerta,
+                          fecha: _formatearFecha(alerta.creadoEn),
                         ),
-                        title: Text(alerta.mensaje),
-                        subtitle: Text(_formatearFecha(alerta.creadoEn)),
-                        trailing: EstadoBadge(
-                            texto: esCritica ? "Critica" : "Normal",
-                            color: color),
                       ),
-                    );
-                  },
-                ),
+                ],
               );
             },
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 }
 
-class _TarjetaResumen extends StatelessWidget {
-  final String titulo;
-  final String valor;
-  final String subtitulo;
-  final Color color;
+class _TarjetaAlerta extends StatelessWidget {
+  const _TarjetaAlerta({required this.alerta, required this.fecha});
 
-  const _TarjetaResumen({
-    required this.titulo,
-    required this.valor,
-    required this.subtitulo,
-    required this.color,
-  });
+  final Alerta alerta;
+  final String fecha;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(14),
-        border: Border(left: BorderSide(color: color, width: 4)),
-        boxShadow: [
-          BoxShadow(color: color.withValues(alpha: 0.15), blurRadius: 14)
-        ],
-      ),
-      child: Column(
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final esCritica = alerta.nivel == "critica";
+    final color = esCritica ? StatusColors.critico : StatusColors.advertencia;
+
+    return Vidrio(
+      padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+      blur: 8,
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(titulo, style: AppTextStyles.tech(color: color, fontSize: 9)),
-          const SizedBox(height: 4),
-          Text(valor,
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.bold)),
-          Text(subtitulo,
-              style:
-                  TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 11)),
+          CajaIcono(
+            esCritica ? Icons.notification_important_rounded : Icons.notifications_rounded,
+            color: color,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  alerta.mensaje,
+                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600, height: 1.3),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Icon(Icons.schedule_rounded, size: 13, color: colorScheme.outline),
+                    const SizedBox(width: 4),
+                    Text(
+                      fecha,
+                      style: theme.textTheme.labelSmall?.copyWith(color: colorScheme.outline, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          PillEstado(esCritica ? "Crítica" : "Normal", color: color),
         ],
       ),
     );
@@ -353,18 +342,17 @@ class _TarjetaFallaCritica extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final color = control.esDemorado
         ? StatusColors.advertencia
         : StatusColors.critico;
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
+    return Vidrio(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      borderColor: color.withValues(alpha: 0.4),
+      color: color.withValues(alpha: 0.08),
+      onTap: onVerDetalle,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -372,7 +360,7 @@ class _TarjetaFallaCritica extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Padding(
-                padding: const EdgeInsets.only(top: 5, right: 10),
+                padding: const EdgeInsets.only(top: 6, right: 10),
                 child: _PuntoCritico(color: color),
               ),
               Expanded(
@@ -381,42 +369,38 @@ class _TarjetaFallaCritica extends StatelessWidget {
                   children: [
                     Text(
                       control.nombre,
-                      style: AppTextStyles.tech(
-                          color: color,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700),
+                      style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
                       "${control.fuente} · ${control.estado}",
-                      style: TextStyle(
-                          color: colorScheme.onSurfaceVariant, fontSize: 11.5),
+                      style: theme.textTheme.bodySmall?.copyWith(color: color, fontWeight: FontWeight.w600),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              Text(hora,
-                  style: AppTextStyles.tech(
-                      color: colorScheme.onSurfaceVariant, fontSize: 11)),
+              Text(
+                hora,
+                style: AppTextStyles.tech(color: colorScheme.onSurfaceVariant, fontSize: 11, letterSpacing: 0.4),
+              ),
             ],
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: onVerDetalle,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: color,
-                side: BorderSide(color: color.withValues(alpha: 0.6)),
-                padding: const EdgeInsets.symmetric(vertical: 10),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Text(
+                "Ver detalle",
+                style: theme.textTheme.labelMedium?.copyWith(color: color, fontWeight: FontWeight.w800),
               ),
-              icon: const Icon(Icons.description_outlined, size: 16),
-              label: const Text("VER DETALLE",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-            ),
+              const SizedBox(width: 2),
+              Icon(Icons.arrow_forward_rounded, size: 16, color: color),
+            ],
           ),
         ],
       ),
@@ -457,69 +441,21 @@ class _PuntoCriticoState extends State<_PuntoCritico>
       animation: _controller,
       builder: (context, _) {
         return Container(
-          width: 8,
-          height: 8,
+          width: 9,
+          height: 9,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: widget.color,
             boxShadow: [
               BoxShadow(
                   color:
-                      widget.color.withValues(alpha: 0.4 * _controller.value),
-                  blurRadius: 6 * _controller.value),
+                      widget.color.withValues(alpha: 0.5 * _controller.value),
+                  blurRadius: 8 * _controller.value,
+                  spreadRadius: 1.5 * _controller.value),
             ],
           ),
         );
       },
-    );
-  }
-}
-
-/// Banner flotante y descartable que resume las fallas core actuales, para
-/// cuando la alarma de pantalla completa no se disparo (fuera de horario de
-/// guardia o guardia desarmada): la falla queda visible aca, sin interrumpir.
-class _BannerCriticoFlotante extends StatelessWidget {
-  final int cantidad;
-  final VoidCallback onCerrar;
-
-  const _BannerCriticoFlotante(
-      {required this.cantidad, required this.onCerrar});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: StatusColors.critico,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-              color: StatusColors.critico.withValues(alpha: 0.35),
-              blurRadius: 20)
-        ],
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.warning_amber_rounded,
-              color: Colors.white, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              "CRÍTICO: $cantidad proceso${cantidad == 1 ? '' : 's'} core detenido${cantidad == 1 ? '' : 's'}. Revisión manual requerida.",
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600),
-            ),
-          ),
-          IconButton(
-            onPressed: onCerrar,
-            icon: const Icon(Icons.close, color: Colors.white, size: 18),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-          ),
-        ],
-      ),
     );
   }
 }

@@ -75,8 +75,9 @@ class _FormularioEntradaBitacoraState
       child: Container(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHigh,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          color: Theme.of(context).bottomSheetTheme.backgroundColor ?? colorScheme.surfaceContainerLow,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border.all(color: colorScheme.outlineVariant),
         ),
         child: Form(
           key: _formKey,
@@ -95,7 +96,10 @@ class _FormularioEntradaBitacoraState
                       borderRadius: BorderRadius.circular(2)),
                 ),
               ),
-              Text(titulo, style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                titulo,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.4),
+              ),
               const SizedBox(height: 16),
               SegmentedButton<bool>(
                 segments: const [

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app import auth, schemas
 from app.database import get_db
-from app.services.catalogos import aplicar_push_catalogos, estado_catalogos
+from app.services.catalogos import aplicar_push_catalogos, eliminar_bitacora_local_automatica, estado_catalogos
 from app.services.ciclo import ejecutar_ciclo_en_segundo_plano
 from app.services.poller import BOLIVIA_TZ
 from app.services.solicitudes import aprobar_solicitud_registro
@@ -48,6 +48,19 @@ def designar_administrador_interno(datos: schemas.AdministradorIn, db: Session =
     (todos los demas accesos los aprueba un administrador). Idempotente."""
     usuario = designar_administrador(db, datos.email, datos.nombre)
     return schemas.UsuarioOut.model_validate(usuario, from_attributes=True).model_copy(update={"es_admin": True})
+
+
+@router.delete(
+    "/bitacora/locales-automaticas",
+    response_model=schemas.MensajeOut,
+    dependencies=[Depends(auth.verificar_internal_key)],
+)
+def borrar_bitacora_local_automatica(db: Session = Depends(get_db)):
+    """Limpieza unica: borra los episodios que el poller viejo de la app
+    genero por su cuenta (duplican a los replicados de MySQL). Conserva
+    entradas manuales e incoherencias."""
+    borradas = eliminar_bitacora_local_automatica(db)
+    return schemas.MensajeOut(ok=True, mensaje=f"{borradas} episodios locales automaticos eliminados")
 
 
 @router.get(

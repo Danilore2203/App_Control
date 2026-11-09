@@ -123,7 +123,8 @@ def test_estado_resume_lo_recibido_del_dia(db):
     assert estado_catalogos(db, HOY).model_dump() == {
         "fecha": HOY, "procesos_hoy": 0, "tablas_hoy": 0, "eventos_hoy": 0, "ultimo_snapshot_ts": None,
         "ultimo_evento_ts": None, "ultimo_evento_id": 0, "ultimo_cambio_revisado": 0, "episodios_alerta_abiertos": 0,
-        "bitacora_total": 0, "bitacora_ultima_actualizacion": None, "relaciones_total": 0, "usuarios_total": 0,
+        "bitacora_total": 0, "bitacora_ultima_actualizacion": None, "bitacora_locales": 0,
+        "bitacora_locales_automaticas": 0, "bitacora_hoy_mysql": 0, "relaciones_total": 0, "usuarios_total": 0,
     }
 
     ts_tarde = datetime(2026, 11, 5, 9, 30)
@@ -216,6 +217,27 @@ def test_bitacora_de_mysql_se_replica_por_origen_id_sin_tocar_lo_propio(db):
     assert (cerrada.id, cerrada.estado_fin, cerrada.fecha_actualizacion) == (id_local, "OK", datetime(2026, 11, 5, 9, 3))
     assert db.query(models.BitacoraError).filter_by(nombre="manual").one().estado_fin == "ERROR"
     assert db.query(models.BitacoraError).count() == 2
+
+
+def test_limpieza_borra_solo_los_episodios_locales_automaticos(db):
+    from app.services.catalogos import eliminar_bitacora_local_automatica
+
+    def fila(**kw):
+        base = dict(fecha_hora=TS, nombre="p", tecnologia="AIRFLOW", descripcion="x", estado="ERROR",
+                    estado_fin="ERROR", tipo="PROCESO")
+        base.update(kw)
+        db.add(models.BitacoraError(**base))
+
+    fila(origen_id=1)                                   # replicada de MySQL: se queda
+    fila(nombre="poller viejo")                         # local automatica: se borra
+    fila(nombre="manual", creado_por_id=7)              # manual: se queda
+    fila(nombre="a -> t", estado="INCOHERENCIA")        # incoherencia: se queda
+    db.commit()
+
+    assert eliminar_bitacora_local_automatica(db) == 1
+    assert sorted(b.nombre for b in db.query(models.BitacoraError).all()) == ["a -> t", "manual", "p"]
+    estado = estado_catalogos(db, HOY)
+    assert (estado.bitacora_total, estado.bitacora_locales, estado.bitacora_locales_automaticas, estado.bitacora_hoy_mysql) == (1, 2, 0, 1)
 
 
 def test_relaciones_proceso_tabla_completo_reemplaza(db):

@@ -7,6 +7,8 @@ import "../theme.dart";
 import "../utils/meses_es.dart";
 import "../widgets/estado_vacio.dart";
 import "../widgets/formulario_entrada_bitacora.dart";
+import "../widgets/pestanas.dart";
+import "../widgets/titulo_seccion.dart";
 
 IconData iconoTecnologia(String tecnologia) {
   switch (tecnologia) {
@@ -124,6 +126,10 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
   String? _filtroEstado; // null=todos, "ABIERTO", "RESUELTO" o "DEMORADO"
   String? _filtroTecnologia;
   bool _soloCore = false;
+  // Pestana como en el monitor web: GENERAL (todo), PROCESOS o TABLAS. Se
+  // arranca en Procesos porque es lo que mira la guardia; las tablas (sobre
+  // todo PG_PROD vacias) son muchas mas y tapaban a los procesos.
+  String _vista = "PROCESOS";
   // Nombres de procesos CORE segun el estado ACTUAL de /controles (no se
   // guarda ese dato en la bitacora): cruzado por nombre contra cada entrada.
   // Aproximado a proposito -si un proceso cambio de nombre o ya no existe en
@@ -215,9 +221,6 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
     return indice == -1 ? e.nombre : e.nombre.substring(0, indice);
   }
 
-  List<String> get _tecnologiasAfectadas =>
-      _entradas.map((e) => e.tecnologia).toSet().toList();
-
   /// Bucket exclusivo para los 4 filtros pedidos: un demorado no cuenta como
   /// "abierto" aparte (tiene su propio filtro), igual que en Controles
   /// "Con error" y "Demorados" son categorías separadas.
@@ -227,26 +230,41 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
     return "ABIERTO";
   }
 
+  bool _esIncoherencia(BitacoraError e) =>
+      (e.estado ?? "").toUpperCase() == "INCOHERENCIA";
+
+  bool _enVista(BitacoraError e) => switch (_vista) {
+        "PROCESOS" => e.esProceso,
+        "TABLAS" => !e.esProceso,
+        _ => true,
+      };
+
+  /// Tecnologias que tienen sentido en la pestana actual (procesos o
+  /// tablas); en General, todas.
+  List<String> get _tecnologiasDeLaVista => switch (_vista) {
+        "PROCESOS" => tecnologiasProceso,
+        "TABLAS" => tecnologiasTabla,
+        _ => _todasLasTecnologias,
+      };
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final busquedaLimpia = _busqueda.trim().toLowerCase();
-    // Base para los contadores y la lista: busqueda + tecnologia ya
-    // aplicadas. El filtro de ESTADO (chips Todos/Abiertos/Resueltos/
-    // Demorado) se aplica despues, aparte, porque son las opciones entre las
-    // que el usuario esta eligiendo - no tendria sentido que se filtraran a
-    // si mismas. Antes los contadores de estos chips se calculaban sobre
-    // _entradas sin filtrar, asi que elegir una tecnologia cambiaba la lista
-    // de abajo pero no los numeros de los chips.
+    // Base para los indicadores, los chips y la lista: pestana + busqueda +
+    // tecnologia + core ya aplicados. El filtro de ESTADO (chips) se aplica
+    // despues, aparte, porque son las opciones entre las que el usuario
+    // esta eligiendo: no tendria sentido que se filtraran a si mismas.
     final entradasVisibles = _entradas.where((e) {
       final coincideBusqueda = busquedaLimpia.isEmpty ||
           e.nombre.toLowerCase().contains(busquedaLimpia) ||
-          e.tecnologia.toLowerCase().contains(busquedaLimpia);
+          e.tecnologia.toLowerCase().contains(busquedaLimpia) ||
+          e.descripcion.toLowerCase().contains(busquedaLimpia);
       final coincideTecnologia =
           _filtroTecnologia == null || e.tecnologia == _filtroTecnologia;
       final coincideCore =
           !_soloCore || _nombresCoreActuales.contains(_nombreProcesoDe(e));
-      return coincideBusqueda && coincideTecnologia && coincideCore;
+      return _enVista(e) && coincideBusqueda && coincideTecnologia && coincideCore;
     }).toList();
     final abiertos =
         entradasVisibles.where((e) => _bucketEstado(e) == "ABIERTO").length;
@@ -254,114 +272,112 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
         entradasVisibles.where((e) => _bucketEstado(e) == "RESUELTO").length;
     final demorados =
         entradasVisibles.where((e) => _bucketEstado(e) == "DEMORADO").length;
+    final incoherencias = entradasVisibles.where(_esIncoherencia).length;
+    final total = entradasVisibles.length;
+    final pctCritico = total == 0 ? 0 : ((abiertos + demorados) * 100 / total).round();
     final entradasFiltradas = entradasVisibles
         .where((e) => _filtroEstado == null || _bucketEstado(e) == _filtroEstado)
         .toList();
+    final totalProcesos = _entradas.where((e) => e.esProceso).length;
+    final totalTablas = _entradas.length - totalProcesos;
+
+    void elegirEstado(String? estado) =>
+        setState(() => _filtroEstado = _filtroEstado == estado ? null : estado);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-            "${widget.dia} DE ${nombresMesEs[widget.mes - 1].toUpperCase()}"),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Eyebrow("Registro de incidentes"),
+            Text("${widget.dia} de ${nombresMesEs[widget.mes - 1]}"),
+          ],
+        ),
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: _abrirFormulario,
-        child: const Icon(Icons.add),
+        icon: const Icon(Icons.add),
+        label: const Text("Registrar"),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
         children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(16),
-              border: Border(
-                  left: BorderSide(
-                      color: abiertos > 0
-                          ? StatusColors.critico
-                          : StatusColors.exitoso,
-                      width: 4)),
-            ),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Positioned(
-                  top: -10,
-                  right: -10,
-                  child: Icon(
-                    Icons.warning_amber_rounded,
-                    size: 90,
-                    color: (abiertos > 0
-                            ? StatusColors.critico
-                            : StatusColors.exitoso)
-                        .withValues(alpha: 0.08),
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AnimatedBuilder(
-                      animation: _pulseController,
-                      builder: (context, child) => Opacity(
-                        opacity: abiertos > 0
-                            ? 0.6 + (_pulseController.value * 0.4)
-                            : 1,
-                        child: child,
-                      ),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: abiertos > 0
-                              ? StatusColors.critico
-                              : StatusColors.exitoso,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                                abiertos > 0
-                                    ? Icons.error_outline
-                                    : Icons.check_circle_outline,
-                                color: Colors.white,
-                                size: 14),
-                            const SizedBox(width: 6),
-                            Text(
-                              abiertos > 0
-                                  ? "$abiertos FALLO${abiertos == 1 ? '' : 'S'} CRÍTICO${abiertos == 1 ? '' : 'S'}"
-                                  : "SIN FALLOS ABIERTOS",
-                              style: AppTextStyles.tech(
-                                  color: Colors.white, fontSize: 10),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text("Resumen Operativo",
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 6),
-                    Text(
-                      _tecnologiasAfectadas.isEmpty
-                          ? "Sin fallos registrados este día."
-                          : "Se detectaron fallos en: ${_tecnologiasAfectadas.join(', ')}.",
-                      style: TextStyle(color: colorScheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+          // Pestanas General / Procesos / Tablas, como el monitor web.
+          Pestanas(
+            seleccionada: _vista,
+            opciones: [
+              ("GENERAL", "General", _entradas.length),
+              ("PROCESOS", "Procesos", totalProcesos),
+              ("TABLAS", "Tablas", totalTablas),
+            ],
+            onCambiar: (vista) => setState(() {
+              _vista = vista;
+              _filtroTecnologia = null;
+              _filtroEstado = null;
+            }),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
+          // Indicadores del dia (.bt-kpi-tile): tocar uno filtra la lista.
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            childAspectRatio: 2.35,
+            children: [
+              IndicadorTile(
+                etiqueta: "Total",
+                valor: "$total",
+                icono: Icons.list_alt_outlined,
+                onTap: () => elegirEstado(null),
+              ),
+              IndicadorTile(
+                etiqueta: "Error",
+                valor: "$abiertos",
+                color: StatusColors.critico,
+                icono: Icons.error_outline,
+                onTap: () => elegirEstado("ABIERTO"),
+              ),
+              IndicadorTile(
+                etiqueta: "Resueltos",
+                valor: "$resueltos",
+                color: StatusColors.exitoso,
+                icono: Icons.check_circle_outline,
+                onTap: () => elegirEstado("RESUELTO"),
+              ),
+              IndicadorTile(
+                etiqueta: "Demorados",
+                valor: "$demorados",
+                color: StatusColors.demorado,
+                icono: Icons.schedule,
+                onTap: () => elegirEstado("DEMORADO"),
+              ),
+              IndicadorTile(
+                etiqueta: "Incoherencias",
+                valor: "$incoherencias",
+                color: StatusColors.info,
+                icono: Icons.compare_arrows,
+              ),
+              IndicadorTile(
+                etiqueta: "Crítico",
+                valor: "$pctCritico%",
+                color: pctCritico >= 50
+                    ? StatusColors.critico
+                    : pctCritico > 0
+                        ? StatusColors.demorado
+                        : StatusColors.exitoso,
+                icono: Icons.speed_outlined,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
           TextField(
             controller: _busquedaController,
             onChanged: (valor) => setState(() => _busqueda = valor),
             decoration: InputDecoration(
-              hintText: "Buscar proceso o tabla...",
+              hintText: "Buscar por nombre, tecnología o descripción...",
               prefixIcon: const Icon(Icons.search),
               suffixIcon: _busqueda.isEmpty
                   ? null
@@ -381,35 +397,35 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
               scrollDirection: Axis.horizontal,
               children: [
                 _ChipEstado(
-                  etiqueta: "TODOS",
-                  cantidad: entradasVisibles.length,
+                  etiqueta: "Todos",
+                  cantidad: total,
                   color: colorScheme.primary,
                   seleccionado: _filtroEstado == null,
                   onTap: () => setState(() => _filtroEstado = null),
                 ),
                 const SizedBox(width: 8),
                 _ChipEstado(
-                  etiqueta: "ABIERTOS",
+                  etiqueta: "Error",
                   cantidad: abiertos,
                   color: StatusColors.critico,
                   seleccionado: _filtroEstado == "ABIERTO",
-                  onTap: () => setState(() => _filtroEstado = "ABIERTO"),
+                  onTap: () => elegirEstado("ABIERTO"),
                 ),
                 const SizedBox(width: 8),
                 _ChipEstado(
-                  etiqueta: "RESUELTOS",
-                  cantidad: resueltos,
-                  color: StatusColors.exitoso,
-                  seleccionado: _filtroEstado == "RESUELTO",
-                  onTap: () => setState(() => _filtroEstado = "RESUELTO"),
-                ),
-                const SizedBox(width: 8),
-                _ChipEstado(
-                  etiqueta: "DEMORADO",
+                  etiqueta: "Demorados",
                   cantidad: demorados,
                   color: StatusColors.demorado,
                   seleccionado: _filtroEstado == "DEMORADO",
-                  onTap: () => setState(() => _filtroEstado = "DEMORADO"),
+                  onTap: () => elegirEstado("DEMORADO"),
+                ),
+                const SizedBox(width: 8),
+                _ChipEstado(
+                  etiqueta: "Resueltos",
+                  cantidad: resueltos,
+                  color: StatusColors.exitoso,
+                  seleccionado: _filtroEstado == "RESUELTO",
+                  onTap: () => elegirEstado("RESUELTO"),
                 ),
               ],
             ),
@@ -420,12 +436,14 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: [
-                _ChipCore(
-                  seleccionado: _soloCore,
-                  onTap: () => setState(() => _soloCore = !_soloCore),
-                ),
-                const SizedBox(width: 8),
-                for (final tecnologia in _todasLasTecnologias) ...[
+                if (_vista != "TABLAS") ...[
+                  _ChipCore(
+                    seleccionado: _soloCore,
+                    onTap: () => setState(() => _soloCore = !_soloCore),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                for (final tecnologia in _tecnologiasDeLaVista) ...[
                   _ChipTecnologia(
                     tecnologia: tecnologia,
                     seleccionado: _filtroTecnologia == tecnologia,
@@ -438,6 +456,14 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
             ),
           ),
           const SizedBox(height: 16),
+          TituloSeccion(
+            "Bitácora del ${widget.anio}-${widget.mes.toString().padLeft(2, '0')}-${widget.dia.toString().padLeft(2, '0')}",
+            accion: Text(
+              "${entradasFiltradas.length} de $total",
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colorScheme.outline),
+            ),
+          ),
+          const SizedBox(height: 10),
           if (entradasFiltradas.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 24),
@@ -478,33 +504,42 @@ class _ChipEstado extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: seleccionado ? color : colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-              color: seleccionado
-                  ? Colors.transparent
-                  : colorScheme.outlineVariant),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(etiqueta,
-                style: AppTextStyles.tech(
-                    color: seleccionado ? colorScheme.onPrimary : color,
-                    fontSize: 10)),
-            const SizedBox(width: 6),
-            Text("$cantidad",
-                style: AppTextStyles.tech(
-                    color: (seleccionado ? colorScheme.onPrimary : color)
-                        .withValues(alpha: 0.8),
-                    fontSize: 10)),
-          ],
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final colorTexto = seleccionado ? Colors.white : colorScheme.onSurface;
+    return Material(
+      color: seleccionado ? color : colorScheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: seleccionado ? Colors.transparent : colorScheme.outlineVariant),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!seleccionado) ...[
+                Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                etiqueta,
+                style: theme.textTheme.labelMedium?.copyWith(color: colorTexto, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                "$cantidad",
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: colorTexto.withValues(alpha: 0.75),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -524,27 +559,60 @@ class _ChipCore extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const color = StatusColors.critico;
-    return GestureDetector(
+    return _ChipIcono(
+      icono: Icons.bolt_rounded,
+      texto: "Core",
+      color: StatusColors.critico,
+      seleccionado: seleccionado,
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: seleccionado ? 0.9 : 0.1),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withValues(alpha: 0.4)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.verified_outlined,
-                size: 14, color: seleccionado ? Colors.white : color),
-            const SizedBox(width: 6),
-            Text("CORE",
-                style: AppTextStyles.tech(
-                    color: seleccionado ? Colors.white : color,
-                    fontSize: 9)),
-          ],
+    );
+  }
+}
+
+/// Chip con icono y tono propio: lleno cuando esta seleccionado, al 12 %
+/// con borde cuando no.
+class _ChipIcono extends StatelessWidget {
+  final IconData icono;
+  final String texto;
+  final Color color;
+  final bool seleccionado;
+  final VoidCallback onTap;
+
+  const _ChipIcono({
+    required this.icono,
+    required this.texto,
+    required this.color,
+    required this.seleccionado,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorTexto = seleccionado ? Colors.white : color;
+    return Material(
+      color: seleccionado ? color : color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: color.withValues(alpha: seleccionado ? 0 : 0.35)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icono, size: 14, color: colorTexto),
+              const SizedBox(width: 6),
+              Text(
+                texto,
+                style: theme.textTheme.labelMedium?.copyWith(color: colorTexto, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -564,29 +632,12 @@ class _ChipTecnologia extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = colorTecnologia(tecnologia);
-    return GestureDetector(
+    return _ChipIcono(
+      icono: iconoTecnologia(tecnologia),
+      texto: tecnologia,
+      color: colorTecnologia(tecnologia),
+      seleccionado: seleccionado,
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: seleccionado ? 0.9 : 0.1),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withValues(alpha: 0.4)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(iconoTecnologia(tecnologia),
-                size: 14, color: seleccionado ? Colors.white : color),
-            const SizedBox(width: 6),
-            Text(tecnologia,
-                style: AppTextStyles.tech(
-                    color: seleccionado ? Colors.white : color,
-                    fontSize: 9)),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -607,14 +658,12 @@ class _TarjetaFalloDia extends StatelessWidget {
     final estadoTexto = entrada.estado ?? (entrada.esProceso ? "ERROR" : "TABLA");
     final sistema = entrada.sistema ?? entrada.tecnologia;
 
+    final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(16),
-        border: Border(left: BorderSide(color: color, width: 4)),
-        boxShadow: [
-          BoxShadow(color: color.withValues(alpha: 0.12), blurRadius: 16)
-        ],
+        border: Border.all(color: resuelto ? colorScheme.outlineVariant : color.withValues(alpha: 0.35)),
       ),
       padding: const EdgeInsets.all(14),
       child: Column(
@@ -623,15 +672,7 @@ class _TarjetaFalloDia extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(iconoEvento(entrada), color: color, size: 18),
-              ),
+              CajaIcono(iconoEvento(entrada), color: color, tamano: 36, tamanoIcono: 19),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -639,31 +680,14 @@ class _TarjetaFalloDia extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Expanded(
-                          child: Text(
-                            "$sistema · $estadoTexto",
-                            style:
-                                AppTextStyles.tech(color: color, fontSize: 9),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 1),
-                          decoration: BoxDecoration(
-                              color: color.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(6)),
-                          child: Text(resuelto ? "RESUELTO" : "ABIERTO",
-                              style:
-                                  AppTextStyles.tech(color: color, fontSize: 8)),
-                        ),
+                        Expanded(child: Eyebrow("$sistema · $estadoTexto", color: color)),
+                        PillEstado(resuelto ? "Resuelto" : "Abierto", color: color),
                       ],
                     ),
+                    const SizedBox(height: 3),
                     Text(
                       entrada.nombre,
-                      style: AppTextStyles.tech(
-                          color: colorScheme.onSurface,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700),
+                      style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -695,22 +719,25 @@ class _TarjetaFalloDia extends StatelessWidget {
           const SizedBox(height: 10),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(11),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
+              color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: color.withValues(alpha: 0.2)),
+              border: Border.all(color: colorScheme.outlineVariant),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(iconoEvento(entrada), color: color, size: 15),
-                const SizedBox(width: 8),
+                Container(
+                  width: 3,
+                  height: 16,
+                  margin: const EdgeInsets.only(top: 1, right: 9),
+                  decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+                ),
                 Expanded(
                   child: Text(
                     entrada.descripcion,
-                    style:
-                        TextStyle(color: color, fontSize: 12.5, height: 1.35),
+                    style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurface, height: 1.4),
                   ),
                 ),
               ],

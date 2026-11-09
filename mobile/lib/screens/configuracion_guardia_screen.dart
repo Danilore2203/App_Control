@@ -9,7 +9,9 @@ import "../services/guardia_service.dart";
 import "../services/tono_alarma_service.dart";
 import "../theme.dart";
 import "../widgets/detalle_proceso_sheet.dart";
+import "../widgets/fondo_app.dart";
 import "../widgets/monitoreo_por_fuente.dart" show esCore;
+import "../widgets/titulo_seccion.dart";
 
 /// Version con AppBar propio, para abrir desde el menu lateral (con boton
 /// de volver). El contenido vive en [GuardiaContenido] para poder reusarlo
@@ -19,14 +21,8 @@ class ConfiguracionGuardiaScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          "CONFIGURACIÓN DE GUARDIA",
-          style: AppTextStyles.tech(color: colorScheme.onSurface, fontSize: 13),
-        ),
-      ),
+      appBar: AppBar(title: const Text("Guardia")),
       body: const GuardiaContenido(),
     );
   }
@@ -184,79 +180,66 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
     return _cargandoPreferencias
         ? const Center(child: CircularProgressIndicator())
         : ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
               _tarjetaArmado(colorScheme),
-              const SizedBox(height: 24),
-              _tituloSeccion("HORARIO DE GUARDIA", colorScheme),
+              const SizedBox(height: 22),
+              const TituloSeccion("Horario de guardia"),
               const SizedBox(height: 10),
               _tarjetaHorario(colorScheme),
-              const SizedBox(height: 24),
-              _tituloSeccion("TONO DE ALARMA (CRÍTICO)", colorScheme),
+              const SizedBox(height: 22),
+              const TituloSeccion("Tono de alarma"),
               const SizedBox(height: 10),
               _tarjetaTono(colorScheme),
-              const SizedBox(height: 24),
+              const SizedBox(height: 22),
               _seccionProcesosVigilados(colorScheme),
-              const SizedBox(height: 24),
-              _tituloSeccion("FALLAS RECIENTES (7 DÍAS)", colorScheme),
+              const SizedBox(height: 22),
+              const TituloSeccion("Fallas recientes", accion: Eyebrow("Últimos 7 días")),
               const SizedBox(height: 10),
               _graficoHistorial(colorScheme),
-              const SizedBox(height: 16),
             ],
           );
   }
 
-  Widget _tituloSeccion(String texto, ColorScheme colorScheme) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 4),
-      child: Text(texto,
-          style: AppTextStyles.tech(
-              color: colorScheme.onSurfaceVariant, fontSize: 10)),
-    );
-  }
-
   Widget _tarjetaArmado(ColorScheme colorScheme) {
-    return Container(
+    final theme = Theme.of(context);
+    final tono = _armado ? colorScheme.primary : colorScheme.outline;
+    return Vidrio(
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-            color: _armado
-                ? colorScheme.primary.withValues(alpha: 0.5)
-                : Colors.transparent),
-        boxShadow: _armado
-            ? [
-                BoxShadow(
-                    color: colorScheme.primary.withValues(alpha: 0.15),
-                    blurRadius: 20)
-              ]
-            : null,
-      ),
+      color: _armado ? colorScheme.primary.withValues(alpha: 0.12) : null,
+      borderColor: _armado ? colorScheme.primary.withValues(alpha: 0.5) : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
+              CajaIcono(
+                _armado ? Icons.shield_rounded : Icons.shield_outlined,
+                color: tono,
+                tamano: 46,
+                tamanoIcono: 24,
+                solido: _armado,
+              ),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       "Monitoreo de guardia",
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: colorScheme.primary,
-                          fontWeight: FontWeight.bold),
+                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Text(
-                      "Activar alerta crítica sonora en este dispositivo",
-                      style: TextStyle(
-                          color: colorScheme.onSurfaceVariant, fontSize: 12.5),
+                      _armado
+                          ? "Armado: este celular suena si un proceso core falla."
+                          : "Desarmado: no suena la alarma en este celular.",
+                      style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant, height: 1.35),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
               Switch(
                 value: _armado,
                 onChanged: (valor) {
@@ -268,58 +251,22 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           Row(
             children: [
-              Expanded(
-                child: _casillaEstado(
-                  colorScheme,
-                  titulo: "ESTADO",
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        margin: const EdgeInsets.only(right: 6),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: _armado
-                              ? colorScheme.primary
-                              : colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      Text(
-                        _armado ? "ARMADO" : "DESARMADO",
-                        style: AppTextStyles.tech(
-                          color: _armado
-                              ? colorScheme.primary
-                              : colorScheme.onSurfaceVariant,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              PillEstado(
+                _armado ? "Armado" : "Desarmado",
+                color: _armado ? StatusColors.exitoso : colorScheme.outline,
+                icono: Icons.circle,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _casillaEstado(
-                  colorScheme,
-                  titulo: "RESPUESTA",
-                  child: Text(
-                    "ALERTA SONORA",
-                    style: AppTextStyles.tech(
-                        color: colorScheme.onSurface, fontSize: 11),
-                  ),
-                ),
-              ),
+              const SizedBox(width: 8),
+              PillEstado("Alerta sonora", color: colorScheme.onSurfaceVariant, icono: Icons.volume_up_rounded),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
-            height: 44,
+            height: 46,
             child: OutlinedButton.icon(
               onPressed: _probandoAlerta ? null : _probarAlerta,
               icon: _probandoAlerta
@@ -337,45 +284,27 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
     );
   }
 
-  Widget _casillaEstado(ColorScheme colorScheme,
-      {required String titulo, required Widget child}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: colorScheme.surface.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(titulo,
-              style: AppTextStyles.tech(
-                  color: colorScheme.onSurfaceVariant, fontSize: 8.5)),
-          const SizedBox(height: 4),
-          child,
-        ],
-      ),
-    );
-  }
-
   Widget _tarjetaHorario(ColorScheme colorScheme) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(16),
-      ),
+    return Vidrio(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      blur: 10,
       child: Row(
         children: [
           Expanded(
-              child: _columnaHora("INICIO", _horaInicio, colorScheme,
+              child: _columnaHora("Inicio", _horaInicio, colorScheme,
                   () => _elegirHora(esInicio: true))),
-          Icon(Icons.arrow_forward,
-              color: colorScheme.onSurfaceVariant, size: 18),
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: colorScheme.surfaceContainerHighest,
+              border: Border.all(color: colorScheme.outlineVariant),
+            ),
+            child: Icon(Icons.arrow_forward_rounded, color: colorScheme.onSurfaceVariant, size: 16),
+          ),
           Expanded(
-              child: _columnaHora("FIN", _horaFin, colorScheme,
+              child: _columnaHora("Fin", _horaFin, colorScheme,
                   () => _elegirHora(esInicio: false))),
         ],
       ),
@@ -384,6 +313,7 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
 
   Widget _columnaHora(String etiqueta, String valor, ColorScheme colorScheme,
       VoidCallback onTap) {
+    final theme = Theme.of(context);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -391,16 +321,21 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Column(
           children: [
-            Text(etiqueta,
-                style: AppTextStyles.tech(
-                    color: colorScheme.onSurfaceVariant, fontSize: 9)),
+            Eyebrow(etiqueta),
             const SizedBox(height: 6),
             Text(
               valor,
-              style: AppTextStyles.tech(
-                  color: colorScheme.primary,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700),
+              style: theme.textTheme.headlineSmall?.copyWith(
+                color: acentoTinta(context),
+                fontWeight: FontWeight.w800,
+                letterSpacing: -1,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              "Tocá para cambiar",
+              style: theme.textTheme.labelSmall?.copyWith(color: colorScheme.outline),
             ),
           ],
         ),
@@ -409,57 +344,20 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
   }
 
   Widget _tarjetaTono(ColorScheme colorScheme) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: colorScheme.primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
+    return FilaOpcion(
+      icono: Icons.music_note_rounded,
+      titulo: _nombreTono ?? "Predeterminado del sistema",
+      subtitulo: "Uno de los tonos de alarma instalados en el celular",
+      trailing: _cambiandoTono
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : TextButton(
+              onPressed: _elegirTono,
+              child: const Text("Cambiar"),
             ),
-            child: Icon(Icons.music_note_outlined, color: colorScheme.primary),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _nombreTono ?? "Predeterminado del sistema",
-                  style: TextStyle(
-                      color: colorScheme.onSurface, fontWeight: FontWeight.w600),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  "Uno de los tonos de alarma ya instalados en el celular",
-                  style: TextStyle(
-                      color: colorScheme.onSurfaceVariant, fontSize: 11.5),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          _cambiandoTono
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : TextButton(
-                  onPressed: _elegirTono,
-                  child: const Text("Cambiar"),
-                ),
-        ],
-      ),
     );
   }
 
@@ -480,27 +378,18 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
             return (orden[a.color] ?? 5).compareTo(orden[b.color] ?? 5);
           });
 
+        final fallas = core.where((c) => c.color == "red" || c.color == "orange").length;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.only(left: 4, bottom: 10),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "PROCESOS BAJO VIGILANCIA",
-                    style: AppTextStyles.tech(
-                        color: colorScheme.onSurfaceVariant, fontSize: 10),
-                  ),
-                  Text(
-                    "${core.length} ACTIVOS",
-                    style: AppTextStyles.tech(
-                        color: colorScheme.primary, fontSize: 10),
-                  ),
-                ],
+            TituloSeccion(
+              "Procesos vigilados",
+              accion: PillEstado(
+                fallas > 0 ? "$fallas en falla" : "${core.length} core",
+                color: fallas > 0 ? StatusColors.critico : StatusColors.exitoso,
               ),
             ),
+            const SizedBox(height: 10),
             if (snapshot.connectionState == ConnectionState.waiting)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
@@ -514,7 +403,7 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
             else
               for (final control in core)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.only(bottom: 8),
                   child: _FilaProcesoVigilado(
                     control: control,
                     onTap: () => mostrarDetalleProceso(context, control),
@@ -527,13 +416,9 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
   }
 
   Widget _graficoHistorial(ColorScheme colorScheme) {
-    return Container(
-      width: double.infinity,
+    return Vidrio(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(16),
-      ),
+      blur: 10,
       child: FutureBuilder<List<HistorialFalla>>(
         future: _historialFuture,
         builder: (context, snapshot) {
@@ -585,17 +470,29 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
                                 ),
                               ),
                               const SizedBox(height: 4),
-                              Container(
-                                height: maxValor == 0
-                                    ? 4
-                                    : (datos[i].fallas / maxValor) * 76 + 4,
-                                decoration: BoxDecoration(
-                                  color: i == indiceMax
-                                      ? StatusColors.critico
-                                      : colorScheme.primary
-                                          .withValues(alpha: 0.35),
-                                  borderRadius: const BorderRadius.vertical(
-                                      top: Radius.circular(4)),
+                              TweenAnimationBuilder<double>(
+                                tween: Tween(
+                                    begin: 0,
+                                    end: maxValor == 0
+                                        ? 4
+                                        : (datos[i].fallas / maxValor) * 76 + 4),
+                                duration: const Duration(milliseconds: 700),
+                                curve: Curves.easeOutCubic,
+                                builder: (context, alto, _) => Container(
+                                  height: alto,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: i == indiceMax
+                                          ? [StatusColors.critico, StatusColors.critico.withValues(alpha: 0.55)]
+                                          : [
+                                              colorScheme.primary.withValues(alpha: 0.7),
+                                              colorScheme.primary.withValues(alpha: 0.25),
+                                            ],
+                                    ),
+                                    borderRadius: BorderRadius.circular(5),
+                                  ),
                                 ),
                               ),
                             ],
@@ -687,46 +584,34 @@ class _FilaProcesoVigilado extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
                 color: esFalla
-                    ? color.withValues(alpha: 0.35)
-                    : Colors.transparent),
+                    ? color.withValues(alpha: 0.4)
+                    : colorScheme.outlineVariant),
           ),
           child: Row(
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Stack(
-                  children: [
-                    Center(
-                        child: Icon(_icono,
-                            color: esFalla
-                                ? color
-                                : colorScheme.onSurfaceVariant)),
-                    Positioned(
-                      top: -2,
-                      right: -2,
-                      child: Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: color,
-                          border:
-                              Border.all(color: colorScheme.surface, width: 2),
-                        ),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  CajaIcono(_icono, color: esFalla ? color : colorScheme.onSurfaceVariant, tamano: 42),
+                  Positioned(
+                    top: -3,
+                    right: -3,
+                    child: Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: color,
+                        border: Border.all(color: colorScheme.surfaceContainerLow, width: 2),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
               const SizedBox(width: 12),
               Expanded(

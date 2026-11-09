@@ -43,6 +43,24 @@ class ApiService {
     return data.map((json) => Control.fromJson(json)).toList();
   }
 
+  /// Estado actual de las tablas monitoreadas (dataops_catalogo_tablas),
+  /// como Control con tipo "TABLA" para listarlas junto a los procesos.
+  Future<List<Control>> obtenerTablas() async {
+    final response = await ApiClient.enviar(() async => http
+        .get(
+          Uri.parse("${AppConfig.apiBaseUrl}/tablas"),
+          headers: await _headers(),
+        )
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
+
+    if (response.statusCode != 200) {
+      throw Exception("No se pudieron obtener las tablas");
+    }
+
+    final List<dynamic> data = jsonDecode(response.body);
+    return data.map((json) => Control.fromTablaJson(json)).toList();
+  }
+
   Future<List<HistorialFalla>> obtenerHistorialFallas({int dias = 7}) async {
     final response = await ApiClient.enviar(() async => http
         .get(

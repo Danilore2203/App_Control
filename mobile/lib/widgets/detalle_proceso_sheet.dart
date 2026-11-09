@@ -89,6 +89,33 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
     final ruta = _sinVacio(control.ruta);
     final version = _sinVacio(control.version);
     final core = _sinVacio(control.core);
+    final esTabla = control.esTabla;
+    final layer = _sinVacio(control.layer);
+    final ultimaFecha = _sinVacio(control.ultimaFecha);
+    final catalogo =
+        esTabla ? "dataops_catalogo_tablas" : "dataops_catalogo_procesos";
+
+    // Tres casillas arriba: horas de corrida para un proceso; registros,
+    // capa y ultima carga para una tabla.
+    final casillas = esTabla
+        ? [
+            ("REGISTROS", control.cantidadFormateada ?? "—",
+                control.color == "red" ? colorScheme.error : color),
+            ("CAPA", layer?.toUpperCase() ?? "—", colorScheme.secondary),
+            ("ULTIMA CARGA", ultimaFecha ?? horaProgramada ?? "—",
+                colorScheme.onSurfaceVariant),
+          ]
+        : [
+            ("PROGRAMADO", horaProgramada ?? "—", colorScheme.onSurfaceVariant),
+            ("INICIO", horaLog ?? "—", colorScheme.secondary),
+            (
+              "FIN",
+              horaFin ?? "—",
+              control.color == "red" && !control.esDemorado
+                  ? colorScheme.error
+                  : color
+            ),
+          ];
 
     return SafeArea(
       top: false,
@@ -96,8 +123,9 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
         heightFactor: 0.88,
         child: Container(
           decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHigh,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            color: Theme.of(context).bottomSheetTheme.backgroundColor ?? colorScheme.surfaceContainerLow,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            border: Border.all(color: colorScheme.outlineVariant),
             boxShadow: [
               BoxShadow(
                   color: Colors.black.withValues(alpha: 0.4),
@@ -170,7 +198,7 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
-                                  core ?? ruta ?? "dataops_catalogo_procesos",
+                                  core ?? ruta ?? catalogo,
                                   style: AppTextStyles.tech(
                                     color: colorScheme.onSurfaceVariant,
                                     fontSize: 10.5,
@@ -200,36 +228,21 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                     children: [
                       Row(
                         children: [
-                          Expanded(
-                            child: _CasillaStat(
-                              titulo: "PROGRAMADO",
-                              valor: horaProgramada ?? "—",
-                              color: colorScheme.onSurfaceVariant,
+                          for (var i = 0; i < casillas.length; i++) ...[
+                            if (i > 0) const SizedBox(width: 10),
+                            Expanded(
+                              child: _CasillaStat(
+                                titulo: casillas[i].$1,
+                                valor: casillas[i].$2,
+                                color: casillas[i].$3,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _CasillaStat(
-                              titulo: "INICIO",
-                              valor: horaLog ?? "—",
-                              color: colorScheme.secondary,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _CasillaStat(
-                              titulo: "FIN",
-                              valor: horaFin ?? "—",
-                              color: control.color == "red" && !control.esDemorado
-                                  ? colorScheme.error
-                                  : color,
-                            ),
-                          ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 24),
                       Text(
-                        "ESTADO DEL PROCESO",
+                        esTabla ? "ESTADO DE LA TABLA" : "ESTADO DEL PROCESO",
                         style: AppTextStyles.tech(
                             color: colorScheme.onSurfaceVariant, fontSize: 10),
                       ),
@@ -322,7 +335,7 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             _LineaConsola(
-                              texto: "# dataops_catalogo_procesos",
+                              texto: "# $catalogo",
                               color: colorScheme.onSurfaceVariant
                                   .withValues(alpha: 0.5),
                             ),
@@ -335,6 +348,18 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                             if (ruta != null)
                               _LineaConsola(
                                   texto: "ruta: $ruta",
+                                  color: colorScheme.onSurfaceVariant),
+                            if (esTabla)
+                              _LineaConsola(
+                                  texto: "registros: ${control.cantidad ?? 0}",
+                                  color: colorScheme.onSurfaceVariant),
+                            if (layer != null)
+                              _LineaConsola(
+                                  texto: "layer: $layer",
+                                  color: colorScheme.onSurfaceVariant),
+                            if (ultimaFecha != null)
+                              _LineaConsola(
+                                  texto: "ultima_fecha: $ultimaFecha",
                                   color: colorScheme.onSurfaceVariant),
                             _LineaConsola(
                               texto:

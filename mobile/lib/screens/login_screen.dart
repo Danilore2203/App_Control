@@ -3,13 +3,12 @@ import "package:flutter/material.dart";
 import "../services/auth_service.dart";
 import "../services/biometric_service.dart";
 import "../services/notification_service.dart";
-import "../theme.dart";
-import "../widgets/dotted_background.dart";
+import "../widgets/fondo_app.dart";
+import "../widgets/titulo_seccion.dart";
+import "../widgets/version_app.dart";
 import "configurar_password_screen.dart";
 import "dashboard_screen.dart";
 import "register_screen.dart";
-
-const String _version = "v0.1.0";
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -195,10 +194,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
-      body: DottedBackground(
-        dotColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.15),
-        child: SizedBox.expand(
+      body: SizedBox.expand(
           child: SafeArea(
             child: Center(
               child: SingleChildScrollView(
@@ -212,55 +208,33 @@ class _LoginScreenState extends State<LoginScreen> {
                           children: [
                             _Encabezado(colorScheme: colorScheme),
                             const SizedBox(height: 28),
-                            Card(
-                              elevation: 8,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
-                                child: Column(
+                            Vidrio(
+                              radius: 24,
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 30),
+                              child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
                                       _hayTokenGuardado ? "Bienvenido de nuevo" : "Bienvenido",
                                       style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                            fontWeight: FontWeight.bold,
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: -0.6,
                                           ),
                                     ),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: 6),
                                     Text(
                                       _hayTokenGuardado
-                                          ? "Confirma tu identidad para continuar"
-                                          : "Inicia sesión para acceder al panel de control",
+                                          ? "Confirmá tu identidad para continuar"
+                                          : "Ingresá para acceder al monitor",
                                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                             color: colorScheme.onSurfaceVariant,
                                           ),
                                       textAlign: TextAlign.center,
                                     ),
-                                    const SizedBox(height: 28),
+                                    const SizedBox(height: 24),
                                     if (_error != null) ...[
-                                      Container(
-                                        width: double.infinity,
-                                        padding: const EdgeInsets.all(12),
-                                        decoration: BoxDecoration(
-                                          color: colorScheme.errorContainer,
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Icon(Icons.error_outline,
-                                                color: colorScheme.onErrorContainer, size: 20),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Text(
-                                                _error!,
-                                                style: TextStyle(
-                                                    color: colorScheme.onErrorContainer, fontSize: 13),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(height: 20),
+                                      MensajeInline(_error!),
+                                      const SizedBox(height: 18),
                                     ],
                                     if (_cargando)
                                       const Padding(
@@ -282,7 +256,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                         child: const Text("Usar otra cuenta"),
                                       ),
                                     ] else ...[
-                                      _EtiquetaCampo(texto: "USUARIO / EMAIL", colorScheme: colorScheme),
+                                      const _EtiquetaCampo(texto: "Usuario o email"),
                                       const SizedBox(height: 6),
                                       TextField(
                                         controller: _usuarioController,
@@ -292,7 +266,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                         ),
                                       ),
                                       const SizedBox(height: 16),
-                                      _EtiquetaCampo(texto: "CONTRASEÑA", colorScheme: colorScheme),
+                                      const _EtiquetaCampo(texto: "Contraseña"),
                                       const SizedBox(height: 6),
                                       TextField(
                                         controller: _passwordController,
@@ -341,27 +315,19 @@ class _LoginScreenState extends State<LoginScreen> {
                                         child: const Text("¿No tienes cuenta? Crear cuenta"),
                                       ),
                                       const SizedBox(height: 8),
-                                      Text(
-                                        "O INGRESE CON",
-                                        textAlign: TextAlign.center,
-                                        style: AppTextStyles.tech(
-                                          color: colorScheme.onSurfaceVariant,
-                                          fontSize: 10,
-                                        ),
-                                      ),
+                                      const _Separador(texto: "o ingresá con"),
                                       const SizedBox(height: 16),
                                       _BotonAncho(onTap: _iniciarSesionConGoogle),
                                     ],
                                   ],
                                 ),
-                              ),
                             ),
                             const SizedBox(height: 24),
-                            Text(
-                              _version.toUpperCase(),
-                              style: AppTextStyles.tech(
-                                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                                fontSize: 10,
+                            VersionApp(
+                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: colorScheme.outline,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.8,
                               ),
                             ),
                           ],
@@ -370,8 +336,28 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ),
-        ),
       ),
+    );
+  }
+}
+
+class _Separador extends StatelessWidget {
+  const _Separador({required this.texto});
+
+  final String texto;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Expanded(child: Divider(color: colorScheme.outlineVariant)),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Eyebrow(texto),
+        ),
+        Expanded(child: Divider(color: colorScheme.outlineVariant)),
+      ],
     );
   }
 }
@@ -383,30 +369,28 @@ class _Encabezado extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Column(
       children: [
         Container(
-          width: 56,
-          height: 56,
+          width: 64,
+          height: 64,
           decoration: BoxDecoration(
             color: colorScheme.primary,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(color: colorScheme.primary.withValues(alpha: 0.4), blurRadius: 28, offset: const Offset(0, 8)),
+            ],
           ),
-          child: Icon(Icons.insights, size: 30, color: colorScheme.onPrimary),
+          child: Icon(Icons.insights_rounded, size: 34, color: colorScheme.onPrimary),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         Text(
-          "CONTROLES",
-          style: AppTextStyles.tech(color: colorScheme.primary, fontSize: 20, letterSpacing: 1.5),
+          "Controles",
+          style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.8),
         ),
-        Text(
-          "MONITOREO Y ALERTAS",
-          style: AppTextStyles.tech(
-            color: colorScheme.onSurfaceVariant,
-            fontSize: 10,
-            fontWeight: FontWeight.w400,
-          ),
-        ),
+        const SizedBox(height: 2),
+        const Eyebrow("Monitoreo y alertas · Centinela DWH"),
       ],
     );
   }
@@ -414,15 +398,17 @@ class _Encabezado extends StatelessWidget {
 
 class _EtiquetaCampo extends StatelessWidget {
   final String texto;
-  final ColorScheme colorScheme;
 
-  const _EtiquetaCampo({required this.texto, required this.colorScheme});
+  const _EtiquetaCampo({required this.texto});
 
   @override
   Widget build(BuildContext context) {
     return Align(
       alignment: Alignment.centerLeft,
-      child: Text(texto, style: AppTextStyles.tech(color: colorScheme.onSurfaceVariant, fontSize: 10)),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 4),
+        child: Eyebrow(texto),
+      ),
     );
   }
 }
@@ -442,27 +428,32 @@ class _BotonAncho extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final esGoogle = icono == null;
     return SizedBox(
       width: double.infinity,
       height: 52,
-      child: OutlinedButton(
-        onPressed: onTap,
-        style: OutlinedButton.styleFrom(
-          backgroundColor: Colors.white,
-          side: BorderSide(color: Colors.grey.shade300),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            icono != null ? Icon(icono, size: 20, color: Colors.grey.shade800) : const _GoogleLogo(),
-            const SizedBox(width: 12),
-            Text(
-              texto,
-              style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w600, fontSize: 15),
+      child: esGoogle
+          ? OutlinedButton(
+              onPressed: onTap,
+              style: OutlinedButton.styleFrom(
+                backgroundColor: colorScheme.surfaceContainerHighest,
+                foregroundColor: colorScheme.onSurface,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const _GoogleLogo(),
+                  const SizedBox(width: 12),
+                  Text(texto, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                ],
+              ),
+            )
+          : ElevatedButton.icon(
+              onPressed: onTap,
+              icon: Icon(icono, size: 20),
+              label: Text(texto),
             ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -474,16 +465,11 @@ class _BotonHuella extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Column(
       children: [
-        Text(
-          "O INGRESA CON",
-          style: AppTextStyles.tech(color: colorScheme.onSurfaceVariant, fontSize: 10),
-        ),
-        const SizedBox(height: 16),
-        _IconoSecundario(icono: Icons.fingerprint, onTap: onTap),
+        const _Separador(texto: "ingresá con tu huella"),
+        const SizedBox(height: 18),
+        _IconoSecundario(icono: Icons.fingerprint_rounded, onTap: onTap),
       ],
     );
   }
@@ -500,16 +486,23 @@ class _IconoSecundario extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Center(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(40),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: colorScheme.primaryContainer,
+      child: Material(
+        color: colorScheme.primary,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: Container(
+            width: 76,
+            height: 76,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(color: colorScheme.primary.withValues(alpha: 0.4), blurRadius: 24, spreadRadius: -2),
+              ],
+            ),
+            child: Icon(icono, size: 36, color: colorScheme.onPrimary),
           ),
-          child: Icon(icono, size: 32, color: colorScheme.onPrimaryContainer),
         ),
       ),
     );

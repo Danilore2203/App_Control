@@ -111,14 +111,23 @@ class BitacoraResumenMes {
   final int total;
   final bool tieneError;
 
-  BitacoraResumenMes(
-      {required this.mes, required this.total, required this.tieneError});
+  /// Episodios de ese mes que siguen sin resolver.
+  final int abiertos;
+
+  BitacoraResumenMes({
+    required this.mes,
+    required this.total,
+    required this.tieneError,
+    this.abiertos = 0,
+  });
 
   factory BitacoraResumenMes.fromJson(Map<String, dynamic> json) {
     return BitacoraResumenMes(
-        mes: json["mes"],
-        total: json["total"],
-        tieneError: json["tiene_error"]);
+      mes: json["mes"],
+      total: json["total"] ?? 0,
+      tieneError: json["tiene_error"] ?? false,
+      abiertos: json["abiertos"] ?? 0,
+    );
   }
 }
 
@@ -128,21 +137,32 @@ class BitacoraResumenAnio {
   final double? variacionPct;
   final List<BitacoraResumenMes> meses;
 
+  /// Indicadores del momento (independientes del año consultado).
+  final int abiertosAhora;
+  final int hoy;
+  final int ultimos7Dias;
+
   BitacoraResumenAnio({
     required this.anio,
     required this.totalAnual,
     required this.meses,
     this.variacionPct,
+    this.abiertosAhora = 0,
+    this.hoy = 0,
+    this.ultimos7Dias = 0,
   });
 
   factory BitacoraResumenAnio.fromJson(Map<String, dynamic> json) {
     return BitacoraResumenAnio(
       anio: json["anio"],
-      totalAnual: json["total_anual"],
+      totalAnual: json["total_anual"] ?? 0,
       variacionPct: (json["variacion_pct"] as num?)?.toDouble(),
       meses: (json["meses"] as List)
           .map((j) => BitacoraResumenMes.fromJson(j))
           .toList(),
+      abiertosAhora: json["abiertos_ahora"] ?? 0,
+      hoy: json["hoy"] ?? 0,
+      ultimos7Dias: json["ultimos_7_dias"] ?? 0,
     );
   }
 }
