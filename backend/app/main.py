@@ -18,6 +18,7 @@ from app.routers import bitacora as bitacora_router
 from app.routers import controles as controles_router
 from app.routers import infra as infra_router
 from app.routers import internal as internal_router
+from app.routers import comandos as comandos_router
 from app.routers import tablas as tablas_router
 from app.services.ciclo import ejecutar_ciclo
 
@@ -157,6 +158,7 @@ app.add_middleware(
 app.include_router(auth_router.router)
 app.include_router(controles_router.router)
 app.include_router(tablas_router.router)
+app.include_router(comandos_router.router)
 app.include_router(alertas_router.router)
 app.include_router(admin_router.router)
 app.include_router(infra_router.router)

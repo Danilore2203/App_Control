@@ -302,3 +302,29 @@ class AirflowEstado(Base):
     last_state = Column(String(30), nullable=True)
     is_paused = Column(Boolean, nullable=False, default=False)
     actualizado_en = Column(DateTime, nullable=False)
+
+
+class Comando(Base):
+    """Pedido de la app para que OP_PROD haga algo adentro de la red (ver
+    services/comandos.py): consultar sesiones de Netezza/PostgreSQL, lanzar
+    un proceso, pausar un DAG, actualizar todos, cancelar una sesion. Render
+    no llega al servidor OP (red interna), asi que la app deja el comando aca
+    y OP_PROD lo retira por HTTPS cada pocos segundos, lo ejecuta y deja el
+    resultado. `payload` y `resultado` son JSON en texto."""
+
+    __tablename__ = "comandos"
+    __table_args__ = (Index("ix_comandos_estado_creado", "estado", "creado_en"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    tipo = Column(String(60), nullable=False)
+    payload = Column(String, nullable=False, default="{}")
+    # pendiente -> en_curso -> ok | error ; o expirado si nadie lo retiro a tiempo
+    estado = Column(String(20), nullable=False, default="pendiente", index=True)
+    creado_por_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    creado_en = Column(DateTime, nullable=False, default=datetime.utcnow)
+    tomado_en = Column(DateTime, nullable=True)
+    terminado_en = Column(DateTime, nullable=True)
+    resultado = Column(String, nullable=True)
+    error = Column(String(2000), nullable=True)
+
+    creado_por = relationship("Usuario", lazy="joined")

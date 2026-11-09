@@ -499,3 +499,32 @@ class AirflowEstadosIn(BaseModel):
 class AirflowEstadosOut(BaseModel):
     recibidos: int
     actualizado_en: datetime
+
+
+class ComandoIn(BaseModel):
+    """POST /comandos: lo que la app le pide a OP_PROD (ver TIPOS_COMANDO en
+    services/comandos.py)."""
+
+    tipo: str = Field(min_length=3, max_length=60)
+    payload: dict = Field(default_factory=dict)
+
+
+class ComandoOut(BaseModel):
+    id: int
+    tipo: str
+    payload: dict
+    estado: str
+    creado_en: datetime
+    tomado_en: Optional[datetime] = None
+    terminado_en: Optional[datetime] = None
+    resultado: Optional[dict] = None
+    error: Optional[str] = None
+    creado_por: Optional[str] = None
+
+
+class ComandoResultadoIn(BaseModel):
+    """POST /internal/comandos/{id}/resultado, desde OP_PROD."""
+
+    ok: bool
+    resultado: Optional[dict] = None
+    error: Optional[str] = None
