@@ -51,6 +51,9 @@ Color colorTecnologia(String tecnologia) {
 IconData iconoEvento(BitacoraError entrada) {
   if (entrada.resuelto) return Icons.check_circle_outline;
   switch ((entrada.estado ?? "").toUpperCase()) {
+    case "VACIA":
+    case "VACÍA":
+      return Icons.inbox_outlined;
     case "DEMORADO":
       return Icons.schedule;
     case "EJECUTADO":
@@ -71,6 +74,9 @@ IconData iconoEvento(BitacoraError entrada) {
 Color colorEvento(BitacoraError entrada) {
   if (entrada.resuelto) return StatusColors.exitoso;
   switch ((entrada.estado ?? "").toUpperCase()) {
+    case "VACIA":
+    case "VACÍA":
+      return StatusColors.info;
     case "DEMORADO":
       return StatusColors.demorado;
     case "EJECUTADO":
@@ -221,17 +227,28 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
     return indice == -1 ? e.nombre : e.nombre.substring(0, indice);
   }
 
-  /// Bucket exclusivo para los 4 filtros pedidos: un demorado no cuenta como
-  /// "abierto" aparte (tiene su propio filtro), igual que en Controles
-  /// "Con error" y "Demorados" son categorías separadas.
+  /// Bucket exclusivo, con el mismo criterio que la bitacora web (por
+  /// Estado_Fin): OK = resuelto; DEMORADO, VACIA e INCOHERENCIA tienen su
+  /// propio contador y el resto es Error (sin Estado_Fin cuenta como ERROR,
+  /// como hace la web con COALESCE).
   String _bucketEstado(BitacoraError e) {
-    if (e.resuelto) return "RESUELTO";
-    if ((e.estado ?? "").toUpperCase() == "DEMORADO") return "DEMORADO";
-    return "ABIERTO";
+    switch ((e.estadoFin ?? "ERROR").trim().toUpperCase()) {
+      case "OK":
+        return "RESUELTO";
+      case "DEMORADO":
+        return "DEMORADO";
+      case "VACIA":
+      case "VACÍA":
+        return "VACIA";
+      case "INCOHERENCIA":
+        return "INCOHERENCIA";
+      default:
+        return "ABIERTO";
+    }
   }
 
   bool _esIncoherencia(BitacoraError e) =>
-      (e.estado ?? "").toUpperCase() == "INCOHERENCIA";
+      (e.estado ?? "").toUpperCase() == "INCOHERENCIA" || _bucketEstado(e) == "INCOHERENCIA";
 
   bool _enVista(BitacoraError e) => switch (_vista) {
         "PROCESOS" => e.esProceso,
@@ -272,14 +289,28 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
         entradasVisibles.where((e) => _bucketEstado(e) == "RESUELTO").length;
     final demorados =
         entradasVisibles.where((e) => _bucketEstado(e) == "DEMORADO").length;
+    final vacias = entradasVisibles.where((e) => _bucketEstado(e) == "VACIA").length;
     final incoherencias = entradasVisibles.where(_esIncoherencia).length;
     final total = entradasVisibles.length;
-    final pctCritico = total == 0 ? 0 : ((abiertos + demorados) * 100 / total).round();
     final entradasFiltradas = entradasVisibles
         .where((e) => _filtroEstado == null || _bucketEstado(e) == _filtroEstado)
         .toList();
     final totalProcesos = _entradas.where((e) => e.esProceso).length;
     final totalTablas = _entradas.length - totalProcesos;
+    // Conteo por tecnologia (las tarjetas "Monitoreo por fuente" de la web):
+    // sobre la pestana + busqueda + core, sin el filtro de tecnologia ni el
+    // de estado, que son los que el usuario elige con esos chips.
+    final porTecnologia = <String, int>{};
+    for (final e in _entradas) {
+      final coincideBusqueda = busquedaLimpia.isEmpty ||
+          e.nombre.toLowerCase().contains(busquedaLimpia) ||
+          e.tecnologia.toLowerCase().contains(busquedaLimpia) ||
+          e.descripcion.toLowerCase().contains(busquedaLimpia);
+      final coincideCore = !_soloCore || _nombresCoreActuales.contains(_nombreProcesoDe(e));
+      if (_enVista(e) && coincideBusqueda && coincideCore) {
+        porTecnologia[e.tecnologia] = (porTecnologia[e.tecnologia] ?? 0) + 1;
+      }
+    }
 
     void elegirEstado(String? estado) =>
         setState(() => _filtroEstado = _filtroEstado == estado ? null : estado);
@@ -347,29 +378,46 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
                 icono: Icons.check_circle_outline,
                 onTap: () => elegirEstado("RESUELTO"),
               ),
-              IndicadorTile(
-                etiqueta: "Demorados",
-                valor: "$demorados",
-                color: StatusColors.demorado,
-                icono: Icons.schedule,
-                onTap: () => elegirEstado("DEMORADO"),
-              ),
+              // Procesos: demorados; tablas: vacias (como los chips de la web).
+              if (_vista == "TABLAS")
+                IndicadorTile(
+                  etiqueta: "Vacías",
+                  valor: "$vacias",
+                  color: StatusColors.info,
+                  icono: Icons.inbox_outlined,
+                  onTap: () => elegirEstado("VACIA"),
+                )
+              else
+                IndicadorTile(
+                  etiqueta: "Demorados",
+                  valor: "$demorados",
+                  color: StatusColors.demorado,
+                  icono: Icons.schedule,
+                  onTap: () => elegirEstado("DEMORADO"),
+                ),
               IndicadorTile(
                 etiqueta: "Incoherencias",
                 valor: "$incoherencias",
-                color: StatusColors.info,
+                color: StatusColors.advertencia,
                 icono: Icons.compare_arrows,
+                onTap: () => elegirEstado("INCOHERENCIA"),
               ),
-              IndicadorTile(
-                etiqueta: "Crítico",
-                valor: "$pctCritico%",
-                color: pctCritico >= 50
-                    ? StatusColors.critico
-                    : pctCritico > 0
-                        ? StatusColors.demorado
-                        : StatusColors.exitoso,
-                icono: Icons.speed_outlined,
-              ),
+              if (_vista == "GENERAL")
+                IndicadorTile(
+                  etiqueta: "Vacías",
+                  valor: "$vacias",
+                  color: StatusColors.info,
+                  icono: Icons.inbox_outlined,
+                  onTap: () => elegirEstado("VACIA"),
+                )
+              else
+                IndicadorTile(
+                  etiqueta: _vista == "TABLAS" ? "Demorados" : "Vacías",
+                  valor: _vista == "TABLAS" ? "$demorados" : "$vacias",
+                  color: _vista == "TABLAS" ? StatusColors.demorado : StatusColors.info,
+                  icono: _vista == "TABLAS" ? Icons.schedule : Icons.inbox_outlined,
+                  onTap: () => elegirEstado(_vista == "TABLAS" ? "DEMORADO" : "VACIA"),
+                ),
             ],
           ),
           const SizedBox(height: 14),
@@ -411,14 +459,28 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
                   seleccionado: _filtroEstado == "ABIERTO",
                   onTap: () => elegirEstado("ABIERTO"),
                 ),
-                const SizedBox(width: 8),
-                _ChipEstado(
-                  etiqueta: "Demorados",
-                  cantidad: demorados,
-                  color: StatusColors.demorado,
-                  seleccionado: _filtroEstado == "DEMORADO",
-                  onTap: () => elegirEstado("DEMORADO"),
-                ),
+                // Mismo orden que la web: Todos, Error, Demorados (procesos),
+                // Vacías (tablas), Resueltos.
+                if (_vista != "TABLAS") ...[
+                  const SizedBox(width: 8),
+                  _ChipEstado(
+                    etiqueta: "Demorados",
+                    cantidad: demorados,
+                    color: StatusColors.demorado,
+                    seleccionado: _filtroEstado == "DEMORADO",
+                    onTap: () => elegirEstado("DEMORADO"),
+                  ),
+                ],
+                if (_vista != "PROCESOS") ...[
+                  const SizedBox(width: 8),
+                  _ChipEstado(
+                    etiqueta: "Vacías",
+                    cantidad: vacias,
+                    color: StatusColors.info,
+                    seleccionado: _filtroEstado == "VACIA",
+                    onTap: () => elegirEstado("VACIA"),
+                  ),
+                ],
                 const SizedBox(width: 8),
                 _ChipEstado(
                   etiqueta: "Resueltos",
@@ -446,6 +508,7 @@ class _BitacoraDiaScreenState extends State<BitacoraDiaScreen>
                 for (final tecnologia in _tecnologiasDeLaVista) ...[
                   _ChipTecnologia(
                     tecnologia: tecnologia,
+                    cantidad: porTecnologia[tecnologia] ?? 0,
                     seleccionado: _filtroTecnologia == tecnologia,
                     onTap: () => setState(() => _filtroTecnologia =
                         _filtroTecnologia == tecnologia ? null : tecnologia),
@@ -621,11 +684,13 @@ class _ChipIcono extends StatelessWidget {
 
 class _ChipTecnologia extends StatelessWidget {
   final String tecnologia;
+  final int cantidad;
   final bool seleccionado;
   final VoidCallback onTap;
 
   const _ChipTecnologia({
     required this.tecnologia,
+    required this.cantidad,
     required this.seleccionado,
     required this.onTap,
   });
@@ -634,7 +699,7 @@ class _ChipTecnologia extends StatelessWidget {
   Widget build(BuildContext context) {
     return _ChipIcono(
       icono: iconoTecnologia(tecnologia),
-      texto: tecnologia,
+      texto: "$tecnologia  $cantidad",
       color: colorTecnologia(tecnologia),
       seleccionado: seleccionado,
       onTap: onTap,
@@ -656,6 +721,7 @@ class _TarjetaFalloDia extends StatelessWidget {
     final resuelto = entrada.resuelto;
     final color = colorEvento(entrada);
     final estadoTexto = entrada.estado ?? (entrada.esProceso ? "ERROR" : "TABLA");
+    final estadoFinTexto = (entrada.estadoFin ?? "ERROR").toUpperCase();
     final sistema = entrada.sistema ?? entrada.tecnologia;
 
     final theme = Theme.of(context);
@@ -680,8 +746,12 @@ class _TarjetaFalloDia extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Expanded(child: Eyebrow("$sistema · $estadoTexto", color: color)),
-                        PillEstado(resuelto ? "Resuelto" : "Abierto", color: color),
+                        Expanded(child: Eyebrow(sistema, color: color)),
+                        // Como la web: estado inicial -> estado final.
+                        PillEstado(
+                          resuelto ? "$estadoTexto → OK" : "$estadoTexto → $estadoFinTexto",
+                          color: color,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 3),
