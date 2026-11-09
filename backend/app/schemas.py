@@ -476,5 +476,8 @@ class CatalogoEstadoOut(BaseModel):
     # proceso/tabla sin autor): duplican a las de MySQL y deben borrarse.
     bitacora_locales_automaticas: int = 0
     bitacora_hoy_mysql: int = 0  # filas de hoy con origen_id
+    # Ultimos envios a POST /internal/catalogos (memoria del proceso): ip,
+    # tamano y resultado, para rastrear un envio raro.
+    ultimos_envios: list[dict] = Field(default_factory=list)
     relaciones_total: int = 0
     usuarios_total: int = 0
