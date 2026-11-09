@@ -6,7 +6,9 @@ import "../models/control.dart";
 import "../models/usuario.dart";
 import "../services/actualizaciones_service.dart";
 import "../services/api_service.dart";
+import "../services/comandos_service.dart";
 import "../services/infra_service.dart";
+import "../services/sesion_actual.dart";
 import "../theme.dart";
 import "bitacora_screen.dart";
 import "configuracion_guardia_screen.dart";
@@ -68,6 +70,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       setState(() => _controlesFuture = _cargarCatalogo());
     });
     _apiService.obtenerPerfil().then((usuario) {
+      SesionActual.usuario = usuario;
       if (mounted) setState(() => _usuario = usuario);
     }).catchError((_) {
       // El menu simplemente no muestra la seccion de admin si esto falla.
@@ -83,9 +86,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.dispose();
   }
 
-  /// Corre en toda la app (no solo en Infraestructura): cada 60s consulta si
-  /// hay sesiones bloqueadas en PostgreSQL PROD, igual que hace el monitor
-  /// web. Si no hay infra_token (login con Google) queda callado.
+  /// Corre en toda la app (no solo en Infraestructura): cada 5 min consulta
+  /// si hay sesiones bloqueadas en PostgreSQL PROD, igual que el monitor web.
+  /// Cada consulta es un comando que ejecuta OP_PROD desde adentro de la
+  /// red, por eso no se hace cada minuto.
+  static const _intervaloVigiaBloqueos = Duration(minutes: 5);
+
   void _iniciarVigiaBloqueosProd() {
     Future<void> consultar() async {
       try {
@@ -107,9 +113,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // Si viene fallando seguido, espacia los reintentos (hasta 10 min) en
       // vez de insistir cada 60s sin necesidad - ahorra batería/datos cuando
       // no hay infra_token o el monitor esta caido por un rato largo.
+      final base = _intervaloVigiaBloqueos.inSeconds;
       final segundos = _fallosConsecutivosBloqueos == 0
-          ? 60
-          : (60 * (1 << _fallosConsecutivosBloqueos.clamp(0, 4))).clamp(60, 600);
+          ? base
+          : (base * (1 << _fallosConsecutivosBloqueos.clamp(0, 3))).clamp(base, 3600);
       _vigiaBloqueosProd = Timer(Duration(seconds: segundos), consultar);
     }
 
@@ -317,10 +324,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildEncabezadoLista(ColorScheme colorScheme) {
+    // "Actualizar todos" como en el monitor web: solo administradores y
+    // solo en Procesos o Tablas (General mezcla las dos cosas).
+    final puedeActualizar = (_usuario?.esAdmin ?? false) && _vista != "GENERAL";
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: TituloSeccion(_tituloLista),
+      child: TituloSeccion(
+        _tituloLista,
+        accion: puedeActualizar
+            ? TextButton.icon(
+                onPressed: _actualizandoTodos ? null : _actualizarTodos,
+                icon: _actualizandoTodos
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text("Actualizar todos"),
+              )
+            : null,
+      ),
     );
+  }
+
+  bool _actualizandoTodos = false;
+
+  /// Dispara en OP_PROD la actualizacion masiva (procesos o tablas en
+  /// error/demorado/en tiempo), igual que el boton de la web.
+  Future<void> _actualizarTodos() async {
+    final esTablas = _vista == "TABLAS";
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(esTablas ? "¿Actualizar todas las tablas?" : "¿Actualizar todos los procesos?"),
+        content: Text(
+          esTablas
+              ? "Se relanza la actualización de todas las tablas en error, demoradas o en proceso, en lotes, como desde la web."
+              : "Se relanzan todos los procesos en error, demorados o en tiempo, en lotes, como desde la web.",
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text("Cancelar")),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text("Actualizar")),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+    setState(() => _actualizandoTodos = true);
+    try {
+      final r = await ComandosService().ejecutar(esTablas ? "tablas.actualizar_todos" : "procesos.actualizar_todos");
+      if (!mounted) return;
+      final total = r.resultado["total"];
+      final texto = r.resultado["resultado"] == "sin_candidatos"
+          ? "No hay ${esTablas ? 'tablas' : 'procesos'} para actualizar ahora."
+          : "Actualización iniciada: $total ${esTablas ? 'tablas' : 'procesos'}.";
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      if (mounted) setState(() => _actualizandoTodos = false);
+    }
   }
 
   Widget _buildPestanas(_Catalogo catalogo) {
