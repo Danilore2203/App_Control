@@ -23,9 +23,10 @@ class SaludSistema extends StatelessWidget {
     final fallidos = controles.where((c) => c.color == "red" && !c.esDemorado).length;
     final demorados = controles.where((c) => c.esDemorado).length;
     final enCurso = controles.where((c) => c.color == "blue").length;
-    // Gris = DAGs pausados y procesos sin ejecucion: no cuentan como sanos
-    // (no corren) pero tampoco como falla, igual que en el catalogo de OP.
-    final pausados = controles.where((c) => c.color == "gray").length;
+    // Gris: "EN TIEMPO" (todavia no le toca correr; "En proceso" en el monitor
+    // web) o sin ejecucion. No son exito ni falla.
+    final enProceso = controles.where((c) => c.esEnTiempo).length;
+    final sinEjecucion = controles.where((c) => c.color == "gray" && !c.esEnTiempo).length;
     final porcentaje = total == 0 ? 0.0 : exitosos / total;
 
     final Color colorSalud;
@@ -74,10 +75,10 @@ class SaludSistema extends StatelessWidget {
                       Row(
                         children: [
                           Expanded(
-                            child: _Dato(etiqueta: "Exitosos", valor: exitosos, color: StatusColors.exitoso),
+                            child: _Dato(etiqueta: "OK", valor: exitosos, color: StatusColors.exitoso),
                           ),
                           Expanded(
-                            child: _Dato(etiqueta: "Con error", valor: fallidos, color: StatusColors.critico),
+                            child: _Dato(etiqueta: "Error", valor: fallidos, color: StatusColors.critico),
                           ),
                         ],
                       ),
@@ -85,10 +86,10 @@ class SaludSistema extends StatelessWidget {
                       Row(
                         children: [
                           Expanded(
-                            child: _Dato(etiqueta: "Demorados", valor: demorados, color: StatusColors.advertencia),
+                            child: _Dato(etiqueta: "Demorado", valor: demorados, color: StatusColors.advertencia),
                           ),
                           Expanded(
-                            child: _Dato(etiqueta: "En curso", valor: enCurso, color: StatusColors.info),
+                            child: _Dato(etiqueta: "Actualizando", valor: enCurso, color: StatusColors.info),
                           ),
                         ],
                       ),
@@ -105,7 +106,7 @@ class SaludSistema extends StatelessWidget {
                 (enCurso, StatusColors.info),
                 (demorados, StatusColors.advertencia),
                 (fallidos, StatusColors.critico),
-                (pausados, StatusColors.neutral),
+                (enProceso + sinEjecucion, StatusColors.neutral),
               ],
             ),
             const SizedBox(height: 8),
@@ -113,7 +114,8 @@ class SaludSistema extends StatelessWidget {
               total == 0
                   ? "Todavía no hay controles registrados"
                   : "$total elemento${total == 1 ? '' : 's'} monitoreado${total == 1 ? '' : 's'}"
-                      "${pausados > 0 ? ' · $pausados pausado${pausados == 1 ? '' : 's'} o sin ejecución (no cuentan como OK)' : ''}",
+                      "${enProceso > 0 ? ' · $enProceso en proceso' : ''}"
+                      "${sinEjecucion > 0 ? ' · $sinEjecucion sin ejecución' : ''}",
               style: theme.textTheme.labelSmall?.copyWith(color: colorScheme.outline, fontWeight: FontWeight.w600),
             ),
           ],

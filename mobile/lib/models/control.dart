@@ -84,6 +84,27 @@ class Control {
   /// mostrarlo visualmente igual que un error duro.
   bool get esDemorado => color == "red" && estado.toUpperCase() == "DEMORADO";
 
+  /// Gris "EN TIEMPO": todavia no le toca correr (lo que el monitor web de
+  /// procesos llama "En proceso"), distinto de un gris sin ejecucion.
+  bool get esEnTiempo => color == "gray" && estado.trim().toUpperCase() == "EN TIEMPO";
+
+  /// Categoria con la misma semantica que los contadores del monitor web:
+  /// red (error), orange (demorado), blue (actualizando/corriendo), green
+  /// (OK), tiempo (en proceso) y gray (sin ejecucion / pausado sin corrida).
+  String get categoria {
+    if (esDemorado) return "orange";
+    if (esEnTiempo) return "tiempo";
+    switch (color) {
+      case "red":
+      case "orange":
+      case "blue":
+      case "green":
+        return color;
+      default:
+        return "gray";
+    }
+  }
+
   /// Cantidad de registros con separador de miles ("1.234.567").
   String? get cantidadFormateada {
     final n = cantidad;

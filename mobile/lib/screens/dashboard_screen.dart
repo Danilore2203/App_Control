@@ -116,8 +116,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     consultar();
   }
 
-  Color _colorEstado(String color) {
-    switch (color) {
+  Color _colorEstado(String categoria) {
+    switch (categoria) {
       case "red":
         return StatusColors.critico;
       case "orange":
@@ -126,29 +126,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return StatusColors.exitoso;
       case "blue":
         return StatusColors.info;
+      case "tiempo":
+        return StatusColors.neutral;
       default:
         return StatusColors.neutral;
     }
   }
 
-  String _etiquetaColor(String color) {
-    switch (color) {
+  /// Mismas etiquetas que los contadores del monitor web de procesos.
+  String _etiquetaColor(String categoria) {
+    switch (categoria) {
       case "red":
-        return "Con error";
+        return "Error";
       case "orange":
-        return "Demorados";
+        return "Demorado";
       case "green":
         return "OK";
       case "blue":
-        return "En ejecución";
+        return "Actualizando";
+      case "tiempo":
+        return "En proceso";
       default:
-        // Gris: DAGs pausados y procesos sin ejecucion (el catalogo de OP
-        // los deja asi aunque su ultima corrida haya sido OK).
-        return "Pausados";
+        return "Sin ejecución";
     }
   }
 
-  String _bucketDe(Control c) => c.esDemorado ? "orange" : c.color;
+  String _bucketDe(Control c) => c.categoria;
 
   /// Procesos y tablas en paralelo (dos endpoints), para que el selector
   /// General / Procesos / Tablas cambie de vista sin volver a pedir nada.
@@ -201,10 +204,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final bucket = _bucketDe(control);
       conteos[bucket] = (conteos[bucket] ?? 0) + 1;
     }
-    // Orden fijo: primero lo urgente (rojo/naranja), despues el resto.
-    // Siempre se muestran las 5 (aunque una este en 0), para que "Demorados"
-    // no aparezca y desaparezca segun si hay algun proceso demorado ahora.
-    const ordenColores = ["red", "orange", "blue", "green", "gray"];
+    // Mismo orden que los contadores del monitor web (OK, Error, Demorado,
+    // Actualizando, En proceso); "Sin ejecucion" solo si hay alguno, para no
+    // mostrar una categoria que en DataStage/Pentaho no existe.
+    final ordenColores = [
+      "green",
+      "red",
+      "orange",
+      "blue",
+      "tiempo",
+      if ((conteos["gray"] ?? 0) > 0) "gray",
+    ];
     return SizedBox(
       height: 42,
       child: ListView(
@@ -372,13 +382,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               .toList();
         }
 
-        final criticos = todos.where((c) => c.color == "red").toList();
+        // Como en el monitor web: "error" es rojo de verdad; un demorado va
+        // aparte (el backend lo pinta rojo para la alarma, pero no se cuenta
+        // como error en el resumen).
+        final criticos = todos.where((c) => c.color == "red" && !c.esDemorado).toList();
         final fuentesCriticas = criticos.map((c) => c.fuente).toSet().toList();
 
         return Column(
           children: [
             AlertaBanner(
               cantidadCriticos: criticos.length,
+              cantidadDemorados: todos.where((c) => c.esDemorado).length,
               fuentesAfectadas: fuentesCriticas,
               onTap: () => setState(() => _filtroColor = "red"),
             ),
@@ -392,7 +406,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: Column(
                         children: [
                           _buildPestanas(catalogo),
-                          SaludSistema(controles: todos),
+                          // La salud responde a la fuente/core elegidos, para
+                          // poder comparar AIRFLOW o DATASTAGE con su monitor.
+                          SaludSistema(controles: segunCore),
                           MonitoreoPorFuente(
                             controles: todos,
                             fuenteSeleccionada: _filtroFuente,

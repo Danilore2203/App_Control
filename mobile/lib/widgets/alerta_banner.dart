@@ -6,12 +6,14 @@ import "../theme.dart";
 /// (color rojo). Se puede cerrar; vuelve a aparecer si se recarga la lista.
 class AlertaBanner extends StatefulWidget {
   final int cantidadCriticos;
+  final int cantidadDemorados;
   final List<String> fuentesAfectadas;
   final VoidCallback? onTap;
 
   const AlertaBanner({
     super.key,
     required this.cantidadCriticos,
+    this.cantidadDemorados = 0,
     required this.fuentesAfectadas,
     this.onTap,
   });
@@ -37,9 +39,11 @@ class _AlertaBannerState extends State<AlertaBanner> {
       return const SizedBox.shrink();
     }
 
-    final texto = widget.fuentesAfectadas.isEmpty
-        ? "${widget.cantidadCriticos} proceso(s) en estado crítico"
-        : "${widget.cantidadCriticos} proceso(s) en estado crítico en ${widget.fuentesAfectadas.join(", ")}";
+    final n = widget.cantidadCriticos;
+    final base = "$n ${n == 1 ? 'proceso' : 'procesos'} con error";
+    final donde = widget.fuentesAfectadas.isEmpty ? "" : " en ${widget.fuentesAfectadas.join(", ")}";
+    final demorados = widget.cantidadDemorados > 0 ? " · ${widget.cantidadDemorados} demorados" : "";
+    final texto = "$base$donde$demorados";
 
     // Pill translucida con tono rojo (como .do-hs-badge--err del monitor
     // web), en vez de una franja roja solida que tapaba la cabecera.
