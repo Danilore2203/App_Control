@@ -125,8 +125,15 @@ def recibir_estados_airflow(payload: schemas.AirflowEstadosIn, db: Session = Dep
     """Ultima corrida de cada DAG segun el Monitor Airflow de OP (ver
     models.AirflowEstado). Reemplaza la lista completa."""
     ahora = datetime.utcnow()
+    # Si cambio la ultima corrida de algun DAG (o es la primera vez que
+    # llega esto), se avisa a los celulares para que refresquen /controles:
+    # si no, la app seguiria mostrando lo que cargo antes hasta reabrirla.
+    anterior = {e.dag_id: (e.last_state or "").lower() for e in db.query(models.AirflowEstado).all()}
+    nuevo = {e.dag_id: (e.last_state or "").lower() for e in payload.estados}
     db.query(models.AirflowEstado).delete(synchronize_session=False)
     for e in payload.estados:
         db.add(models.AirflowEstado(dag_id=e.dag_id, last_state=e.last_state, is_paused=e.is_paused, actualizado_en=ahora))
     db.commit()
+    if nuevo != anterior:
+        ejecutar_ciclo_en_segundo_plano(avisar_app=True)
     return schemas.AirflowEstadosOut(recibidos=len(payload.estados), actualizado_en=ahora)
