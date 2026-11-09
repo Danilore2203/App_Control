@@ -3,6 +3,8 @@ import "dart:async";
 import "package:flutter/material.dart";
 
 import "../models/control.dart";
+import "../services/comandos_service.dart";
+import "../services/sesion_actual.dart";
 import "../theme.dart";
 
 /// Abre el detalle de un proceso como bottom sheet (estilo consola/cluster),
@@ -30,6 +32,110 @@ class _DetalleProcesoSheet extends StatefulWidget {
 class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
   late Timer _reloj;
   DateTime _ahora = DateTime.now();
+  String? _accionEnCurso;
+
+  /// Ejecuta una accion en OP_PROD (lanzar el proceso, pausar/reanudar el
+  /// DAG) tras confirmar. Solo administradores ven estos botones; el
+  /// backend lo exige igual.
+  Future<void> _accion(String clave, String titulo, String detalle, String tipo, Map<String, dynamic> payload) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(titulo),
+        content: Text(detalle),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text("Cancelar")),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text("Confirmar")),
+        ],
+      ),
+    );
+    if (confirmar != true || !mounted) return;
+    setState(() => _accionEnCurso = clave);
+    try {
+      final r = await ComandosService().ejecutar(tipo, payload: payload);
+      if (!mounted) return;
+      final mensaje = r.resultado["mensaje"]?.toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(mensaje == null || mensaje.isEmpty ? "$titulo: listo." : mensaje)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      if (mounted) setState(() => _accionEnCurso = null);
+    }
+  }
+
+  Widget _botonesAccion(ColorScheme colorScheme) {
+    if (!SesionActual.esAdmin || control.esTabla) return const SizedBox.shrink();
+    final esAirflow = control.fuente.toUpperCase() == "AIRFLOW";
+    final pausado = control.estado.toUpperCase() == "PAUSADO";
+    Widget boton(String clave, IconData icono, String texto, VoidCallback onTap, {bool destacado = false}) {
+      final ocupado = _accionEnCurso == clave;
+      final icon = ocupado
+          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+          : Icon(icono, size: 18);
+      return destacado
+          ? FilledButton.icon(onPressed: _accionEnCurso == null ? onTap : null, icon: icon, label: Text(texto))
+          : OutlinedButton.icon(onPressed: _accionEnCurso == null ? onTap : null, icon: icon, label: Text(texto));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("ACCIONES", style: AppTextStyles.tech(color: colorScheme.onSurfaceVariant, fontSize: 10)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: boton(
+                  "lanzar",
+                  Icons.play_arrow_rounded,
+                  esAirflow ? "Disparar DAG" : "Ejecutar ahora",
+                  () => _accion(
+                    "lanzar",
+                    esAirflow ? "Disparar ${control.nombre}" : "Ejecutar ${control.nombre}",
+                    esAirflow
+                        ? "Se crea una corrida manual del DAG en Airflow, como desde el monitor web."
+                        : "Se lanza el proceso en ${control.fuente} a través del scheduler de OP, como desde la web.",
+                    "procesos.lanzar",
+                    {"nombre": control.nombre, "fuente": control.fuente},
+                  ),
+                  destacado: true,
+                ),
+              ),
+              if (esAirflow) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: boton(
+                    "pausa",
+                    pausado ? Icons.play_circle_outline_rounded : Icons.pause_circle_outline_rounded,
+                    pausado ? "Reanudar DAG" : "Pausar DAG",
+                    () => _accion(
+                      "pausa",
+                      pausado ? "Reanudar ${control.nombre}" : "Pausar ${control.nombre}",
+                      pausado
+                          ? "El DAG vuelve a correr según su programación."
+                          : "El DAG deja de correr hasta que lo reanudes.",
+                      "airflow.pausar",
+                      {"dag_id": control.nombre, "pausar": !pausado},
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "Lo ejecuta OP_PROD dentro de la red; tarda unos segundos.",
+            style: TextStyle(color: colorScheme.outline, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -370,6 +476,7 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                           ],
                         ),
                       ),
+                      _botonesAccion(colorScheme),
                     ],
                   ),
                 ),
