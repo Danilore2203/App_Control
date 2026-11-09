@@ -16,6 +16,8 @@ import "infraestructura_screen.dart";
 import "../widgets/alerta_banner.dart";
 import "../widgets/app_drawer.dart";
 import "../widgets/barra_navegacion.dart";
+import "../widgets/indicador_ejecucion.dart";
+import "../services/ejecucion_actual.dart";
 import "../widgets/detalle_proceso_sheet.dart";
 import "../widgets/estado_vacio.dart";
 import "../widgets/monitoreo_por_fuente.dart";
@@ -367,19 +369,82 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
     if (confirmar != true || !mounted) return;
     setState(() => _actualizandoTodos = true);
+    final que = esTablas ? "tablas" : "procesos";
+    final titulo = esTablas ? "Actualizar todas las tablas" : "Actualizar todos los procesos";
     try {
-      final r = await ComandosService().ejecutar(esTablas ? "tablas.actualizar_todos" : "procesos.actualizar_todos");
+      final r = await ComandosService().ejecutar(
+        esTablas ? "tablas.actualizar_todos" : "procesos.actualizar_todos",
+        titulo: titulo,
+        anunciarFinal: false,
+      );
       if (!mounted) return;
-      final total = r.resultado["total"];
-      final texto = r.resultado["resultado"] == "sin_candidatos"
-          ? "No hay ${esTablas ? 'tablas' : 'procesos'} para actualizar ahora."
-          : "Actualización iniciada: $total ${esTablas ? 'tablas' : 'procesos'}.";
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto)));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      final total = (r.resultado["total"] as num?)?.toInt() ?? 0;
+      if (r.resultado["resultado"] == "sin_candidatos" || total == 0) {
+        EjecucionActual.mostrar(EstadoEjecucion(
+          titulo: titulo,
+          detalle: "No hay $que para actualizar ahora.",
+          fase: FaseEjecucion.listo,
+        ));
+        return;
+      }
+      EjecucionActual.mostrar(EstadoEjecucion(
+        titulo: titulo,
+        detalle: "Iniciada: $total $que en lotes…",
+        fase: FaseEjecucion.progreso,
+        progreso: 0,
+        completados: 0,
+        total: total,
+      ));
+      // Seguir el avance real en OP_PROD hasta que termine.
+      unawaited(_seguirActualizacion(esTablas: esTablas, titulo: titulo, total: total));
+    } catch (_) {
+      // El indicador ya muestra el error.
     } finally {
       if (mounted) setState(() => _actualizandoTodos = false);
+    }
+  }
+
+  /// Consulta cada pocos segundos el estado de la actualizacion masiva en
+  /// OP_PROD y lo refleja en la barra de avance (completados/total).
+  Future<void> _seguirActualizacion({required bool esTablas, required String titulo, required int total}) async {
+    final tipo = esTablas ? "tablas.actualizar_todos.estado" : "procesos.actualizar_todos.estado";
+    final limite = DateTime.now().add(const Duration(minutes: 45));
+    var totalActual = total;
+    while (DateTime.now().isBefore(limite)) {
+      await Future.delayed(const Duration(seconds: 10));
+      if (EjecucionActual.notifier.value?.titulo != titulo) return; // el usuario lo cerro o empezo otra cosa
+      Map<String, dynamic> estado;
+      try {
+        estado = (await ComandosService().ejecutar(tipo)).resultado;
+      } catch (_) {
+        continue; // una consulta fallida no corta el seguimiento
+      }
+      final completados = (estado["completed"] as num?)?.toInt() ?? 0;
+      totalActual = (estado["total"] as num?)?.toInt() ?? totalActual;
+      final corriendo = estado["running"] == true;
+      final errores = (estado["errores"] as List?)?.length ?? 0;
+      final actual = (estado["nombre"] ?? "").toString();
+      if (!corriendo || (totalActual > 0 && completados >= totalActual)) {
+        EjecucionActual.mostrar(EstadoEjecucion(
+          titulo: titulo,
+          detalle: errores == 0
+              ? "Terminada: $completados de $totalActual sin errores."
+              : "Terminada: $completados de $totalActual · $errores con error.",
+          fase: errores == 0 ? FaseEjecucion.listo : FaseEjecucion.error,
+          progreso: 1,
+          completados: completados,
+          total: totalActual,
+        ));
+        return;
+      }
+      EjecucionActual.mostrar(EstadoEjecucion(
+        titulo: titulo,
+        detalle: actual.isEmpty ? "En curso…" : "Ahora: $actual",
+        fase: FaseEjecucion.progreso,
+        progreso: totalActual == 0 ? null : (completados / totalActual).clamp(0.0, 1.0),
+        completados: completados,
+        total: totalActual,
+      ));
     }
   }
 
@@ -632,7 +697,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Expanded(child: vistas[_tabActual]),
         ],
       ),
-      bottomNavigationBar: BarraNavegacion(
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Avance de lo que se pidio a OP_PROD (ejecutar, actualizar todos...).
+          const IndicadorEjecucion(),
+          BarraNavegacion(
         indice: _tabActual,
         onSeleccionar: (index) => setState(() => _tabActual = index),
         destinos: const [
@@ -643,6 +713,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           DestinoNavegacion(icono: Icons.shield_outlined, iconoActivo: Icons.shield_rounded, etiqueta: "Guardia"),
           DestinoNavegacion(
               icono: Icons.menu_book_outlined, iconoActivo: Icons.menu_book_rounded, etiqueta: "Bitácora"),
+        ],
+          ),
         ],
       ),
     );
