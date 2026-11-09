@@ -73,6 +73,7 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
           titulo: titulo,
           nombre: payload["nombre"].toString(),
           lanzadoEnServidor: lanzadoEn,
+          runId: r.resultado["run_id"]?.toString(),
         );
       }
     } catch (_) {
@@ -117,7 +118,7 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                         ? "Se crea una corrida manual del DAG en Airflow, como desde el monitor web."
                         : "Se lanza el proceso en ${control.fuente} a través del scheduler de OP, como desde la web.",
                     "procesos.lanzar",
-                    {"nombre": control.nombre, "fuente": control.fuente},
+                    {"nombre": control.nombre, "fuente": control.fuente, "ruta": control.ruta ?? ""},
                     seguir: !esAirflow,
                   ),
                   destacado: true,
