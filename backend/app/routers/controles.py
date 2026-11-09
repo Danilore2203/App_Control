@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, aliased
 
 from app import auth, models, schemas
 from app.database import get_db
-from app.services.procesos import color_efectivo, estado_efectivo
+from app.services.procesos import aplicar_estados_airflow, color_efectivo, estado_efectivo
 
 router = APIRouter(prefix="/controles", tags=["controles"])
 
@@ -69,7 +69,11 @@ def listar_controles(
         .limit(limit)
         .all()
     )
-    return [_construir_control_out(c) for c in controles]
+    salida = [_construir_control_out(c) for c in controles]
+    # DAGs en gris segun el catalogo: se muestran por su ultima corrida (como
+    # el Monitor Airflow) si esa informacion llego hace poco.
+    aplicar_estados_airflow(db, salida)
+    return salida
 
 
 @router.get("/historial-fallas", response_model=List[schemas.HistorialFallaOut])
