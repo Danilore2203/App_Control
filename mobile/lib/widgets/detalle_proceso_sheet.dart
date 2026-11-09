@@ -5,6 +5,7 @@ import "package:flutter/material.dart";
 import "../models/control.dart";
 import "../services/comandos_service.dart";
 import "../services/ejecucion_actual.dart";
+import "../services/seguimiento_lanzamiento.dart";
 import "../services/sesion_actual.dart";
 import "../theme.dart";
 
@@ -37,8 +38,17 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
 
   /// Ejecuta una accion en OP_PROD (lanzar el proceso, pausar/reanudar el
   /// DAG) tras confirmar. Solo administradores ven estos botones; el
-  /// backend lo exige igual.
-  Future<void> _accion(String clave, String titulo, String detalle, String tipo, Map<String, dynamic> payload) async {
+  /// backend lo exige igual. Con `seguir`, despues del lanzamiento se queda
+  /// siguiendo la corrida: cronometro desde que arranco y, al final, cuanto
+  /// tardo (ver SeguimientoLanzamiento).
+  Future<void> _accion(
+    String clave,
+    String titulo,
+    String detalle,
+    String tipo,
+    Map<String, dynamic> payload, {
+    bool seguir = false,
+  }) async {
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -55,7 +65,16 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
     try {
       // El avance se ve en la barra flotante del monitor (IndicadorEjecucion)
       // y aca abajo mientras la hoja este abierta.
-      await ComandosService().ejecutar(tipo, payload: payload, titulo: titulo);
+      final r = await ComandosService().ejecutar(tipo, payload: payload, titulo: titulo, anunciarFinal: !seguir);
+      if (seguir) {
+        // OP_PROD ya lanzo el proceso; ahora se cuenta el tiempo hasta que termine.
+        final lanzadoEn = (r.resultado["lanzado_en"] ?? "").toString();
+        await SeguimientoLanzamiento().seguir(
+          titulo: titulo,
+          nombre: payload["nombre"].toString(),
+          lanzadoEnServidor: lanzadoEn,
+        );
+      }
     } catch (_) {
       // El indicador ya muestra el error.
     } finally {
@@ -99,6 +118,7 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                         : "Se lanza el proceso en ${control.fuente} a través del scheduler de OP, como desde la web.",
                     "procesos.lanzar",
                     {"nombre": control.nombre, "fuente": control.fuente},
+                    seguir: !esAirflow,
                   ),
                   destacado: true,
                 ),
