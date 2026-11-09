@@ -4,6 +4,7 @@ import "package:flutter/material.dart";
 
 import "../models/control.dart";
 import "../services/comandos_service.dart";
+import "../services/ejecucion_actual.dart";
 import "../services/sesion_actual.dart";
 import "../theme.dart";
 
@@ -52,15 +53,11 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
     if (confirmar != true || !mounted) return;
     setState(() => _accionEnCurso = clave);
     try {
-      final r = await ComandosService().ejecutar(tipo, payload: payload);
-      if (!mounted) return;
-      final mensaje = r.resultado["mensaje"]?.toString();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(mensaje == null || mensaje.isEmpty ? "$titulo: listo." : mensaje)),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      // El avance se ve en la barra flotante del monitor (IndicadorEjecucion)
+      // y aca abajo mientras la hoja este abierta.
+      await ComandosService().ejecutar(tipo, payload: payload, titulo: titulo);
+    } catch (_) {
+      // El indicador ya muestra el error.
     } finally {
       if (mounted) setState(() => _accionEnCurso = null);
     }
@@ -127,10 +124,42 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
               ],
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            "Lo ejecuta OP_PROD dentro de la red; tarda unos segundos.",
-            style: TextStyle(color: colorScheme.outline, fontSize: 11),
+          const SizedBox(height: 10),
+          // Mientras la hoja esta abierta, el avance se ve aca mismo.
+          ValueListenableBuilder<EstadoEjecucion?>(
+            valueListenable: EjecucionActual.notifier,
+            builder: (context, estado, _) {
+              if (estado == null || _accionEnCurso == null && estado.terminado == false) {
+                return Text(
+                  "Lo ejecuta OP_PROD dentro de la red; tarda unos segundos.",
+                  style: TextStyle(color: colorScheme.outline, fontSize: 11),
+                );
+              }
+              final tono = switch (estado.fase) {
+                FaseEjecucion.listo => StatusColors.exitoso,
+                FaseEjecucion.error => StatusColors.critico,
+                _ => colorScheme.primary,
+              };
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: estado.terminado ? 1 : estado.progreso,
+                      minHeight: 5,
+                      backgroundColor: colorScheme.outlineVariant.withValues(alpha: 0.5),
+                      color: tono,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    estado.detalle,
+                    style: TextStyle(color: tono, fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
