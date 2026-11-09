@@ -403,6 +403,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               cantidadCriticos: criticos.length,
               cantidadDemorados: todos.where((c) => c.esDemorado).length,
               fuentesAfectadas: fuentesCriticas,
+              sustantivo: switch (_vista) {
+                "PROCESOS" => "proceso",
+                "TABLAS" => "tabla",
+                _ => "elemento",
+              },
               onTap: () => setState(() => _filtroColor = "red"),
             ),
             Expanded(

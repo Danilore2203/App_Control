@@ -8,6 +8,10 @@ class AlertaBanner extends StatefulWidget {
   final int cantidadCriticos;
   final int cantidadDemorados;
   final List<String> fuentesAfectadas;
+
+  /// "proceso", "tabla" o "elemento": segun la vista (Procesos / Tablas /
+  /// General) que esta resumiendo el banner.
+  final String sustantivo;
   final VoidCallback? onTap;
 
   const AlertaBanner({
@@ -15,6 +19,7 @@ class AlertaBanner extends StatefulWidget {
     required this.cantidadCriticos,
     this.cantidadDemorados = 0,
     required this.fuentesAfectadas,
+    this.sustantivo = "proceso",
     this.onTap,
   });
 
@@ -40,7 +45,7 @@ class _AlertaBannerState extends State<AlertaBanner> {
     }
 
     final n = widget.cantidadCriticos;
-    final base = "$n ${n == 1 ? 'proceso' : 'procesos'} con error";
+    final base = "$n ${widget.sustantivo}${n == 1 ? '' : 's'} con error";
     final donde = widget.fuentesAfectadas.isEmpty ? "" : " en ${widget.fuentesAfectadas.join(", ")}";
     final demorados = widget.cantidadDemorados > 0 ? " · ${widget.cantidadDemorados} demorados" : "";
     final texto = "$base$donde$demorados";
