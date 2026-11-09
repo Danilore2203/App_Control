@@ -2,9 +2,11 @@ import "package:flutter/material.dart";
 
 import "../models/control.dart";
 import "../theme.dart";
+import "titulo_seccion.dart";
 
-/// Tarjeta de un proceso: icono segun estado real, nombre, tecnologia
-/// (fuente) y una linea de detalle con hora + estado.
+/// Tarjeta de un proceso o tabla: icono segun estado, nombre, fuente y una
+/// linea de detalle (hora + estado para procesos; registros + capa para
+/// tablas). Vidrio con borde fino y una barra de tono a la izquierda.
 class TarjetaProceso extends StatelessWidget {
   final Control control;
   final VoidCallback? onTap;
@@ -23,28 +25,26 @@ class TarjetaProceso extends StatelessWidget {
       case "blue":
         return StatusColors.info;
       default:
-        return Colors.grey;
+        return StatusColors.neutral;
     }
   }
 
   IconData get _icono {
     if (control.esTabla) {
-      return control.color == "red"
-          ? Icons.table_view_outlined
-          : Icons.table_chart_outlined;
+      return control.color == "red" ? Icons.table_view_outlined : Icons.table_chart_outlined;
     }
-    if (control.esDemorado) return Icons.schedule;
+    if (control.esDemorado) return Icons.schedule_rounded;
     switch (control.color) {
       case "red":
-        return Icons.error_outline;
+        return Icons.error_outline_rounded;
       case "orange":
-        return Icons.schedule;
+        return Icons.schedule_rounded;
       case "green":
-        return Icons.check_circle_outline;
+        return Icons.check_circle_outline_rounded;
       case "blue":
-        return Icons.sync;
+        return Icons.sync_rounded;
       default:
-        return Icons.pause_circle_outline;
+        return Icons.pause_circle_outline_rounded;
     }
   }
 
@@ -59,13 +59,11 @@ class TarjetaProceso extends StatelessWidget {
       case "blue":
         return "Inicio";
       default:
-        return "Ultimo run";
+        return "Último run";
     }
   }
 
-  String? get _hora {
-    return control.horaFin ?? control.horaLog ?? control.horaProgramada;
-  }
+  String? get _hora => control.horaFin ?? control.horaLog ?? control.horaProgramada;
 
   /// Linea de detalle: para procesos "Terminado: 06:12", para tablas la
   /// cantidad de registros y la capa (lo que trae el catalogo de tablas).
@@ -84,25 +82,21 @@ class TarjetaProceso extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final color = _color(context);
     final detalle = _detalle();
-    final esCritico = control.color == "red";
+    final esCritico = control.color == "red" && !control.esDemorado;
 
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context)
-            .colorScheme
-            .surfaceContainerHigh
-            .withValues(alpha: 0.6),
+        color: colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(16),
-        border: Border(left: BorderSide(color: color, width: 4)),
+        border: Border.all(
+          color: esCritico ? color.withValues(alpha: 0.4) : colorScheme.outlineVariant,
+        ),
         boxShadow: esCritico
-            ? [
-                BoxShadow(
-                    color: color.withValues(alpha: 0.25),
-                    blurRadius: 14,
-                    spreadRadius: -2)
-              ]
+            ? [BoxShadow(color: color.withValues(alpha: 0.18), blurRadius: 18, spreadRadius: -4)]
             : null,
       ),
       clipBehavior: Clip.antiAlias,
@@ -110,21 +104,26 @@ class TarjetaProceso extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(_icono, color: color, size: 22),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
+          child: Row(
+            children: [
+              // Barra de tono: dentro de la tarjeta, con sus propias esquinas,
+              // en vez de un borde izquierdo grueso que se cortaba feo con el
+              // radio de la tarjeta.
+              Container(
+                width: 4,
+                height: 38,
+                margin: const EdgeInsets.only(left: 10),
+                decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
+              ),
+              const SizedBox(width: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                child: CajaIcono(_icono, color: color, tamano: 40, tamanoIcono: 21),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 13),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -133,8 +132,7 @@ class TarjetaProceso extends StatelessWidget {
                           Expanded(
                             child: Text(
                               control.nombre,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w700, fontSize: 13),
+                              style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -146,17 +144,12 @@ class TarjetaProceso extends StatelessWidget {
                       const SizedBox(height: 4),
                       Text.rich(
                         TextSpan(
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant),
+                          style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
                           children: [
                             TextSpan(text: "$detalle  ·  "),
                             TextSpan(
                               text: control.estado,
-                              style: TextStyle(
-                                  color: color, fontWeight: FontWeight.w600),
+                              style: TextStyle(color: color, fontWeight: FontWeight.w700),
                             ),
                           ],
                         ),
@@ -166,12 +159,11 @@ class TarjetaProceso extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 4),
-                Icon(Icons.chevron_right,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    size: 20),
-              ],
-            ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.chevron_right_rounded, color: colorScheme.outline, size: 20),
+              const SizedBox(width: 8),
+            ],
           ),
         ),
       ),
@@ -186,20 +178,22 @@ class _EtiquetaFuente extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: colorScheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(6),
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Text(
         fuente,
-        style: TextStyle(
+        style: theme.textTheme.labelSmall?.copyWith(
           fontSize: 9,
-          fontWeight: FontWeight.bold,
-          color: colorScheme.onSecondaryContainer,
-          letterSpacing: 0.5,
+          fontWeight: FontWeight.w800,
+          color: colorScheme.onSurfaceVariant,
+          letterSpacing: 0.6,
         ),
       ),
     );

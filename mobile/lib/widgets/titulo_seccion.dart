@@ -169,3 +169,170 @@ class PillEstado extends StatelessWidget {
 /// fondo claro; en oscuro, el lima claro), como --pm-accent-ink.
 Color acentoTinta(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark ? OpTokens.accentInkDark : OpTokens.accentInkLight;
+
+/// Cuadro redondeado con un icono sobre fondo tenue del mismo tono: el
+/// "leading" estandar de tarjetas, filas de menu y opciones.
+class CajaIcono extends StatelessWidget {
+  const CajaIcono(this.icono, {super.key, this.color, this.tamano = 40, this.tamanoIcono = 20, this.solido = false});
+
+  final IconData icono;
+  final Color? color;
+  final double tamano;
+  final double tamanoIcono;
+
+  /// Fondo lleno del color (icono en onPrimary) en vez del tono al 14 %.
+  final bool solido;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final tono = color ?? colorScheme.primary;
+    return Container(
+      width: tamano,
+      height: tamano,
+      decoration: BoxDecoration(
+        color: solido ? tono : tono.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(tamano * 0.3),
+        border: solido ? null : Border.all(color: tono.withValues(alpha: 0.18)),
+      ),
+      child: Icon(icono, color: solido ? colorScheme.onPrimary : tono, size: tamanoIcono),
+    );
+  }
+}
+
+/// Aviso en linea (error, advertencia o informacion) con fondo translucido
+/// del tono, para formularios y pantallas de ajustes.
+class MensajeInline extends StatelessWidget {
+  const MensajeInline(this.texto, {super.key, this.color, this.icono = Icons.error_outline, this.onCerrar});
+
+  final String texto;
+  final Color? color;
+  final IconData icono;
+  final VoidCallback? onCerrar;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tono = color ?? StatusColors.critico;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: tono.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: tono.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(icono, color: tono, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              texto,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurface,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
+            ),
+          ),
+          if (onCerrar != null)
+            IconButton(
+              onPressed: onCerrar,
+              icon: Icon(Icons.close, size: 18, color: theme.colorScheme.onSurfaceVariant),
+              visualDensity: VisualDensity.compact,
+              tooltip: "Cerrar",
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Fila de opcion dentro de una tarjeta vidrio: icono en caja, titulo,
+/// descripcion y un control a la derecha (switch, boton, chevron...).
+class FilaOpcion extends StatelessWidget {
+  const FilaOpcion({
+    super.key,
+    required this.icono,
+    required this.titulo,
+    this.subtitulo,
+    this.trailing,
+    this.color,
+    this.onTap,
+  });
+
+  final IconData icono;
+  final String titulo;
+  final String? subtitulo;
+  final Widget? trailing;
+  final Color? color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Vidrio(
+      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+      blur: 10,
+      onTap: onTap,
+      child: Row(
+        children: [
+          CajaIcono(icono, color: color),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                if (subtitulo != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitulo!,
+                    style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant, height: 1.35),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (trailing != null) ...[const SizedBox(width: 10), trailing!]
+          else if (onTap != null) ...[
+            const SizedBox(width: 10),
+            Icon(Icons.chevron_right, color: colorScheme.outline, size: 20),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Barra de progreso fina con esquinas redondeadas y color de tono.
+class BarraProgreso extends StatelessWidget {
+  const BarraProgreso({super.key, required this.valor, required this.color, this.alto = 5});
+
+  final double valor;
+  final Color color;
+  final double alto;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(alto),
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: valor.clamp(0.0, 1.0)),
+        duration: const Duration(milliseconds: 700),
+        curve: Curves.easeOutCubic,
+        builder: (context, v, _) => LinearProgressIndicator(
+          value: v,
+          minHeight: alto,
+          backgroundColor: colorScheme.outlineVariant.withValues(alpha: 0.5),
+          color: color,
+        ),
+      ),
+    );
+  }
+}

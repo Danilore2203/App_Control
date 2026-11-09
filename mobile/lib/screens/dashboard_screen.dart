@@ -13,6 +13,7 @@ import "configuracion_guardia_screen.dart";
 import "infraestructura_screen.dart";
 import "../widgets/alerta_banner.dart";
 import "../widgets/app_drawer.dart";
+import "../widgets/barra_navegacion.dart";
 import "../widgets/detalle_proceso_sheet.dart";
 import "../widgets/estado_vacio.dart";
 import "../widgets/monitoreo_por_fuente.dart";
@@ -240,11 +241,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (controles.isEmpty) {
       return SliverToBoxAdapter(
         child: Padding(
-          padding: const EdgeInsets.all(32),
+          padding: const EdgeInsets.all(16),
           child: EstadoVacio(
             icono: Icons.filter_alt_off_outlined,
-            mensaje: "No hay controles con ese estado",
-            colorIcono: colorScheme.onSurfaceVariant,
+            mensaje: "Nada que mostrar con estos filtros",
+            detalle: "Probá con otro estado, fuente o búsqueda.",
+            colorIcono: colorScheme.outline,
           ),
         ),
       );
@@ -333,8 +335,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
         if (snapshot.hasError) {
           return EstadoVacio(
-            icono: Icons.error_outline,
-            mensaje: "No se pudieron cargar los controles.",
+            icono: Icons.cloud_off_rounded,
+            mensaje: "No se pudieron cargar los controles",
+            detalle: "Revisá la conexión e intentá de nuevo.",
             colorIcono: colorScheme.error,
             onReintentar: _recargarControles,
           );
@@ -433,14 +436,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
       key: _scaffoldKey,
       appBar: AppBar(
         titleSpacing: 12,
-        leading: IconButton(
-          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-          icon: Container(
-            decoration: BoxDecoration(
-              color: colorScheme.primary,
-              borderRadius: BorderRadius.circular(10),
+        leading: Center(
+          child: Material(
+            color: colorScheme.surfaceContainerHigh,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: colorScheme.outlineVariant),
             ),
-            child: Icon(Icons.menu, color: colorScheme.onPrimary, size: 20),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _scaffoldKey.currentState?.openDrawer(),
+              child: SizedBox(
+                width: 40,
+                height: 40,
+                child: Icon(Icons.menu_rounded, color: colorScheme.onSurface, size: 22),
+              ),
+            ),
           ),
         ),
         title: Column(
@@ -483,20 +494,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (_tabActual == 0)
             IconButton(
               onPressed: () => _busquedaFocus.requestFocus(),
-              icon: const Icon(Icons.search),
+              icon: const Icon(Icons.search_rounded),
               tooltip: "Buscar",
             ),
           Padding(
-            padding: const EdgeInsets.only(right: 12, left: 4),
-            child: CircleAvatar(
-              radius: 16,
-              backgroundColor: colorScheme.surfaceContainerHighest,
-              child: Text(
-                inicial.isEmpty ? "?" : inicial[0].toUpperCase(),
-                style: TextStyle(
-                    color: colorScheme.onSurface,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13),
+            padding: const EdgeInsets.only(right: 14, left: 2),
+            child: GestureDetector(
+              onTap: () => _scaffoldKey.currentState?.openDrawer(),
+              child: Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colorScheme.primary.withValues(alpha: 0.16),
+                  border: Border.all(color: colorScheme.primary.withValues(alpha: 0.5), width: 1.5),
+                ),
+                child: Text(
+                  inicial.isEmpty ? "?" : inicial[0].toUpperCase(),
+                  style: TextStyle(
+                      color: acentoTinta(context),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14),
+                ),
               ),
             ),
           ),
@@ -520,18 +540,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Expanded(child: vistas[_tabActual]),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tabActual,
-        onDestinationSelected: (index) => setState(() => _tabActual = index),
-        destinations: const [
-          NavigationDestination(
-              icon: Icon(Icons.checklist), label: "Controles"),
-          NavigationDestination(
-              icon: Icon(Icons.notifications_active), label: "Alertas"),
-          NavigationDestination(
-              icon: Icon(Icons.shield_outlined), label: "Guardia"),
-          NavigationDestination(
-              icon: Icon(Icons.menu_book_outlined), label: "Bitácora"),
+      bottomNavigationBar: BarraNavegacion(
+        indice: _tabActual,
+        onSeleccionar: (index) => setState(() => _tabActual = index),
+        destinos: const [
+          DestinoNavegacion(
+              icono: Icons.grid_view_outlined, iconoActivo: Icons.grid_view_rounded, etiqueta: "Controles"),
+          DestinoNavegacion(
+              icono: Icons.notifications_outlined, iconoActivo: Icons.notifications_rounded, etiqueta: "Alertas"),
+          DestinoNavegacion(icono: Icons.shield_outlined, iconoActivo: Icons.shield_rounded, etiqueta: "Guardia"),
+          DestinoNavegacion(
+              icono: Icons.menu_book_outlined, iconoActivo: Icons.menu_book_rounded, etiqueta: "Bitácora"),
         ],
       ),
     );
@@ -563,33 +582,15 @@ class _BannerBloqueosProd extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: StatusColors.critico,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: InkWell(
+        borderRadius: BorderRadius.circular(14),
         onTap: onVerDetalle,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            children: [
-              const Icon(Icons.lock_clock, color: Colors.white, size: 20),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  "PostgreSQL PROD: $cantidad sesión${cantidad == 1 ? '' : 'es'} bloqueada${cantidad == 1 ? '' : 's'}. Revisión urgente.",
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.white, size: 18),
-                onPressed: onCerrar,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
-            ],
-          ),
+        child: MensajeInline(
+          "PostgreSQL PROD: $cantidad sesión${cantidad == 1 ? '' : 'es'} bloqueada${cantidad == 1 ? '' : 's'}. Tocá para revisar.",
+          icono: Icons.lock_clock_rounded,
+          onCerrar: onCerrar,
         ),
       ),
     );

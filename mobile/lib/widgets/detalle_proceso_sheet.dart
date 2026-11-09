@@ -123,8 +123,9 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
         heightFactor: 0.88,
         child: Container(
           decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHigh,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            color: Theme.of(context).bottomSheetTheme.backgroundColor ?? colorScheme.surfaceContainerLow,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            border: Border.all(color: colorScheme.outlineVariant),
             boxShadow: [
               BoxShadow(
                   color: Colors.black.withValues(alpha: 0.4),

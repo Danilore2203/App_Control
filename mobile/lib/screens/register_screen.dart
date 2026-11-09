@@ -1,6 +1,8 @@
 import "package:flutter/material.dart";
 
 import "../services/auth_service.dart";
+import "../widgets/fondo_app.dart";
+import "../widgets/titulo_seccion.dart";
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -68,43 +70,38 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(title: const Text("Crear cuenta")),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
+              constraints: const BoxConstraints(maxWidth: 400),
               child: Form(
                 key: _formKey,
-                child: Column(
+                child: Vidrio(
+                  radius: 24,
+                  padding: const EdgeInsets.fromLTRB(22, 22, 22, 24),
+                  child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    Text(
+                      "Solicitar acceso",
+                      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.4),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "Un administrador tiene que aprobar la solicitud antes de que puedas ingresar.",
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4),
+                    ),
+                    const SizedBox(height: 20),
                     if (_error != null) ...[
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: colorScheme.errorContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.error_outline, color: colorScheme.onErrorContainer, size: 20),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _error!,
-                                style: TextStyle(color: colorScheme.onErrorContainer, fontSize: 13),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 20),
+                      MensajeInline(_error!),
+                      const SizedBox(height: 18),
                     ],
                     TextFormField(
                       controller: _usuarioController,
@@ -172,10 +169,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 height: 22,
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
-                            : const Text("Crear cuenta"),
+                            : const Text("Enviar solicitud"),
                       ),
                     ),
                   ],
+                  ),
                 ),
               ),
             ),

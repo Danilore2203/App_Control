@@ -116,7 +116,7 @@ class _TarjetaCore extends StatelessWidget {
     final color = fallas > 0 ? StatusColors.critico : StatusColors.exitoso;
 
     return Material(
-      color: colorScheme.surfaceContainerHigh,
+      color: seleccionada ? colorScheme.primary.withValues(alpha: 0.14) : colorScheme.surfaceContainerHigh,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -127,15 +127,15 @@ class _TarjetaCore extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: seleccionada ? colorScheme.primary : Colors.transparent,
-              width: 1.4,
+              color: seleccionada ? colorScheme.primary.withValues(alpha: 0.6) : colorScheme.outlineVariant,
+              width: seleccionada ? 1.4 : 1,
             ),
             boxShadow: fallas > 0
                 ? [
                     BoxShadow(
-                        color: color.withValues(alpha: 0.25),
-                        blurRadius: 14,
-                        spreadRadius: -3)
+                        color: color.withValues(alpha: 0.22),
+                        blurRadius: 16,
+                        spreadRadius: -4)
                   ]
                 : null,
           ),
@@ -144,15 +144,7 @@ class _TarjetaCore extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: Icon(Icons.bolt, color: color, size: 18),
-                  ),
+                  CajaIcono(Icons.bolt_rounded, color: color, tamano: 32, tamanoIcono: 18),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
@@ -210,7 +202,7 @@ class _TarjetaFuente extends StatelessWidget {
             : StatusColors.critico;
 
     return Material(
-      color: colorScheme.surfaceContainerHigh,
+      color: seleccionada ? colorScheme.primary.withValues(alpha: 0.14) : colorScheme.surfaceContainerHigh,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -221,8 +213,8 @@ class _TarjetaFuente extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: seleccionada ? colorScheme.primary : Colors.transparent,
-              width: 1.4,
+              color: seleccionada ? colorScheme.primary.withValues(alpha: 0.6) : colorScheme.outlineVariant,
+              width: seleccionada ? 1.4 : 1,
             ),
           ),
           child: Column(
@@ -244,6 +236,7 @@ class _TarjetaFuente extends StatelessWidget {
                             CircularProgressIndicator(
                               value: valorAnimado,
                               strokeWidth: 4,
+                              strokeCap: StrokeCap.round,
                               backgroundColor: color.withValues(alpha: 0.15),
                               valueColor: AlwaysStoppedAnimation(color),
                             ),

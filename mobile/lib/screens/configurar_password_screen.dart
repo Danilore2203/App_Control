@@ -3,7 +3,8 @@ import "package:flutter/material.dart";
 import "../services/auth_service.dart";
 import "../services/notification_service.dart";
 import "../theme.dart";
-import "../widgets/dotted_background.dart";
+import "../widgets/fondo_app.dart";
+import "../widgets/titulo_seccion.dart";
 import "../widgets/version_app.dart";
 import "dashboard_screen.dart";
 
@@ -99,51 +100,52 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
-      body: DottedBackground(
-        dotColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.15),
-        child: SizedBox.expand(
+      appBar: AppBar(
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(
+              child: VersionApp(
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: colorScheme.outline,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: SizedBox.expand(
           child: SafeArea(
             child: Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 380),
+                  constraints: const BoxConstraints(maxWidth: 400),
                   child: Form(
                     key: _formKey,
-                    child: Column(
+                    child: Vidrio(
+                      radius: 24,
+                      padding: const EdgeInsets.fromLTRB(22, 26, 22, 24),
+                      child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Row(
-                          children: [
-                            IconButton(
-                              onPressed: () => Navigator.of(context).pop(),
-                              icon: const Icon(Icons.arrow_back),
-                            ),
-                            const Spacer(),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: colorScheme.primaryContainer,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: VersionApp(
-                                style: AppTextStyles.tech(
-                                  color: colorScheme.onPrimaryContainer,
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ),
-                          ],
+                        Center(
+                          child: CajaIcono(
+                            widget.esPrimeraVez ? Icons.waving_hand_rounded : Icons.lock_reset_rounded,
+                            tamano: 56,
+                            tamanoIcono: 28,
+                          ),
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 14),
                         Text(
                           widget.esPrimeraVez ? "¡Bienvenido!" : "Cambio de contraseña",
                           style: Theme.of(context)
                               .textTheme
                               .headlineSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
+                              ?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.6),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 8),
@@ -161,28 +163,10 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                         ),
                         const SizedBox(height: 24),
                         if (_error != null) ...[
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: colorScheme.errorContainer,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(Icons.error_outline, color: colorScheme.onErrorContainer, size: 20),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    _error!,
-                                    style: TextStyle(color: colorScheme.onErrorContainer, fontSize: 13),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 20),
+                          MensajeInline(_error!),
+                          const SizedBox(height: 18),
                         ],
-                        _EtiquetaCampo(texto: "USUARIO", colorScheme: colorScheme),
+                        const _EtiquetaCampo(texto: "Usuario"),
                         const SizedBox(height: 6),
                         TextFormField(
                           controller: _usuarioController,
@@ -192,7 +176,7 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                         ),
                         const SizedBox(height: 16),
                         if (widget.esPrimeraVez) ...[
-                          _EtiquetaCampo(texto: "CORREO NUEVATEL", colorScheme: colorScheme),
+                          const _EtiquetaCampo(texto: "Correo Nuevatel"),
                           const SizedBox(height: 6),
                           TextFormField(
                             controller: _correoController,
@@ -211,7 +195,7 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                             },
                           ),
                         ] else ...[
-                          _EtiquetaCampo(texto: "CONTRASEÑA ACTUAL", colorScheme: colorScheme),
+                          const _EtiquetaCampo(texto: "Contraseña actual"),
                           const SizedBox(height: 6),
                           TextFormField(
                             controller: _actualController,
@@ -230,7 +214,7 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                         const SizedBox(height: 20),
                         Divider(color: colorScheme.outlineVariant),
                         const SizedBox(height: 20),
-                        _EtiquetaCampo(texto: "NUEVA CONTRASEÑA", colorScheme: colorScheme),
+                        const _EtiquetaCampo(texto: "Nueva contraseña"),
                         const SizedBox(height: 6),
                         TextFormField(
                           controller: _nuevaController,
@@ -248,7 +232,7 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                           },
                         ),
                         const SizedBox(height: 16),
-                        _EtiquetaCampo(texto: "CONFIRMAR NUEVA CONTRASEÑA", colorScheme: colorScheme),
+                        const _EtiquetaCampo(texto: "Confirmar nueva contraseña"),
                         const SizedBox(height: 6),
                         TextFormField(
                           controller: _confirmarController,
@@ -264,17 +248,14 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                           width: double.infinity,
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                            color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                            borderRadius: BorderRadius.circular(12),
+                            color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: colorScheme.outlineVariant),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                "REQUISITOS DE SEGURIDAD",
-                                style:
-                                    AppTextStyles.tech(color: colorScheme.onSurfaceVariant, fontSize: 10),
-                              ),
+                              const Eyebrow("Requisitos de seguridad"),
                               const SizedBox(height: 8),
                               _RequisitoItem(cumplido: _tieneLongitud, texto: "Mínimo 8 caracteres"),
                               _RequisitoItem(cumplido: _tieneNumero, texto: "Incluir un número"),
@@ -303,23 +284,23 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                                   ),
                           ),
                         ),
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 18),
                         const Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            _InsigniaPie(icono: Icons.wifi_tethering, texto: "CONEXIÓN SEGURA"),
+                            _InsigniaPie(icono: Icons.lock_outline_rounded, texto: "Conexión segura"),
                             SizedBox(width: 16),
-                            _InsigniaPie(icono: Icons.lock_person_outlined, texto: "DATOS ENCRIPTADOS"),
+                            _InsigniaPie(icono: Icons.enhanced_encryption_outlined, texto: "Datos cifrados"),
                           ],
                         ),
                       ],
+                    ),
                     ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
       ),
     );
   }
@@ -327,15 +308,17 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
 
 class _EtiquetaCampo extends StatelessWidget {
   final String texto;
-  final ColorScheme colorScheme;
 
-  const _EtiquetaCampo({required this.texto, required this.colorScheme});
+  const _EtiquetaCampo({required this.texto});
 
   @override
   Widget build(BuildContext context) {
     return Align(
       alignment: Alignment.centerLeft,
-      child: Text(texto, style: AppTextStyles.tech(color: colorScheme.onSurfaceVariant, fontSize: 10)),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 4),
+        child: Eyebrow(texto),
+      ),
     );
   }
 }
@@ -348,13 +331,14 @@ class _InsigniaPie extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.onSurfaceVariant;
+    final theme = Theme.of(context);
+    final color = theme.colorScheme.outline;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icono, size: 13, color: color),
         const SizedBox(width: 4),
-        Text(texto, style: AppTextStyles.tech(color: color, fontSize: 9, fontWeight: FontWeight.w400)),
+        Text(texto, style: theme.textTheme.labelSmall?.copyWith(color: color, fontWeight: FontWeight.w600)),
       ],
     );
   }
@@ -369,14 +353,14 @@ class _RequisitoItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final color = cumplido ? colorScheme.primary : colorScheme.onSurfaceVariant;
+    final color = cumplido ? StatusColors.exitoso : colorScheme.onSurfaceVariant;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
           Icon(
-            cumplido ? Icons.check_circle : Icons.radio_button_unchecked,
+            cumplido ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
             size: 18,
             color: color,
           ),

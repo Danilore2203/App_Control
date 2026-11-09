@@ -1,3 +1,4 @@
+import "package:flutter/cupertino.dart" show CupertinoPageTransitionsBuilder;
 import "package:flutter/material.dart";
 import "package:google_fonts/google_fonts.dart";
 
@@ -216,6 +217,9 @@ class AppTheme {
       displayColor: colorScheme.onSurface,
     );
 
+    final vidrio = isDark ? OpTokens.glassDark : OpTokens.glassLight;
+    final panelOpaco = isDark ? OpTokens.surfaceDark : Colors.white;
+
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
@@ -224,16 +228,68 @@ class AppTheme {
       // envolviendo cada pantalla desde MaterialApp.builder: el Scaffold va
       // transparente para que las tarjetas "vidrio" dejen verlo.
       scaffoldBackgroundColor: Colors.transparent,
+      splashFactory: InkSparkle.splashFactory,
+      // Transicion suave entre pantallas (fundido + leve desplazamiento) en
+      // vez del zoom por defecto de Android.
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        },
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         foregroundColor: colorScheme.onSurface,
         elevation: 0,
         scrolledUnderElevation: 0,
+        centerTitle: false,
         titleTextStyle: textTheme.titleLarge?.copyWith(
           fontWeight: FontWeight.w800,
           letterSpacing: -0.5,
           color: colorScheme.onSurface,
         ),
+      ),
+      iconTheme: IconThemeData(color: colorScheme.onSurface),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith((estados) =>
+            estados.contains(WidgetState.selected) ? colorScheme.onPrimary : colorScheme.outline),
+        trackColor: WidgetStateProperty.resolveWith((estados) =>
+            estados.contains(WidgetState.selected) ? colorScheme.primary : colorScheme.surfaceContainerHighest),
+        trackOutlineColor: WidgetStateProperty.resolveWith((estados) =>
+            estados.contains(WidgetState.selected) ? Colors.transparent : colorScheme.outlineVariant),
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: colorScheme.primary,
+        foregroundColor: colorScheme.onPrimary,
+        elevation: 0,
+        highlightElevation: 0,
+        extendedTextStyle: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: isDark ? OpTokens.surface3Dark : OpTokens.textLight,
+        contentTextStyle: textTheme.bodyMedium?.copyWith(color: isDark ? OpTokens.textDark : Colors.white),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+      ),
+      listTileTheme: ListTileThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        iconColor: colorScheme.onSurfaceVariant,
+      ),
+      progressIndicatorTheme: ProgressIndicatorThemeData(color: colorScheme.primary),
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: SegmentedButton.styleFrom(
+          selectedBackgroundColor: colorScheme.primary,
+          selectedForegroundColor: colorScheme.onPrimary,
+          backgroundColor: vidrio,
+          side: BorderSide(color: colorScheme.outlineVariant),
+          textStyle: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+        ),
+      ),
+      timePickerTheme: TimePickerThemeData(
+        backgroundColor: panelOpaco,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       ),
       // Tarjetas translucidas con borde fino, como .pm-panel en la web.
       cardTheme: CardThemeData(
@@ -246,7 +302,7 @@ class AppTheme {
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: isDark ? OpTokens.glassDark : OpTokens.glassLight,
+        backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         indicatorColor: colorScheme.primary,
         labelTextStyle: WidgetStatePropertyAll(
@@ -254,16 +310,25 @@ class AppTheme {
         ),
       ),
       drawerTheme: DrawerThemeData(
-        backgroundColor: isDark ? OpTokens.surfaceDark : Colors.white,
+        backgroundColor: panelOpaco,
         surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.horizontal(right: Radius.circular(28)),
+        ),
       ),
       bottomSheetTheme: BottomSheetThemeData(
-        backgroundColor: isDark ? OpTokens.surfaceDark : Colors.white,
+        backgroundColor: panelOpaco,
         surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: isDark ? OpTokens.surfaceDark : Colors.white,
+        backgroundColor: panelOpaco,
         surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        titleTextStyle: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, color: colorScheme.onSurface),
+        contentTextStyle: textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
       ),
       chipTheme: ChipThemeData(
         shape: const StadiumBorder(),
@@ -297,19 +362,39 @@ class AppTheme {
         style: ElevatedButton.styleFrom(
           backgroundColor: colorScheme.primary,
           foregroundColor: colorScheme.onPrimary,
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          disabledBackgroundColor: colorScheme.primary.withValues(alpha: 0.4),
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
           shape: const StadiumBorder(),
-          textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+          textStyle: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800, fontSize: 15),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: colorScheme.primary,
+          foregroundColor: colorScheme.onPrimary,
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+          shape: const StadiumBorder(),
+          textStyle: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800, fontSize: 15),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          foregroundColor: colorScheme.onSurface,
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
           shape: const StadiumBorder(),
+          side: BorderSide(color: colorScheme.outlineVariant),
+          backgroundColor: vidrio,
+          textStyle: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700, fontSize: 14),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(foregroundColor: colorScheme.primary),
+        style: TextButton.styleFrom(
+          foregroundColor: isDark ? OpTokens.accentInkDark : OpTokens.accentInkLight,
+          shape: const StadiumBorder(),
+          textStyle: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+        ),
       ),
     );
   }

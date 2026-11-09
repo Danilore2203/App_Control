@@ -3,9 +3,12 @@ import "package:flutter/material.dart";
 import "../models/bitacora_error.dart";
 import "../services/api_service.dart";
 import "../theme.dart";
+import "../utils/formato.dart";
 import "../utils/meses_es.dart";
 import "../widgets/estado_vacio.dart";
+import "../widgets/fondo_app.dart";
 import "../widgets/formulario_entrada_bitacora.dart";
+import "../widgets/titulo_seccion.dart";
 import "bitacora_dia_screen.dart";
 
 const _diasSemana = ["L", "M", "X", "J", "V", "S", "D"];
@@ -63,14 +66,23 @@ class _BitacoraMesScreenState extends State<BitacoraMesScreen> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
+    final theme = Theme.of(context);
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-            "${nombresMesEs[widget.mes - 1].toUpperCase()} ${widget.anio}"),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Eyebrow("Bitácora ${widget.anio}"),
+            Text(nombresMesEs[widget.mes - 1]),
+          ],
+        ),
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: _abrirFormulario,
-        child: const Icon(Icons.add),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text("Registrar"),
       ),
       body: FutureBuilder<List<BitacoraError>>(
         future: _entradasFuture,
@@ -80,9 +92,10 @@ class _BitacoraMesScreenState extends State<BitacoraMesScreen> {
           }
           if (snapshot.hasError) {
             return EstadoVacio(
-              icono: Icons.error_outline,
-              mensaje: "No se pudieron cargar las entradas.",
+              icono: Icons.cloud_off_rounded,
+              mensaje: "No se pudieron cargar las entradas",
               colorIcono: colorScheme.error,
+              onReintentar: () async => setState(_cargar),
             );
           }
 
@@ -99,152 +112,106 @@ class _BitacoraMesScreenState extends State<BitacoraMesScreen> {
           final diasTranscurridos = esMesActual ? ahora.day : diasEnMes;
           final diasConError =
               porDia.keys.where((d) => d <= diasTranscurridos).length;
-          final uptimePct = diasTranscurridos == 0
-              ? 100.0
-              : (diasTranscurridos - diasConError) / diasTranscurridos * 100;
+          final abiertos = entradas.where((e) => !e.resuelto).length;
+          final resueltos = entradas.length - abiertos;
+          final procesos = entradas.where((e) => e.esProceso).length;
+          final tablas = entradas.length - procesos;
+          final diaPico = porDia.entries.fold<MapEntry<int, List<BitacoraError>>?>(
+            null,
+            (max, e) => max == null || e.value.length > max.value.length ? e : max,
+          );
 
           return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
             children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: IndicadorTile(
+                      etiqueta: "Episodios",
+                      valor: formatearMiles(entradas.length),
+                      icono: Icons.list_alt_outlined,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: IndicadorTile(
+                      etiqueta: "Abiertos",
+                      valor: formatearMiles(abiertos),
+                      icono: abiertos > 0 ? Icons.error_outline_rounded : Icons.check_circle_outline_rounded,
+                      color: abiertos > 0 ? StatusColors.critico : StatusColors.exitoso,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: IndicadorTile(
+                      etiqueta: "Resueltos",
+                      valor: formatearMiles(resueltos),
+                      icono: Icons.task_alt_rounded,
+                      color: StatusColors.exitoso,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 22),
+              TituloSeccion(
+                "Calendario",
+                accion: Text(
+                  "$diasConError de $diasTranscurridos días con fallas",
+                  style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.outline),
+                ),
+              ),
+              const SizedBox(height: 10),
               _Calendario(
                 anio: widget.anio,
                 mes: widget.mes,
                 porDia: porDia,
                 onTocarDia: _abrirDia,
               ),
-              const SizedBox(height: 24),
-              Text(
-                "ESTADÍSTICAS OPERATIVAS",
-                style: AppTextStyles.tech(
-                    color: colorScheme.primary, fontSize: 10),
-              ),
+              const SizedBox(height: 22),
+              const TituloSeccion("Resumen del mes"),
               const SizedBox(height: 10),
-              Container(
+              Vidrio(
                 padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Row(
+                blur: 10,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: StatusColors.critico.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(Icons.bar_chart, color: StatusColors.critico),
+                    _FilaResumen(
+                      etiqueta: "Procesos",
+                      valor: procesos,
+                      total: entradas.length,
+                      color: colorScheme.primary,
                     ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    const SizedBox(height: 12),
+                    _FilaResumen(
+                      etiqueta: "Tablas",
+                      valor: tablas,
+                      total: entradas.length,
+                      color: StatusColors.info,
+                    ),
+                    const SizedBox(height: 12),
+                    _FilaResumen(
+                      etiqueta: "Siguen abiertos",
+                      valor: abiertos,
+                      total: entradas.length,
+                      color: StatusColors.critico,
+                    ),
+                    if (diaPico != null) ...[
+                      const SizedBox(height: 16),
+                      Row(
                         children: [
-                          Text("Resumen del Mes",
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 4),
-                          RichText(
-                            text: TextSpan(
-                              style: TextStyle(
-                                  color: colorScheme.onSurfaceVariant,
-                                  fontSize: 13),
-                              children: [
-                                TextSpan(
-                                  text:
-                                      "${entradas.length} error${entradas.length == 1 ? '' : 'es'} ",
-                                  style: const TextStyle(
-                                      color: StatusColors.critico,
-                                      fontWeight: FontWeight.bold),
-                                ),
-                                const TextSpan(
-                                    text: "detectados en el periodo actual."),
-                              ],
+                          Icon(Icons.trending_up_rounded, size: 16, color: colorScheme.outline),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              "Día con más episodios: ${diaPico.key} de ${nombresMesEs[widget.mes - 1]} (${formatearMiles(diaPico.value.length)})",
+                              style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
                             ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: _CasillaStat(
-                      titulo: "UPTIME",
-                      valor: "${uptimePct.toStringAsFixed(1)}%",
-                      color: colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _CasillaStat(
-                      titulo: "CRITICAL",
-                      valor: diasConError.toString().padLeft(2, "0"),
-                      color: StatusColors.critico,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  children: [
-                    SizedBox(
-                      width: 128,
-                      height: 128,
-                      child: TweenAnimationBuilder<double>(
-                        tween: Tween(begin: 0, end: uptimePct / 100),
-                        duration: const Duration(milliseconds: 900),
-                        curve: Curves.easeOutCubic,
-                        builder: (context, valor, _) => Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            CircularProgressIndicator(
-                              value: valor,
-                              strokeWidth: 8,
-                              backgroundColor:
-                                  colorScheme.surfaceContainerHighest,
-                              valueColor:
-                                  AlwaysStoppedAnimation(colorScheme.primary),
-                            ),
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text("${(valor * 100).round()}%",
-                                    style: AppTextStyles.tech(
-                                        color: colorScheme.onSurface,
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.bold)),
-                                Text("SALUD",
-                                    style: AppTextStyles.tech(
-                                        color: colorScheme.onSurfaceVariant,
-                                        fontSize: 9)),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      uptimePct >= 90
-                          ? "Nivel de eficiencia estable para el periodo de ${nombresMesEs[widget.mes - 1]}."
-                          : "Eficiencia por debajo de lo esperado en ${nombresMesEs[widget.mes - 1]}: revisar procesos.",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: colorScheme.onSurfaceVariant),
-                    ),
+                    ],
                   ],
                 ),
               ),
@@ -256,36 +223,36 @@ class _BitacoraMesScreenState extends State<BitacoraMesScreen> {
   }
 }
 
-class _CasillaStat extends StatelessWidget {
-  final String titulo;
-  final String valor;
-  final Color color;
+class _FilaResumen extends StatelessWidget {
+  const _FilaResumen({required this.etiqueta, required this.valor, required this.total, required this.color});
 
-  const _CasillaStat(
-      {required this.titulo, required this.valor, required this.color});
+  final String etiqueta;
+  final int valor;
+  final int total;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(14),
-        border: Border(left: BorderSide(color: color, width: 4)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(titulo,
-              style: AppTextStyles.tech(
-                  color: colorScheme.onSurfaceVariant, fontSize: 10)),
-          const SizedBox(height: 4),
-          Text(valor,
-              style: AppTextStyles.tech(
-                  color: color, fontSize: 18, fontWeight: FontWeight.bold)),
-        ],
-      ),
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(etiqueta, style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+            Text(
+              formatearMiles(valor),
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        BarraProgreso(valor: total == 0 ? 0 : valor / total, color: color),
+      ],
     );
   }
 }
@@ -337,46 +304,40 @@ class _Calendario extends StatelessWidget {
       relleno++;
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: _diasSemana
-              .map((d) => Expanded(
-                    child: Center(
-                      child: Text(d,
-                          style: AppTextStyles.tech(
-                              color: colorScheme.onSurfaceVariant,
-                              fontSize: 11)),
-                    ),
-                  ))
-              .toList(),
-        ),
-        const SizedBox(height: 4),
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(16),
+    return Vidrio(
+      padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+      blur: 10,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: _diasSemana
+                .map((d) => Expanded(child: Center(child: Eyebrow(d))))
+                .toList(),
           ),
-          child: GridView.count(
+          const SizedBox(height: 6),
+          GridView.count(
             crossAxisCount: 7,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
+            childAspectRatio: 0.92,
             children: celdas,
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _celdaOpaca(int dia) {
-    return Center(
-      child: Opacity(
-        opacity: 0.2,
-        child: Text("$dia",
-            style: AppTextStyles.tech(
-                fontSize: 13, color: Colors.grey, fontWeight: FontWeight.w400)),
+    return Builder(
+      builder: (context) => Center(
+        child: Text(
+          "$dia",
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.35),
+                fontWeight: FontWeight.w600,
+              ),
+        ),
       ),
     );
   }
@@ -389,61 +350,71 @@ class _Calendario extends StatelessWidget {
     List<BitacoraError>? entradasDelDia,
     ColorScheme colorScheme,
   ) {
-    Widget contenido = Container(
-      width: 32,
-      height: 32,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: esHoy ? colorScheme.primary : Colors.transparent,
-        border: !esHoy && tieneError
-            ? Border.all(color: StatusColors.critico)
-            : null,
-        boxShadow: esHoy
-            ? [
-                BoxShadow(
-                    color: colorScheme.primary.withValues(alpha: 0.4),
-                    blurRadius: 12)
-              ]
-            : tieneError
-                ? [
-                    BoxShadow(
-                        color: StatusColors.critico.withValues(alpha: 0.3),
-                        blurRadius: 10)
-                  ]
-                : null,
-      ),
-      child: Text(
-        "$dia",
-        style: AppTextStyles.tech(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: esHoy
-              ? colorScheme.onPrimary
-              : tieneError
-                  ? StatusColors.critico
-                  : colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
+    final theme = Theme.of(context);
+    final cantidad = entradasDelDia?.length ?? 0;
+    final hayAbiertos = entradasDelDia?.any((e) => !e.resuelto) ?? false;
+    final tono = hayAbiertos ? StatusColors.critico : StatusColors.exitoso;
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: tieneError ? () => onTocarDia(dia, entradasDelDia!) : null,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          contenido,
-          const SizedBox(height: 2),
-          if (tieneError && !esHoy)
-            Container(
-                width: 4,
-                height: 4,
-                decoration: const BoxDecoration(
-                    shape: BoxShape.circle, color: StatusColors.critico))
-          else
-            const SizedBox(height: 4),
-        ],
+    final Color fondo;
+    final Color colorTexto;
+    final Border? borde;
+    if (esHoy) {
+      fondo = colorScheme.primary;
+      colorTexto = colorScheme.onPrimary;
+      borde = null;
+    } else if (tieneError) {
+      fondo = tono.withValues(alpha: 0.14);
+      colorTexto = tono;
+      borde = Border.all(color: tono.withValues(alpha: 0.45));
+    } else {
+      fondo = Colors.transparent;
+      colorTexto = colorScheme.onSurfaceVariant;
+      borde = null;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(3),
+      child: Material(
+        color: fondo,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: tieneError ? () => onTocarDia(dia, entradasDelDia!) : null,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: borde,
+              boxShadow: esHoy
+                  ? [BoxShadow(color: colorScheme.primary.withValues(alpha: 0.35), blurRadius: 12)]
+                  : null,
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  "$dia",
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: colorTexto,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                if (tieneError)
+                  Text(
+                    "$cantidad",
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      color: esHoy ? colorScheme.onPrimary.withValues(alpha: 0.8) : tono,
+                    ),
+                  )
+                else
+                  const SizedBox(height: 11),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -4,7 +4,7 @@ import "package:flutter/services.dart";
 import "../services/api_service.dart";
 import "../services/guardia_service.dart";
 import "../services/notification_service.dart";
-import "../theme.dart";
+import "../widgets/titulo_seccion.dart";
 
 /// Ajustes generales de la app, aparte de la configuracion de guardia
 /// (horario/tono), que ya tiene su propia pantalla.
@@ -97,138 +97,84 @@ class _AjustesScreenState extends State<AjustesScreen> {
     }
   }
 
+  String _etiquetaGracia(int minutos) => minutos == 0 ? "Siempre" : "$minutos min";
+
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
       appBar: AppBar(title: const Text("Ajustes")),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               children: [
                 if (_error != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: colorScheme.errorContainer,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.error_outline, color: colorScheme.onErrorContainer, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _error!,
-                            style: TextStyle(color: colorScheme.onErrorContainer, fontSize: 13),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  MensajeInline(_error!),
                   const SizedBox(height: 16),
                 ],
-                Text(
-                  "NOTIFICACIONES",
-                  style: AppTextStyles.tech(color: colorScheme.onSurfaceVariant, fontSize: 10),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              "Recibir notificaciones",
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              "Incluye alertas críticas y avisos normales de procesos. "
-                              "Al desactivar, este dispositivo deja de recibir push del todo.",
-                              style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12.5),
-                            ),
-                          ],
+                const TituloSeccion("Notificaciones"),
+                const SizedBox(height: 10),
+                FilaOpcion(
+                  icono: Icons.notifications_active_outlined,
+                  titulo: "Recibir notificaciones",
+                  subtitulo: "Alertas críticas y avisos de procesos. Al desactivar, este "
+                      "dispositivo deja de recibir push del todo.",
+                  trailing: _actualizandoNotificaciones
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Switch(
+                          value: _notificacionesHabilitadas,
+                          onChanged: _cambiarNotificaciones,
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      _actualizandoNotificaciones
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Switch(
-                              value: _notificacionesHabilitadas,
-                              onChanged: _cambiarNotificaciones,
-                            ),
-                    ],
-                  ),
                 ),
                 if (_diagnosticoFcm != null && _diagnosticoFcm != "ok") ...[
-                  const SizedBox(height: 8),
-                  Text(
+                  const SizedBox(height: 10),
+                  MensajeInline(
                     "Diagnóstico de notificaciones: $_diagnosticoFcm",
-                    style: TextStyle(color: colorScheme.error, fontSize: 11.5),
+                    icono: Icons.info_outline_rounded,
                   ),
                 ],
-                const SizedBox(height: 24),
-                Text(
-                  "SEGURIDAD",
-                  style: AppTextStyles.tech(color: colorScheme.onSurfaceVariant, fontSize: 10),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              "Volver a pedir huella después de",
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              "Si reabrís la app dentro de este tiempo desde el último "
-                              "ingreso, no vuelve a pedir huella. \"Siempre\" la pide cada vez.",
-                              style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12.5),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      DropdownButton<int>(
-                        value: _ventanaGraciaMinutos,
-                        onChanged: _cambiarVentanaGracia,
-                        items: _opcionesVentanaGracia
-                            .map((minutos) => DropdownMenuItem(
-                                  value: minutos,
-                                  child: Text(minutos == 0 ? "Siempre" : "$minutos min"),
-                                ))
-                            .toList(),
-                      ),
+                const SizedBox(height: 22),
+                const TituloSeccion("Seguridad"),
+                const SizedBox(height: 10),
+                FilaOpcion(
+                  icono: Icons.fingerprint_rounded,
+                  titulo: "Volver a pedir huella después de",
+                  subtitulo: "Si reabrís la app dentro de este tiempo desde el último "
+                      "ingreso, no vuelve a pedir huella. \"Siempre\" la pide cada vez.",
+                  trailing: PopupMenuButton<int>(
+                    initialValue: _ventanaGraciaMinutos,
+                    onSelected: _cambiarVentanaGracia,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    itemBuilder: (context) => [
+                      for (final minutos in _opcionesVentanaGracia)
+                        PopupMenuItem(value: minutos, child: Text(_etiquetaGracia(minutos))),
                     ],
+                    child: Container(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: colorScheme.outlineVariant),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _etiquetaGracia(_ventanaGraciaMinutos),
+                            style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(width: 2),
+                          Icon(Icons.expand_more_rounded, size: 18, color: colorScheme.onSurfaceVariant),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ],

@@ -4,6 +4,7 @@ import "../models/bitacora_error.dart";
 import "../services/actualizaciones_service.dart";
 import "../services/api_service.dart";
 import "../theme.dart";
+import "../utils/formato.dart";
 import "../utils/meses_es.dart";
 import "../widgets/estado_vacio.dart";
 import "../widgets/fondo_app.dart";
@@ -215,7 +216,7 @@ class _ResumenAnio extends StatelessWidget {
     return Row(
       children: [
         Text(
-          "${_formatearMiles(resumen.totalAnual)} episodios en ${resumen.anio}"
+          "${formatearMiles(resumen.totalAnual)} episodios en ${resumen.anio}"
           "${esAnioActual ? ' hasta hoy' : ''}",
           style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
         ),
@@ -368,7 +369,7 @@ class _TarjetaMes extends StatelessWidget {
                   ),
                   const Spacer(),
                   Text(
-                    sinDatos ? "–" : _formatearMiles(info.total),
+                    sinDatos ? "–" : formatearMiles(info.total),
                     maxLines: 1,
                     style: theme.textTheme.headlineSmall?.copyWith(
                       color: sinDatos ? colorScheme.outline.withValues(alpha: 0.5) : colorTexto,
@@ -398,13 +399,3 @@ class _TarjetaMes extends StatelessWidget {
   }
 }
 
-String _formatearMiles(int n) {
-  final texto = n.toString();
-  final buffer = StringBuffer();
-  for (var i = 0; i < texto.length; i++) {
-    final restantes = texto.length - i;
-    buffer.write(texto[i]);
-    if (restantes > 1 && restantes % 3 == 1) buffer.write(".");
-  }
-  return buffer.toString();
-}

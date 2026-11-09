@@ -504,33 +504,42 @@ class _ChipEstado extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: seleccionado ? color : colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-              color: seleccionado
-                  ? Colors.transparent
-                  : colorScheme.outlineVariant),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(etiqueta,
-                style: AppTextStyles.tech(
-                    color: seleccionado ? colorScheme.onPrimary : color,
-                    fontSize: 10)),
-            const SizedBox(width: 6),
-            Text("$cantidad",
-                style: AppTextStyles.tech(
-                    color: (seleccionado ? colorScheme.onPrimary : color)
-                        .withValues(alpha: 0.8),
-                    fontSize: 10)),
-          ],
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final colorTexto = seleccionado ? Colors.white : colorScheme.onSurface;
+    return Material(
+      color: seleccionado ? color : colorScheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: seleccionado ? Colors.transparent : colorScheme.outlineVariant),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!seleccionado) ...[
+                Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                etiqueta,
+                style: theme.textTheme.labelMedium?.copyWith(color: colorTexto, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                "$cantidad",
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: colorTexto.withValues(alpha: 0.75),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -550,27 +559,60 @@ class _ChipCore extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const color = StatusColors.critico;
-    return GestureDetector(
+    return _ChipIcono(
+      icono: Icons.bolt_rounded,
+      texto: "Core",
+      color: StatusColors.critico,
+      seleccionado: seleccionado,
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: seleccionado ? 0.9 : 0.1),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withValues(alpha: 0.4)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.verified_outlined,
-                size: 14, color: seleccionado ? Colors.white : color),
-            const SizedBox(width: 6),
-            Text("CORE",
-                style: AppTextStyles.tech(
-                    color: seleccionado ? Colors.white : color,
-                    fontSize: 9)),
-          ],
+    );
+  }
+}
+
+/// Chip con icono y tono propio: lleno cuando esta seleccionado, al 12 %
+/// con borde cuando no.
+class _ChipIcono extends StatelessWidget {
+  final IconData icono;
+  final String texto;
+  final Color color;
+  final bool seleccionado;
+  final VoidCallback onTap;
+
+  const _ChipIcono({
+    required this.icono,
+    required this.texto,
+    required this.color,
+    required this.seleccionado,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorTexto = seleccionado ? Colors.white : color;
+    return Material(
+      color: seleccionado ? color : color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: color.withValues(alpha: seleccionado ? 0 : 0.35)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icono, size: 14, color: colorTexto),
+              const SizedBox(width: 6),
+              Text(
+                texto,
+                style: theme.textTheme.labelMedium?.copyWith(color: colorTexto, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -590,29 +632,12 @@ class _ChipTecnologia extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = colorTecnologia(tecnologia);
-    return GestureDetector(
+    return _ChipIcono(
+      icono: iconoTecnologia(tecnologia),
+      texto: tecnologia,
+      color: colorTecnologia(tecnologia),
+      seleccionado: seleccionado,
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: seleccionado ? 0.9 : 0.1),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withValues(alpha: 0.4)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(iconoTecnologia(tecnologia),
-                size: 14, color: seleccionado ? Colors.white : color),
-            const SizedBox(width: 6),
-            Text(tecnologia,
-                style: AppTextStyles.tech(
-                    color: seleccionado ? Colors.white : color,
-                    fontSize: 9)),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -633,14 +658,12 @@ class _TarjetaFalloDia extends StatelessWidget {
     final estadoTexto = entrada.estado ?? (entrada.esProceso ? "ERROR" : "TABLA");
     final sistema = entrada.sistema ?? entrada.tecnologia;
 
+    final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(16),
-        border: Border(left: BorderSide(color: color, width: 4)),
-        boxShadow: [
-          BoxShadow(color: color.withValues(alpha: 0.12), blurRadius: 16)
-        ],
+        border: Border.all(color: resuelto ? colorScheme.outlineVariant : color.withValues(alpha: 0.35)),
       ),
       padding: const EdgeInsets.all(14),
       child: Column(
@@ -649,15 +672,7 @@ class _TarjetaFalloDia extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(iconoEvento(entrada), color: color, size: 18),
-              ),
+              CajaIcono(iconoEvento(entrada), color: color, tamano: 36, tamanoIcono: 19),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -665,31 +680,14 @@ class _TarjetaFalloDia extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Expanded(
-                          child: Text(
-                            "$sistema · $estadoTexto",
-                            style:
-                                AppTextStyles.tech(color: color, fontSize: 9),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 1),
-                          decoration: BoxDecoration(
-                              color: color.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(6)),
-                          child: Text(resuelto ? "RESUELTO" : "ABIERTO",
-                              style:
-                                  AppTextStyles.tech(color: color, fontSize: 8)),
-                        ),
+                        Expanded(child: Eyebrow("$sistema · $estadoTexto", color: color)),
+                        PillEstado(resuelto ? "Resuelto" : "Abierto", color: color),
                       ],
                     ),
+                    const SizedBox(height: 3),
                     Text(
                       entrada.nombre,
-                      style: AppTextStyles.tech(
-                          color: colorScheme.onSurface,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700),
+                      style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -721,22 +719,25 @@ class _TarjetaFalloDia extends StatelessWidget {
           const SizedBox(height: 10),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(11),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
+              color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: color.withValues(alpha: 0.2)),
+              border: Border.all(color: colorScheme.outlineVariant),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(iconoEvento(entrada), color: color, size: 15),
-                const SizedBox(width: 8),
+                Container(
+                  width: 3,
+                  height: 16,
+                  margin: const EdgeInsets.only(top: 1, right: 9),
+                  decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+                ),
                 Expanded(
                   child: Text(
                     entrada.descripcion,
-                    style:
-                        TextStyle(color: color, fontSize: 12.5, height: 1.35),
+                    style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurface, height: 1.4),
                   ),
                 ),
               ],

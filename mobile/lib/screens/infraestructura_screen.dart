@@ -5,8 +5,10 @@ import "../models/postgres_sesion.dart";
 import "../services/infra_service.dart";
 import "../theme.dart";
 import "../widgets/estado_vacio.dart";
+import "../widgets/pestanas.dart";
 import "../widgets/tarjeta_sesion_netezza.dart";
 import "../widgets/tarjeta_sesion_postgres.dart";
+import "../widgets/titulo_seccion.dart";
 
 /// Version con AppBar propio, para abrir desde el drawer o el banner de
 /// bloqueos Postgres (ya no es una pestana del menu inferior). El contenido
@@ -16,13 +18,8 @@ class InfraestructuraScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: Text("INFRAESTRUCTURA",
-            style:
-                AppTextStyles.tech(color: colorScheme.onSurface, fontSize: 14)),
-      ),
+      appBar: AppBar(title: const Text("Infraestructura")),
       body: const InfraestructuraContenido(),
     );
   }
@@ -148,37 +145,14 @@ class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Text(
-            "ESCENAS DE CONTROL",
-            style: AppTextStyles.tech(
-                color: colorScheme.onSurfaceVariant, fontSize: 10),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: PestanasSimples(
+            seleccionada: _escena,
+            opciones: const ["Netezza", "PG DEV", "PG PROD"],
+            onCambiar: (i) => setState(() => _escena = i),
           ),
         ),
-        SizedBox(
-          height: 42,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: [
-              _PillEscena(
-                  texto: "Netezza",
-                  seleccionado: _escena == 0,
-                  onTap: () => setState(() => _escena = 0)),
-              const SizedBox(width: 8),
-              _PillEscena(
-                  texto: "Postgres DEV",
-                  seleccionado: _escena == 1,
-                  onTap: () => setState(() => _escena = 1)),
-              const SizedBox(width: 8),
-              _PillEscena(
-                  texto: "Postgres PROD",
-                  seleccionado: _escena == 2,
-                  onTap: () => setState(() => _escena = 2)),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 14),
         Expanded(
           child: switch (_escena) {
             0 => _vistaNetezza(colorScheme),
@@ -192,23 +166,12 @@ class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
 
   Widget _errorInfra(Object error, VoidCallback onReintentar) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            EstadoVacio(
-              icono: Icons.dns_outlined,
-              mensaje: error.toString().replaceFirst("Exception: ", ""),
-              colorIcono: colorScheme.error,
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton(
-                onPressed: onReintentar, child: const Text("Reintentar")),
-          ],
-        ),
-      ),
+    return EstadoVacio(
+      icono: Icons.dns_outlined,
+      mensaje: "No se pudo consultar el monitor",
+      detalle: error.toString().replaceFirst("Exception: ", ""),
+      colorIcono: colorScheme.error,
+      onReintentar: onReintentar,
     );
   }
 
@@ -329,23 +292,39 @@ class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
                       : colorScheme.onSurfaceVariant
                 ),
               ]),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text("Solo activas"),
-                  Switch(
-                    value: soloActivas,
-                    onChanged: (valor) => setState(() {
-                      if (esProd) {
-                        _soloActivasProd = valor;
-                        _prodFuture = _infraService.obtenerPostgresProd(
-                            soloActivas: valor);
-                      } else {
-                        _soloActivasDev = valor;
-                        _devFuture = _infraService.obtenerPostgresDev(
-                            soloActivas: valor);
-                      }
-                    }),
+                  const TituloSeccion("Sesiones"),
+                  Row(
+                    children: [
+                      Text(
+                        "Solo activas",
+                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      const SizedBox(width: 4),
+                      Transform.scale(
+                        scale: 0.85,
+                        child: Switch(
+                          value: soloActivas,
+                          onChanged: (valor) => setState(() {
+                            if (esProd) {
+                              _soloActivasProd = valor;
+                              _prodFuture = _infraService.obtenerPostgresProd(
+                                  soloActivas: valor);
+                            } else {
+                              _soloActivasDev = valor;
+                              _devFuture = _infraService.obtenerPostgresDev(
+                                  soloActivas: valor);
+                            }
+                          }),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -378,73 +357,15 @@ class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
       children: [
         for (var i = 0; i < items.length; i++) ...[
           Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(12),
-                border: Border(left: BorderSide(color: items[i].$3, width: 3)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(items[i].$1,
-                      style: AppTextStyles.tech(
-                          color: colorScheme.onSurfaceVariant, fontSize: 8.5)),
-                  const SizedBox(height: 2),
-                  Text(items[i].$2,
-                      style: TextStyle(
-                          color: items[i].$3,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18)),
-                ],
-              ),
+            child: IndicadorTile(
+              etiqueta: items[i].$1,
+              valor: items[i].$2,
+              color: items[i].$3 == colorScheme.onSurface ? null : items[i].$3,
             ),
           ),
           if (i != items.length - 1) const SizedBox(width: 8),
         ],
       ],
-    );
-  }
-}
-
-class _PillEscena extends StatelessWidget {
-  final String texto;
-  final bool seleccionado;
-  final VoidCallback onTap;
-
-  const _PillEscena(
-      {required this.texto, required this.seleccionado, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
-          decoration: BoxDecoration(
-            color: seleccionado
-                ? colorScheme.primary.withValues(alpha: 0.12)
-                : colorScheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-                color: seleccionado ? colorScheme.primary : Colors.transparent),
-          ),
-          child: Text(
-            texto,
-            style: TextStyle(
-              color: seleccionado
-                  ? colorScheme.primary
-                  : colorScheme.onSurfaceVariant,
-              fontWeight: seleccionado ? FontWeight.bold : FontWeight.normal,
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

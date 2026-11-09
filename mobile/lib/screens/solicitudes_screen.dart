@@ -2,7 +2,10 @@ import "package:flutter/material.dart";
 
 import "../models/solicitud_acceso.dart";
 import "../services/api_service.dart";
+import "../theme.dart";
 import "../widgets/estado_vacio.dart";
+import "../widgets/fondo_app.dart";
+import "../widgets/titulo_seccion.dart";
 
 class SolicitudesScreen extends StatefulWidget {
   const SolicitudesScreen({super.key});
@@ -104,48 +107,46 @@ class _SolicitudesScreenState extends State<SolicitudesScreen> {
           }
           if (snapshot.hasError) {
             return EstadoVacio(
-              icono: Icons.error_outline,
-              mensaje: "No se pudieron cargar las solicitudes.",
+              icono: Icons.cloud_off_rounded,
+              mensaje: "No se pudieron cargar las solicitudes",
               colorIcono: colorScheme.error,
+              onReintentar: _recargar,
             );
           }
 
           final solicitudes = snapshot.data ?? [];
           if (solicitudes.isEmpty) {
-            return EstadoVacio(
-              icono: Icons.check_circle_outline,
+            return const EstadoVacio(
+              icono: Icons.check_circle_outline_rounded,
               mensaje: "No hay solicitudes pendientes",
-              colorIcono: colorScheme.onSurfaceVariant,
+              detalle: "Cuando alguien pida acceso, aparece acá para aprobarlo.",
+              colorIcono: StatusColors.exitoso,
             );
           }
 
           return RefreshIndicator(
             onRefresh: _recargar,
             child: ListView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               itemCount: solicitudes.length,
               itemBuilder: (context, index) {
                 final solicitud = solicitudes[index];
                 final aprobando = _procesando == "${solicitud.id}-aprobar";
                 final rechazando = _procesando == "${solicitud.id}-rechazar";
                 final ocupado = aprobando || rechazando;
+                final esRegistro = solicitud.tipo == "registro";
 
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Vidrio(
+                    padding: const EdgeInsets.all(14),
+                    blur: 10,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           children: [
-                            CircleAvatar(
-                              backgroundColor: colorScheme.primaryContainer,
-                              child: Icon(
-                                solicitud.tipo == "registro" ? Icons.badge_outlined : Icons.g_mobiledata,
-                                color: colorScheme.onPrimaryContainer,
-                              ),
-                            ),
+                            CajaIcono(esRegistro ? Icons.badge_outlined : Icons.mail_outline_rounded),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Column(
@@ -153,11 +154,11 @@ class _SolicitudesScreenState extends State<SolicitudesScreen> {
                                 children: [
                                   Text(
                                     solicitud.identificador,
-                                    style: const TextStyle(fontWeight: FontWeight.w600),
+                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
                                   ),
+                                  const SizedBox(height: 2),
                                   Text(
                                     [
-                                      solicitud.tipo == "registro" ? "Registro local" : "Google",
                                       if (solicitud.email != null) solicitud.email!,
                                       if (solicitud.username != null) "@${solicitud.username}",
                                     ].join(" · "),
@@ -166,9 +167,11 @@ class _SolicitudesScreenState extends State<SolicitudesScreen> {
                                 ],
                               ),
                             ),
+                            const SizedBox(width: 8),
+                            PillEstado(esRegistro ? "Registro" : "Google", color: colorScheme.onSurfaceVariant),
                           ],
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 14),
                         Row(
                           children: [
                             Expanded(
@@ -180,12 +183,12 @@ class _SolicitudesScreenState extends State<SolicitudesScreen> {
                                         height: 16,
                                         child: CircularProgressIndicator(strokeWidth: 2),
                                       )
-                                    : const Icon(Icons.close),
+                                    : const Icon(Icons.close_rounded, size: 18),
                                 label: const Text("Rechazar"),
-                                style: OutlinedButton.styleFrom(foregroundColor: colorScheme.error),
+                                style: OutlinedButton.styleFrom(foregroundColor: StatusColors.critico),
                               ),
                             ),
-                            const SizedBox(width: 12),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: ElevatedButton.icon(
                                 onPressed: ocupado ? null : () => _aprobar(solicitud),
@@ -195,7 +198,7 @@ class _SolicitudesScreenState extends State<SolicitudesScreen> {
                                         height: 16,
                                         child: CircularProgressIndicator(strokeWidth: 2),
                                       )
-                                    : const Icon(Icons.check),
+                                    : const Icon(Icons.check_rounded, size: 18),
                                 label: const Text("Aprobar"),
                               ),
                             ),
