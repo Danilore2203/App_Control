@@ -16,6 +16,29 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 
+# Ultimos envios recibidos (en memoria del proceso): de que IP vinieron y
+# que trajeron. Para saber quien manda cuando llega un envio raro (el
+# 9/11 un "completo" a medias vacio la app y no habia forma de saber de
+# donde salio). Se ve en GET /internal/catalogos/estado.
+_ultimos_envios: list[dict] = []
+
+
+def _registrar_envio(request: Request, push: schemas.CatalogoPushIn, resultado: schemas.CatalogoPushOut) -> None:
+    origen = request.headers.get("x-forwarded-for") or (request.client.host if request.client else "?")
+    registro = {
+        "ts": datetime.now(BOLIVIA_TZ).replace(tzinfo=None).isoformat(timespec="seconds"),
+        "desde": origen,
+        "completo": push.completo,
+        "procesos": len(push.procesos.upsert),
+        "tablas": len(push.tablas.upsert),
+        "bitacora": len(push.bitacora.upsert) if push.bitacora else None,
+        "vigentes": len(push.bitacora.vigentes.ids) if push.bitacora and push.bitacora.vigentes else None,
+        "resultado": resultado.model_dump(exclude_none=True),
+    }
+    logger.info("push de catalogos: %s", registro)
+    _ultimos_envios.append(registro)
+    del _ultimos_envios[:-10]
+
 
 @router.post(
     "/catalogos",
@@ -33,14 +56,7 @@ def recibir_catalogos(push: schemas.CatalogoPushIn, request: Request, db: Sessio
     los celulares para que refresquen: asi la app se entera en el mismo
     minuto en que OP_PROD vio el cambio, sin sondear."""
     resultado = aplicar_push_catalogos(db, push)
-    logger.info(
-        "push de %s: completo=%s procesos=%s tablas=%s bitacora=%s vigentes=%s -> %s",
-        request.headers.get("x-forwarded-for") or (request.client.host if request.client else "?"),
-        push.completo, len(push.procesos.upsert), len(push.tablas.upsert),
-        len(push.bitacora.upsert) if push.bitacora else None,
-        len(push.bitacora.vigentes.ids) if push.bitacora and push.bitacora.vigentes else None,
-        resultado.model_dump(exclude_none=True),
-    )
+    _registrar_envio(request, push, resultado)
     hubo_cambios = any(
         v for seccion in (resultado.procesos, resultado.tablas) for v in seccion.model_dump().values()
     ) or resultado.eventos.insertados > 0
@@ -82,7 +98,9 @@ def borrar_bitacora_local_automatica(db: Session = Depends(get_db)):
 def estado_catalogos_interno(fecha: date | None = None, db: Session = Depends(get_db)):
     """Que hay en la base para un dia (hoy por defecto, hora Bolivia): para
     contrastar con MySQL de OP_PROD y ver si el push esta llegando."""
-    return estado_catalogos(db, fecha or datetime.now(BOLIVIA_TZ).date())
+    estado = estado_catalogos(db, fecha or datetime.now(BOLIVIA_TZ).date())
+    estado.ultimos_envios = list(reversed(_ultimos_envios))
+    return estado
 
 
 @router.post(
