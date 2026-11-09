@@ -352,8 +352,19 @@ class BitacoraImportIn(BaseModel):
     tipo: Optional[str] = None
 
 
+class BitacoraVigentesIn(BaseModel):
+    """Ids de MySQL que siguen existiendo desde `desde` (00:00). Las filas
+    reflejadas (origen_id) de esa ventana que no esten en la lista se
+    eliminan: en el origen se fusionan duplicados del mismo dia y se borran
+    entradas desde la web, y eso no llega como upsert."""
+
+    desde: date
+    ids: list[int] = Field(default_factory=list)
+
+
 class BitacoraIn(BaseModel):
     upsert: list[BitacoraImportIn] = Field(default_factory=list)
+    vigentes: Optional[BitacoraVigentesIn] = None
 
 
 class RelacionImportIn(BaseModel):
@@ -418,6 +429,7 @@ class UsuariosOut(BaseModel):
 class BitacoraOut(BaseModel):
     insertadas: int
     actualizadas: int
+    eliminadas: int = 0  # reflejadas que MySQL ya no tiene (ver BitacoraVigentesIn)
 
 
 class CatalogoPushOut(BaseModel):

@@ -19,6 +19,7 @@ Todo es idempotente: si OP_PROD reintenta el mismo envio (p.ej. porque se
 le corto la red antes de recibir la respuesta), el resultado es el mismo.
 """
 import logging
+from datetime import datetime
 from typing import Iterable, Type
 
 from sqlalchemy.orm import Session
@@ -179,29 +180,56 @@ def _aplicar_usuarios(db: Session, seccion: schemas.UsuariosIn) -> schemas.Usuar
 
 def _aplicar_bitacora(db: Session, seccion: schemas.BitacoraIn) -> schemas.BitacoraOut:
     """Refleja filas de c137.bitacora_errores por origen_id. Las entradas
-    propias de la app (origen_id NULL: manuales e incoherencias) no se tocan."""
-    if not seccion.upsert:
-        return schemas.BitacoraOut(insertadas=0, actualizadas=0)
-    ids = [f.origen_id for f in seccion.upsert]
-    existentes = {
-        e.origen_id: e
-        for e in db.query(models.BitacoraError).filter(models.BitacoraError.origen_id.in_(ids)).all()
-    }
+    propias de la app (origen_id NULL: manuales e incoherencias) no se tocan.
+    Con `vigentes`, ademas se eliminan las reflejadas de esa ventana que
+    MySQL ya no tiene (fusion de duplicados, borrados desde la web): sin
+    eso la app acumulaba filas que la web ya no mostraba."""
     insertadas = actualizadas = 0
-    for fila in seccion.upsert:
-        datos = fila.model_dump()
-        obj = existentes.get(fila.origen_id)
-        if obj is None:
-            obj = models.BitacoraError(**datos)
-            db.add(obj)
-            existentes[fila.origen_id] = obj
-            insertadas += 1
-        else:
-            for k, v in datos.items():
-                setattr(obj, k, v)
-            actualizadas += 1
-    db.flush()
-    return schemas.BitacoraOut(insertadas=insertadas, actualizadas=actualizadas)
+    if seccion.upsert:
+        ids = [f.origen_id for f in seccion.upsert]
+        existentes = {
+            e.origen_id: e
+            for e in db.query(models.BitacoraError).filter(models.BitacoraError.origen_id.in_(ids)).all()
+        }
+        for fila in seccion.upsert:
+            datos = fila.model_dump()
+            obj = existentes.get(fila.origen_id)
+            if obj is None:
+                obj = models.BitacoraError(**datos)
+                db.add(obj)
+                existentes[fila.origen_id] = obj
+                insertadas += 1
+            else:
+                for k, v in datos.items():
+                    setattr(obj, k, v)
+                actualizadas += 1
+        db.flush()
+
+    eliminadas = 0
+    if seccion.vigentes is not None:
+        eliminadas = _eliminar_bitacora_no_vigente(db, seccion.vigentes)
+    return schemas.BitacoraOut(insertadas=insertadas, actualizadas=actualizadas, eliminadas=eliminadas)
+
+
+def _eliminar_bitacora_no_vigente(db: Session, vigentes: schemas.BitacoraVigentesIn) -> int:
+    """Borra las filas reflejadas (origen_id no nulo) con fecha_hora desde
+    `vigentes.desde` cuyo origen_id no este en la lista. Se compara en
+    Python (la lista puede tener decenas de miles de ids) y se borra por
+    lotes de ids locales."""
+    desde = datetime.combine(vigentes.desde, datetime.min.time())
+    ids_vigentes = set(vigentes.ids)
+    locales = (
+        db.query(models.BitacoraError.id, models.BitacoraError.origen_id)
+        .filter(models.BitacoraError.origen_id.isnot(None), models.BitacoraError.fecha_hora >= desde)
+        .all()
+    )
+    sobrantes = [id_ for id_, origen_id in locales if origen_id not in ids_vigentes]
+    for i in range(0, len(sobrantes), 500):
+        lote = sobrantes[i : i + 500]
+        db.query(models.BitacoraError).filter(models.BitacoraError.id.in_(lote)).delete(synchronize_session=False)
+    if sobrantes:
+        db.flush()
+    return len(sobrantes)
 
 
 def _aplicar_relaciones(db: Session, seccion: schemas.RelacionesIn, completo: bool) -> schemas.CatalogoSeccionOut:
