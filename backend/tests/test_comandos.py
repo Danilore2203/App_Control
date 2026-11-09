@@ -44,6 +44,14 @@ def test_las_acciones_solo_las_piden_administradores(db):
     assert c.payload == {"nombre": "X"}
 
 
+def test_seguir_la_corrida_lanzada_lo_puede_pedir_cualquiera(db):
+    ana = usuario(db, "ana")
+    c = S.crear_comando(
+        db, ana, schemas.ComandoIn(tipo="procesos.lanzar.estado", payload={"nombre": "X", "lanzado_en": "2026-11-09 14:40:00"})
+    )
+    assert (c.estado, c.payload["nombre"]) == ("pendiente", "X")
+
+
 def test_tipo_desconocido_se_rechaza(db):
     ana = usuario(db, "ana")
     with pytest.raises(HTTPException) as exc:

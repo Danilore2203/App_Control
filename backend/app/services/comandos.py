@@ -29,7 +29,8 @@ TIPOS_COMANDO: dict[str, bool] = {
     "infra.postgres.sesiones": False,  # payload: {"entorno": "dev"|"prod", "solo_activas": bool}
     "infra.postgres.cancel": True,  # payload: {"entorno": "dev"|"prod", "pid": int}
     # Procesos
-    "procesos.lanzar": True,  # payload: {"nombre": str, "fuente": str}
+    "procesos.lanzar": True,  # payload: {"nombre": str, "fuente": str}; devuelve lanzado_en
+    "procesos.lanzar.estado": False,  # payload: {"nombre": str, "lanzado_en": str}: sigue la corrida lanzada
     "procesos.actualizar_todos": True,
     "procesos.actualizar_todos.estado": False,
     "tablas.actualizar_todos": True,
