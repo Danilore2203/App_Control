@@ -19,6 +19,7 @@ class SeguimientoLanzamiento {
 
   static const intervaloConsulta = Duration(seconds: 10);
   static const maximo = Duration(minutes: 45);
+  static const maxFallosSeguidos = 3;
 
   /// «48s», «3m 05s», «1h 02m 09s».
   static String duracion(Duration d) {
@@ -59,6 +60,7 @@ class SeguimientoLanzamiento {
     final inicio = lanzadoEnLocal ?? DateTime.now();
     final limite = inicio.add(maximo);
     var extra = "";
+    var fallosSeguidos = 0;
 
     bool vigente() => EjecucionActual.notifier.value?.titulo == titulo;
     void corriendo() {
@@ -83,8 +85,20 @@ class SeguimientoLanzamiento {
             payload: {"nombre": nombre, "lanzado_en": lanzadoEnServidor},
           ))
               .resultado;
-        } catch (_) {
-          continue; // una consulta fallida no corta el cronometro
+          fallosSeguidos = 0;
+        } catch (e) {
+          // Una consulta fallida no corta el cronometro; tres seguidas si (p.ej. el
+          // backend de App_Control todavia no conoce el comando): se avisa y se para.
+          if (++fallosSeguidos < maxFallosSeguidos) continue;
+          if (vigente()) {
+            final motivo = e is ComandoFallidoException ? e.mensaje : e.toString();
+            EjecucionActual.mostrar(EstadoEjecucion(
+              titulo: titulo,
+              detalle: "Se lanzó, pero no se pudo seguir la corrida: $motivo",
+              fase: FaseEjecucion.error,
+            ));
+          }
+          return;
         }
         if (!vigente()) return;
         if (estado["corriendo"] == true) {
