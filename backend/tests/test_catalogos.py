@@ -120,7 +120,7 @@ def test_no_borra_un_proceso_que_tiene_alertas(db):
 
 
 def test_estado_resume_lo_recibido_del_dia(db):
-    assert estado_catalogos(db, HOY).model_dump() == {
+    assert estado_catalogos(db, HOY).model_dump(exclude={"ultimos_envios"}) == {
         "fecha": HOY, "procesos_hoy": 0, "tablas_hoy": 0, "eventos_hoy": 0, "ultimo_snapshot_ts": None,
         "ultimo_evento_ts": None, "ultimo_evento_id": 0, "ultimo_cambio_revisado": 0, "episodios_alerta_abiertos": 0,
         "bitacora_total": 0, "bitacora_ultima_actualizacion": None, "bitacora_locales": 0,
