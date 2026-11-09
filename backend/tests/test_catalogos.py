@@ -204,7 +204,7 @@ def test_bitacora_de_mysql_se_replica_por_origen_id_sin_tocar_lo_propio(db):
     envio = push()
     envio.bitacora = schemas.BitacoraIn(upsert=[fila])
     out = aplicar_push_catalogos(db, envio)
-    assert out.bitacora.model_dump() == {"insertadas": 1, "actualizadas": 0}
+    assert out.bitacora.model_dump() == {"insertadas": 1, "actualizadas": 0, "eliminadas": 0}
 
     # Cierre del episodio alla: misma fila (mismo id local), actualizada.
     id_local = db.query(models.BitacoraError).filter_by(origen_id=500).one().id
@@ -212,7 +212,7 @@ def test_bitacora_de_mysql_se_replica_por_origen_id_sin_tocar_lo_propio(db):
     fila.fecha_actualizacion = datetime(2026, 11, 5, 9, 3)
     fila.descripcion = "Proceso en error. Solucionado"
     out2 = aplicar_push_catalogos(db, envio)
-    assert out2.bitacora.model_dump() == {"insertadas": 0, "actualizadas": 1}
+    assert out2.bitacora.model_dump() == {"insertadas": 0, "actualizadas": 1, "eliminadas": 0}
     cerrada = db.query(models.BitacoraError).filter_by(origen_id=500).one()
     assert (cerrada.id, cerrada.estado_fin, cerrada.fecha_actualizacion) == (id_local, "OK", datetime(2026, 11, 5, 9, 3))
     assert db.query(models.BitacoraError).filter_by(nombre="manual").one().estado_fin == "ERROR"
@@ -274,3 +274,29 @@ def test_un_fallo_no_deja_el_envio_a_medias(db):
 
     assert db.get(models.Control, 1).estado == "OK"
     assert db.query(models.CatalogoCambio).count() == 0
+
+
+def test_los_ids_vigentes_borran_lo_que_mysql_ya_no_tiene(db):
+    def fila(origen_id=None, fecha=TS, **kw):
+        base = dict(origen_id=origen_id, fecha_hora=fecha, nombre="p", tecnologia="AIRFLOW", descripcion="x",
+                    estado="ERROR", estado_fin="ERROR", tipo="PROCESO")
+        base.update(kw)
+        db.add(models.BitacoraError(**base))
+
+    fila(origen_id=1)                                        # sigue en MySQL: se queda
+    fila(origen_id=2)                                        # fusionada alla: se borra
+    fila(origen_id=3, fecha=datetime(2026, 10, 1, 8, 0))    # fuera de la ventana: no se toca
+    fila(nombre="manual", creado_por_id=7)                   # propia de la app: no se toca
+    fila(nombre="incoherencia", estado="INCOHERENCIA")       # propia de la app: no se toca
+    db.commit()
+
+    envio = push()
+    envio.bitacora = schemas.BitacoraIn(
+        upsert=[],
+        vigentes=schemas.BitacoraVigentesIn(desde=date(2026, 11, 1), ids=[1, 999]),
+    )
+    out = aplicar_push_catalogos(db, envio)
+
+    assert out.bitacora.model_dump() == {"insertadas": 0, "actualizadas": 0, "eliminadas": 1}
+    restantes = {(e.origen_id, e.nombre) for e in db.query(models.BitacoraError).all()}
+    assert restantes == {(1, "p"), (3, "p"), (None, "manual"), (None, "incoherencia")}
