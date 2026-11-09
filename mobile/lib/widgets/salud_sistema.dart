@@ -23,6 +23,9 @@ class SaludSistema extends StatelessWidget {
     final fallidos = controles.where((c) => c.color == "red" && !c.esDemorado).length;
     final demorados = controles.where((c) => c.esDemorado).length;
     final enCurso = controles.where((c) => c.color == "blue").length;
+    // Gris = DAGs pausados y procesos sin ejecucion: no cuentan como sanos
+    // (no corren) pero tampoco como falla, igual que en el catalogo de OP.
+    final pausados = controles.where((c) => c.color == "gray").length;
     final porcentaje = total == 0 ? 0.0 : exitosos / total;
 
     final Color colorSalud;
@@ -102,13 +105,15 @@ class SaludSistema extends StatelessWidget {
                 (enCurso, StatusColors.info),
                 (demorados, StatusColors.advertencia),
                 (fallidos, StatusColors.critico),
+                (pausados, StatusColors.neutral),
               ],
             ),
             const SizedBox(height: 8),
             Text(
               total == 0
                   ? "Todavía no hay controles registrados"
-                  : "$total elemento${total == 1 ? '' : 's'} monitoreado${total == 1 ? '' : 's'} · $exitosos sin novedades",
+                  : "$total elemento${total == 1 ? '' : 's'} monitoreado${total == 1 ? '' : 's'}"
+                      "${pausados > 0 ? ' · $pausados pausado${pausados == 1 ? '' : 's'} o sin ejecución (no cuentan como OK)' : ''}",
               style: theme.textTheme.labelSmall?.copyWith(color: colorScheme.outline, fontWeight: FontWeight.w600),
             ),
           ],
@@ -261,10 +266,11 @@ class _BarraApilada extends StatelessWidget {
                           color: color,
                         ),
                       ),
-                  Expanded(
-                    flex: (total - segmentos.fold<int>(0, (s, e) => s + e.$1)).clamp(0, total),
-                    child: ColoredBox(color: colorScheme.outlineVariant),
-                  ),
+                  if (total - segmentos.fold<int>(0, (s, e) => s + e.$1) > 0)
+                    Expanded(
+                      flex: total - segmentos.fold<int>(0, (s, e) => s + e.$1),
+                      child: ColoredBox(color: colorScheme.outlineVariant),
+                    ),
                 ],
               ),
       ),

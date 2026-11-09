@@ -127,7 +127,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       case "blue":
         return StatusColors.info;
       default:
-        return Colors.grey;
+        return StatusColors.neutral;
     }
   }
 
@@ -142,7 +142,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       case "blue":
         return "En ejecución";
       default:
-        return "Otros";
+        // Gris: DAGs pausados y procesos sin ejecucion (el catalogo de OP
+        // los deja asi aunque su ultima corrida haya sido OK).
+        return "Pausados";
     }
   }
 
