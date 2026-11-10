@@ -96,8 +96,13 @@ void main() {
     test("duraciones y costos cortos", () {
       expect([duracionCorta(45), duracionCorta(600), duracionCorta(3900), duracionCorta(7200)], ["45 s", "10 min", "1 h 5 min", "2 h"]);
       expect([costoCorto(800), costoCorto(80010), costoCorto(8161891), costoCorto(1250000000)], ["800", "80 mil", "8 M", "1,3 mil M"]);
-      expect(haceCuanto("2026-11-10 07:29:08 -04", ahora: DateTime(2026, 11, 10, 10, 29, 8)), "3 h");
+      // 10:29:08 en Bolivia = 14:29:08 UTC, sin importar la zona del celular.
+      final ahora = DateTime.utc(2026, 11, 10, 14, 29, 8);
+      expect(haceCuanto("2026-11-10 07:29:08 -04", ahora: ahora), "3 h");
+      expect(haceCuanto("2026-11-10 07:29:08", ahora: ahora), "3 h"); // sin zona: hora de Bolivia
+      expect(haceCuanto("2026-11-10 11:29:08.123 +00", ahora: ahora), "3 h");
       expect(haceCuanto("basura"), isNull);
+      expect(extractoSql("WITH p AS (\n SELECT 1 )  SELECT *", largo: 12), "WITH p AS ( …");
     });
   });
 

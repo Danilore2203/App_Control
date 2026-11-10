@@ -105,11 +105,25 @@ String costoCorto(num n) {
 const costoAlto = 100000;
 const costoCritico = 1000000;
 
-/// Fecha del servidor ("2026-11-10 07:29:08", con o sin zona) como DateTime local.
+final _reZona = RegExp(r"([+-])(\d{2}):?(\d{2})?$");
+
+/// Fecha del servidor ("2026-11-10 07:29:08", "2026-11-10 07:29:08 -04") como
+/// instante. Con zona se respeta; sin zona es hora de Bolivia (-04:00), la de
+/// los servidores de Nuevatel, asi el tiempo sale bien aunque el celular este
+/// en otra zona horaria.
 DateTime? fechaServidor(String? v) {
   final s = (v ?? "").trim();
   if (s.length < 19) return null;
-  return DateTime.tryParse(s.substring(0, 19).replaceFirst(" ", "T"));
+  final base = s.substring(0, 19).replaceFirst(" ", "T");
+  final m = _reZona.firstMatch(s.substring(19).trim());
+  final zona = m != null ? "${m.group(1)}${m.group(2)}:${m.group(3) ?? "00"}" : "-04:00";
+  return DateTime.tryParse("$base$zona");
+}
+
+/// Comienzo de la consulta en una linea (cuando no se reconoce la tabla).
+String extractoSql(String? comando, {int largo = 80}) {
+  final sql = (comando ?? "").replaceAll(_reEspacios, " ").trim();
+  return sql.length <= largo ? sql : "${sql.substring(0, largo)}…";
 }
 
 /// Cuanto paso desde esa fecha («hace 2 h 5 min»), o null si no se entiende.

@@ -44,12 +44,21 @@ class LineaSql extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(
-            r.tabla.isEmpty ? (r.externa ? "tabla externa" : "—") : r.tabla,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: AppTextStyles.tech(color: colorScheme.onSurface, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 0.2),
-          ),
+          child: r.tabla.isNotEmpty
+              ? Text(
+                  r.tabla,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.tech(color: colorScheme.onSurface, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 0.2),
+                )
+              // Sin tabla reconocible: el comienzo de la consulta, mas tenue.
+              : Text(
+                  r.externa ? "tabla externa" : extractoSql(comando),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.tech(
+                      color: colorScheme.onSurfaceVariant, fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 0.1),
+                ),
         ),
         if (r.temporal) ...[
           const SizedBox(width: 6),
