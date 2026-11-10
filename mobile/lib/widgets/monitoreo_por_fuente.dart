@@ -4,8 +4,9 @@ import "../models/control.dart";
 import "../theme.dart";
 import "titulo_seccion.dart";
 
-/// Fila de tarjetas, una por cada fuente (DataStage/Pentaho/Airflow/Otro),
-/// cada una con un medidor circular chico mostrando % de exito.
+/// Fila de tarjetas, una por fuente (DataStage/Pentaho/Airflow...) mas una
+/// de los procesos CORE: cuantos son, una barra con la mezcla de estados y,
+/// en palabras, cuantos fallan o estan demorados. Tocar una filtra la lista.
 bool esCore(Control control) => control.core?.trim().toLowerCase() == "si";
 
 /// "proceso", "tabla" o "elemento" segun lo que agrupa la tarjeta (en la
@@ -39,57 +40,57 @@ class MonitoreoPorFuente extends StatelessWidget {
     for (final control in controles) {
       porFuente.putIfAbsent(control.fuente, () => []).add(control);
     }
-
     if (porFuente.isEmpty) return const SizedBox.shrink();
 
-    final fuentesOrdenadas = porFuente.keys.toList()..sort();
+    // Las que tienen errores primero: es lo que se viene a mirar.
+    final fuentes = porFuente.keys.toList()
+      ..sort((a, b) {
+        final ea = porFuente[a]!.where((c) => c.categoria == "red").length;
+        final eb = porFuente[b]!.where((c) => c.categoria == "red").length;
+        return ea != eb ? eb.compareTo(ea) : a.compareTo(b);
+      });
     final core = controles.where(esCore).toList();
-    final coreFallas =
-        core.where((c) => c.color == "red" || c.color == "orange").length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Padding(
-          padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 10),
           child: TituloSeccion("Por fuente"),
         ),
-        SizedBox(
-          height: 118,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: [
-              if (core.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: _TarjetaCore(
-                    total: core.length,
-                    fallas: coreFallas,
-                    seleccionada: coreSeleccionado,
-                    onTap: onSeleccionarCore,
+        // Alto segun el contenido (no fijo): con letra grande del celular no se corta.
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (core.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: _TarjetaGrupo(
+                      nombre: "CORE",
+                      icono: Icons.bolt_rounded,
+                      grupo: core,
+                      unidad: "crítico",
+                      seleccionada: coreSeleccionado,
+                      onTap: onSeleccionarCore,
+                    ),
                   ),
-                ),
-              for (final fuente in fuentesOrdenadas)
-                Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: _TarjetaFuente(
-                    nombre: fuente,
-                    total: porFuente[fuente]!.length,
-                    unidad: _unidad(porFuente[fuente]!),
-                    porcentaje: porFuente[fuente]!.isEmpty
-                        ? 0.0
-                        : porFuente[fuente]!
-                                .where((c) => c.color == "green")
-                                .length /
-                            porFuente[fuente]!.length,
-                    seleccionada: fuenteSeleccionada == fuente,
-                    onTap: onSeleccionarFuente == null
-                        ? null
-                        : () => onSeleccionarFuente!(fuente),
+                for (final fuente in fuentes)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: _TarjetaGrupo(
+                      nombre: fuente,
+                      grupo: porFuente[fuente]!,
+                      unidad: _unidad(porFuente[fuente]!),
+                      seleccionada: fuenteSeleccionada == fuente,
+                      onTap: onSeleccionarFuente == null ? null : () => onSeleccionarFuente!(fuente),
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ],
@@ -97,23 +98,41 @@ class MonitoreoPorFuente extends StatelessWidget {
   }
 }
 
-class _TarjetaCore extends StatelessWidget {
-  final int total;
-  final int fallas;
-  final bool seleccionada;
-  final VoidCallback? onTap;
-
-  const _TarjetaCore({
-    required this.total,
-    required this.fallas,
-    required this.seleccionada,
+class _TarjetaGrupo extends StatelessWidget {
+  const _TarjetaGrupo({
+    required this.nombre,
+    required this.grupo,
+    required this.unidad,
+    this.icono,
+    this.seleccionada = false,
     this.onTap,
   });
 
+  final String nombre;
+  final List<Control> grupo;
+  final String unidad;
+  final IconData? icono;
+  final bool seleccionada;
+  final VoidCallback? onTap;
+
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final color = fallas > 0 ? StatusColors.critico : StatusColors.exitoso;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    int cuenta(String c) => grupo.where((x) => x.categoria == c).length;
+    final ok = cuenta("green");
+    final error = cuenta("red");
+    final demorado = cuenta("orange");
+    final corriendo = cuenta("blue");
+    final resto = grupo.length - ok - error - demorado - corriendo;
+    final total = grupo.length;
+    final pctOk = total == 0 ? 0 : (ok * 100 / total).round();
+
+    final (resumen, tono) = error > 0
+        ? ("$error con error", StatusColors.critico)
+        : demorado > 0
+            ? ("$demorado demorado${demorado == 1 ? "" : "s"}", StatusColors.advertencia)
+            : ("Todo OK", StatusColors.exitoso);
 
     return Material(
       color: seleccionada ? colorScheme.primary.withValues(alpha: 0.14) : colorScheme.surfaceContainerHigh,
@@ -122,50 +141,58 @@ class _TarjetaCore extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         child: Container(
-          width: 148,
-          padding: const EdgeInsets.all(12),
+          width: 164,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: seleccionada ? colorScheme.primary.withValues(alpha: 0.6) : colorScheme.outlineVariant,
-              width: seleccionada ? 1.4 : 1,
+              color: seleccionada
+                  ? colorScheme.primary.withValues(alpha: 0.7)
+                  : (error > 0 ? StatusColors.critico.withValues(alpha: 0.35) : colorScheme.outlineVariant),
+              width: seleccionada ? 1.5 : 1,
             ),
-            boxShadow: fallas > 0
-                ? [
-                    BoxShadow(
-                        color: color.withValues(alpha: 0.22),
-                        blurRadius: 16,
-                        spreadRadius: -4)
-                  ]
-                : null,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  CajaIcono(Icons.bolt_rounded, color: color, tamano: 32, tamanoIcono: 18),
-                  const SizedBox(width: 8),
-                  const Expanded(
+                  if (icono != null) ...[
+                    Icon(icono, size: 15, color: tono),
+                    const SizedBox(width: 4),
+                  ],
+                  Expanded(
                     child: Text(
-                      "CORE",
-                      style: TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 11.5),
+                      nombre,
                       maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800, letterSpacing: 0.3),
                     ),
+                  ),
+                  Text(
+                    "$pctOk%",
+                    style: theme.textTheme.labelMedium?.copyWith(color: tono, fontWeight: FontWeight.w800),
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
+              _BarraMezcla(segmentos: [
+                (ok, StatusColors.exitoso),
+                (error, StatusColors.critico),
+                (demorado, StatusColors.advertencia),
+                (corriendo, StatusColors.info),
+                (resto, colorScheme.outline.withValues(alpha: 0.5)),
+              ]),
+              const SizedBox(height: 14),
               const Spacer(),
               Text(
-                fallas > 0 ? "$fallas en falla" : "Todo OK",
-                style: TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.w700, color: color),
+                resumen,
+                style: theme.textTheme.labelLarge?.copyWith(color: tono, fontWeight: FontWeight.w800),
               ),
+              const SizedBox(height: 1),
               Text(
-                "de $total críticos",
-                style: TextStyle(
-                    fontSize: 10, color: colorScheme.onSurfaceVariant),
+                "de $total $unidad${total == 1 ? "" : "s"}",
+                style: theme.textTheme.labelSmall?.copyWith(color: colorScheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -175,104 +202,31 @@ class _TarjetaCore extends StatelessWidget {
   }
 }
 
-class _TarjetaFuente extends StatelessWidget {
-  final String nombre;
-  final int total;
-  final String unidad;
-  final double porcentaje;
-  final bool seleccionada;
-  final VoidCallback? onTap;
+/// Barra fina con la proporcion de cada estado (verde, rojo, ambar...).
+class _BarraMezcla extends StatelessWidget {
+  const _BarraMezcla({required this.segmentos});
 
-  const _TarjetaFuente({
-    required this.nombre,
-    required this.total,
-    required this.unidad,
-    required this.porcentaje,
-    this.seleccionada = false,
-    this.onTap,
-  });
+  final List<(int, Color)> segmentos;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final color = porcentaje >= 0.9
-        ? StatusColors.exitoso
-        : porcentaje >= 0.7
-            ? StatusColors.advertencia
-            : StatusColors.critico;
-
-    return Material(
-      color: seleccionada ? colorScheme.primary.withValues(alpha: 0.14) : colorScheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Container(
-          width: 148,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: seleccionada ? colorScheme.primary.withValues(alpha: 0.6) : colorScheme.outlineVariant,
-              width: seleccionada ? 1.4 : 1,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+    final visibles = segmentos.where((s) => s.$1 > 0).toList();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(4),
+      child: SizedBox(
+        height: 6,
+        // stretch: sin esto cada segmento (ColoredBox sin hijo) queda de alto 0 y no se ve.
+        child: visibles.isEmpty
+            ? ColoredBox(color: Theme.of(context).colorScheme.outlineVariant, child: const SizedBox.expand())
+            : Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: TweenAnimationBuilder<double>(
-                      tween: Tween(begin: 0, end: porcentaje),
-                      duration: const Duration(milliseconds: 900),
-                      curve: Curves.easeOutCubic,
-                      builder: (context, valorAnimado, _) {
-                        return Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            CircularProgressIndicator(
-                              value: valorAnimado,
-                              strokeWidth: 4,
-                              strokeCap: StrokeCap.round,
-                              backgroundColor: color.withValues(alpha: 0.15),
-                              valueColor: AlwaysStoppedAnimation(color),
-                            ),
-                            Text(
-                              "${(valorAnimado * 100).round()}",
-                              style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                  color: color),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      nombre,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 11.5),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
+                  for (var i = 0; i < visibles.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 2),
+                    Expanded(flex: visibles[i].$1, child: ColoredBox(color: visibles[i].$2)),
+                  ],
                 ],
               ),
-              const Spacer(),
-              Text(
-                "$total $unidad${total == 1 ? '' : 's'}",
-                style: TextStyle(
-                    fontSize: 11, color: colorScheme.onSurfaceVariant),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

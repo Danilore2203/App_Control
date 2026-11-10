@@ -1,6 +1,7 @@
 import "dart:async";
 
 import "package:flutter/material.dart";
+import "package:flutter/services.dart";
 
 import "../models/control.dart";
 import "../services/comandos_service.dart";
@@ -8,10 +9,13 @@ import "../services/ejecucion_actual.dart";
 import "../services/seguimiento_lanzamiento.dart";
 import "../services/sesion_actual.dart";
 import "../theme.dart";
+import "../utils/formato.dart";
+import "titulo_seccion.dart";
 
-/// Abre el detalle de un proceso como bottom sheet (estilo consola/cluster),
-/// con datos reales de dataops_catalogo_procesos: sin inventar metricas que
-/// no tenemos (CPU/memoria/logs), solo lo que el snapshot realmente trae.
+/// Abre el detalle de un proceso (o tabla) como bottom sheet, con lo que el
+/// catalogo realmente trae: estado, la corrida en una linea de tiempo
+/// (programado, inicio, fin y cuanto tardo), los datos tecnicos y, para
+/// administradores, las acciones.
 Future<void> mostrarDetalleProceso(BuildContext context, Control control) {
   return showModalBottomSheet(
     context: context,
@@ -121,11 +125,11 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
     }
 
     return Padding(
-      padding: const EdgeInsets.only(top: 22),
+      padding: const EdgeInsets.only(top: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("ACCIONES", style: AppTextStyles.tech(color: colorScheme.onSurfaceVariant, fontSize: 10)),
+          const Eyebrow("Acciones"),
           const SizedBox(height: 10),
           Row(
             children: [
@@ -227,8 +231,7 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
   Control get control => widget.control;
 
   Color _color(ColorScheme colorScheme) {
-    if (control.esDemorado) return StatusColors.advertencia;
-    switch (control.color) {
+    switch (control.categoria) {
       case "red":
         return StatusColors.critico;
       case "orange":
@@ -244,57 +247,49 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
 
   String _hace(DateTime desde) {
     final diff = _ahora.difference(desde);
-    if (diff.inSeconds < 0) return "recien";
-    if (diff.inMinutes < 1) return "hace ${diff.inSeconds}s";
-    if (diff.inHours < 1) return "hace ${diff.inMinutes}m";
-    if (diff.inDays < 1) return "hace ${diff.inHours}h ${diff.inMinutes % 60}m";
-    return "hace ${diff.inDays}d";
+    if (diff.inSeconds < 0) return "recién";
+    if (diff.inMinutes < 1) return "hace ${diff.inSeconds} s";
+    return "hace ${duracionCorta(diff.inSeconds)}";
   }
 
   String? _sinVacio(String? valor) {
     if (valor == null || valor.trim().isEmpty) return null;
-    return valor;
+    return valor.trim();
   }
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final color = _color(colorScheme);
-    final enEjecucion = control.color == "blue";
-
-    final horaProgramada = _sinVacio(control.horaProgramada);
-    final horaLog = _sinVacio(control.horaLog);
-    final horaFin = _sinVacio(control.horaFin);
+    final enEjecucion = control.categoria == "blue";
+    final esTabla = control.esTabla;
     final ruta = _sinVacio(control.ruta);
     final version = _sinVacio(control.version);
-    final core = _sinVacio(control.core);
-    final esTabla = control.esTabla;
     final layer = _sinVacio(control.layer);
-    final ultimaFecha = _sinVacio(control.ultimaFecha);
-    final catalogo =
-        esTabla ? "dataops_catalogo_tablas" : "dataops_catalogo_procesos";
+    final esCoreProc = control.core?.trim().toLowerCase() == "si";
+    final catalogo = esTabla ? "dataops_catalogo_tablas" : "dataops_catalogo_procesos";
 
-    // Tres casillas arriba: horas de corrida para un proceso; registros,
-    // capa y ultima carga para una tabla.
-    final casillas = esTabla
-        ? [
-            ("REGISTROS", control.cantidadFormateada ?? "—",
-                control.color == "red" ? colorScheme.error : color),
-            ("CAPA", layer?.toUpperCase() ?? "—", colorScheme.secondary),
-            ("ULTIMA CARGA", ultimaFecha ?? horaProgramada ?? "—",
-                colorScheme.onSurfaceVariant),
+    // La corrida (o la carga de la tabla) en una linea de tiempo.
+    final tiempos = esTabla
+        ? <(IconData, String, String?)>[
+            (Icons.event_available_rounded, "Última carga", fechaCatalogo(control.ultimaFecha)),
+            (Icons.schedule_rounded, "Programada", fechaCatalogo(control.horaProgramada)),
           ]
-        : [
-            ("PROGRAMADO", horaProgramada ?? "—", colorScheme.onSurfaceVariant),
-            ("INICIO", horaLog ?? "—", colorScheme.secondary),
-            (
-              "FIN",
-              horaFin ?? "—",
-              control.color == "red" && !control.esDemorado
-                  ? colorScheme.error
-                  : color
-            ),
+        : <(IconData, String, String?)>[
+            (Icons.schedule_rounded, "Programado", fechaCatalogo(control.horaProgramada)),
+            (Icons.play_circle_outline_rounded, "Inicio", fechaCatalogo(control.horaLog)),
+            (Icons.flag_outlined, control.categoria == "red" ? "Falla" : "Fin", fechaCatalogo(control.horaFin)),
+            (Icons.timer_outlined, "Duración", duracionEntre(control.horaLog, control.horaFin)),
           ];
+    final datos = <(String, String, bool)>[
+      if (esTabla && control.cantidadFormateada != null) ("Registros", control.cantidadFormateada!, false),
+      if (layer != null) ("Capa", layer, false),
+      if (version != null) ("Versión", "v$version", false),
+      if (ruta != null) ("Ruta", ruta, true),
+      ("Catálogo", catalogo, true),
+      ("Snapshot", fechaAmigable(control.snapshotTs), false),
+    ];
 
     return SafeArea(
       top: false,
@@ -302,14 +297,11 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
         heightFactor: 0.88,
         child: Container(
           decoration: BoxDecoration(
-            color: Theme.of(context).bottomSheetTheme.backgroundColor ?? colorScheme.surfaceContainerLow,
+            color: theme.bottomSheetTheme.backgroundColor ?? colorScheme.surfaceContainerLow,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             border: Border.all(color: colorScheme.outlineVariant),
             boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.4),
-                  blurRadius: 30,
-                  offset: const Offset(0, -8)),
+              BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 30, offset: const Offset(0, -8)),
             ],
           ),
           child: Column(
@@ -327,7 +319,7 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 18, 12, 0),
+                padding: const EdgeInsets.fromLTRB(20, 14, 8, 0),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -335,58 +327,23 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  control.nombre,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium
-                                      ?.copyWith(
-                                          color: color,
-                                          fontWeight: FontWeight.bold),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: color.withValues(alpha: 0.12),
-                                  border: Border.all(
-                                      color: color.withValues(alpha: 0.4)),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  control.fuente,
-                                  style: AppTextStyles.tech(
-                                      color: color, fontSize: 9),
-                                ),
-                              ),
-                            ],
-                          ),
+                          Eyebrow(esTabla ? "Tabla" : "Proceso"),
                           const SizedBox(height: 4),
-                          Row(
+                          // minLines 1: sin esto reserva el alto de 3 lineas aunque el nombre sea corto.
+                          SelectableText(
+                            control.nombre,
+                            minLines: 1,
+                            maxLines: 3,
+                            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800, height: 1.25),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
                             children: [
-                              Icon(Icons.dns_outlined,
-                                  size: 13,
-                                  color: colorScheme.onSurfaceVariant),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  core ?? ruta ?? catalogo,
-                                  style: AppTextStyles.tech(
-                                    color: colorScheme.onSurfaceVariant,
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w400,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
+                              PillEstado(control.estado, color: color, icono: Icons.circle),
+                              PillEstado(control.fuente, color: colorScheme.outline),
+                              if (esCoreProc) const PillEstado("CORE", color: StatusColors.critico, icono: Icons.bolt_rounded),
                             ],
                           ),
                         ],
@@ -394,97 +351,41 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                     ),
                     IconButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      icon: Icon(Icons.close, color: colorScheme.onSurface),
+                      icon: Icon(Icons.close_rounded, color: colorScheme.onSurface),
                     ),
                   ],
                 ),
               ),
               Expanded(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        children: [
-                          for (var i = 0; i < casillas.length; i++) ...[
-                            if (i > 0) const SizedBox(width: 10),
-                            Expanded(
-                              child: _CasillaStat(
-                                titulo: casillas[i].$1,
-                                valor: casillas[i].$2,
-                                color: casillas[i].$3,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-                      Text(
-                        esTabla ? "ESTADO DE LA TABLA" : "ESTADO DEL PROCESO",
-                        style: AppTextStyles.tech(
-                            color: colorScheme.onSurfaceVariant, fontSize: 10),
-                      ),
-                      const SizedBox(height: 10),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: colorScheme.surface.withValues(alpha: 0.5),
-                          borderRadius: BorderRadius.circular(14),
-                          border:
-                              Border(left: BorderSide(color: color, width: 3)),
-                        ),
-                        padding: const EdgeInsets.all(14),
+                      _Tarjeta(
+                        borde: color.withValues(alpha: 0.35),
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                _IconoEstado(
-                                    color: color,
-                                    animado: enEjecucion,
-                                    colorScheme: colorScheme),
+                                _IconoEstado(color: color, animado: enEjecucion, colorScheme: colorScheme),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         control.estado,
-                                        style: TextStyle(
-                                            color: color,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 14),
+                                        style: theme.textTheme.titleSmall?.copyWith(color: color, fontWeight: FontWeight.w800),
                                       ),
-                                      if (version != null)
-                                        Text(
-                                          "v$version",
-                                          style: TextStyle(
-                                              color:
-                                                  colorScheme.onSurfaceVariant,
-                                              fontSize: 11),
-                                        ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        "Última lectura ${_hace(control.snapshotTs)}",
+                                        style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                                      ),
                                     ],
                                   ),
-                                ),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      _hace(control.snapshotTs),
-                                      style: TextStyle(
-                                          color: color,
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 13),
-                                    ),
-                                    Text(
-                                      "ULTIMA LECTURA",
-                                      style: AppTextStyles.tech(
-                                          color: colorScheme.onSurfaceVariant,
-                                          fontSize: 8),
-                                    ),
-                                  ],
                                 ),
                               ],
                             ),
@@ -493,59 +394,33 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 24),
-                      Text(
-                        "DETALLE TECNICO",
-                        style: AppTextStyles.tech(
-                            color: colorScheme.onSurfaceVariant, fontSize: 10),
-                      ),
-                      const SizedBox(height: 10),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.25),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color: colorScheme.outlineVariant
-                                  .withValues(alpha: 0.4)),
-                        ),
+                      const SizedBox(height: 18),
+                      Eyebrow(esTabla ? "Carga" : "Corrida"),
+                      const SizedBox(height: 8),
+                      _Tarjeta(
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _LineaConsola(
-                              texto: "# $catalogo",
-                              color: colorScheme.onSurfaceVariant
-                                  .withValues(alpha: 0.5),
-                            ),
-                            _LineaConsola(
-                                texto: "fuente: ${control.fuente}",
-                                color: colorScheme.onSurfaceVariant),
-                            _LineaConsola(
-                                texto: "estado: ${control.estado}",
-                                color: color),
-                            if (ruta != null)
-                              _LineaConsola(
-                                  texto: "ruta: $ruta",
-                                  color: colorScheme.onSurfaceVariant),
-                            if (esTabla)
-                              _LineaConsola(
-                                  texto: "registros: ${control.cantidad ?? 0}",
-                                  color: colorScheme.onSurfaceVariant),
-                            if (layer != null)
-                              _LineaConsola(
-                                  texto: "layer: $layer",
-                                  color: colorScheme.onSurfaceVariant),
-                            if (ultimaFecha != null)
-                              _LineaConsola(
-                                  texto: "ultima_fecha: $ultimaFecha",
-                                  color: colorScheme.onSurfaceVariant),
-                            _LineaConsola(
-                              texto:
-                                  "snapshot: ${control.snapshotFecha.toIso8601String().split("T").first} ${control.snapshotTs.toIso8601String().substring(11, 19)}",
-                              color: colorScheme.primary,
-                              conCursor: true,
-                            ),
+                            for (var i = 0; i < tiempos.length; i++)
+                              _FilaTiempo(
+                                icono: tiempos[i].$1,
+                                etiqueta: tiempos[i].$2,
+                                valor: tiempos[i].$3,
+                                tono: tiempos[i].$2 == "Falla" ? StatusColors.critico : null,
+                                conLinea: i < tiempos.length - 1,
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      const Eyebrow("Datos"),
+                      const SizedBox(height: 8),
+                      _Tarjeta(
+                        child: Column(
+                          children: [
+                            for (var i = 0; i < datos.length; i++) ...[
+                              if (i > 0) Divider(height: 18, color: colorScheme.outlineVariant.withValues(alpha: 0.6)),
+                              _FilaDato(etiqueta: datos[i].$1, valor: datos[i].$2, mono: datos[i].$3),
+                            ],
                           ],
                         ),
                       ),
@@ -562,37 +437,83 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
   }
 }
 
-class _CasillaStat extends StatelessWidget {
-  final String titulo;
-  final String valor;
-  final Color color;
+class _Tarjeta extends StatelessWidget {
+  const _Tarjeta({required this.child, this.borde});
 
-  const _CasillaStat(
-      {required this.titulo, required this.valor, required this.color});
+  final Widget child;
+  final Color? borde;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
       decoration: BoxDecoration(
-        color: colorScheme.surface.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
+        color: colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borde ?? colorScheme.outlineVariant),
       ),
-      child: Column(
+      child: child,
+    );
+  }
+}
+
+/// Un paso de la linea de tiempo: icono en un punto, etiqueta y la fecha legible.
+class _FilaTiempo extends StatelessWidget {
+  const _FilaTiempo({required this.icono, required this.etiqueta, required this.valor, this.tono, this.conLinea = true});
+
+  final IconData icono;
+  final String etiqueta;
+  final String? valor;
+  final Color? tono;
+  final bool conLinea;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final hay = valor != null && valor!.isNotEmpty;
+    final color = hay ? (tono ?? acentoTinta(context)) : colorScheme.outline;
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(titulo,
-              style: AppTextStyles.tech(
-                  color: colorScheme.onSurfaceVariant, fontSize: 8.5)),
-          const SizedBox(height: 4),
-          Text(
-            valor,
-            style: AppTextStyles.tech(
-                color: color, fontSize: 12, fontWeight: FontWeight.w700),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          Column(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icono, size: 15, color: color),
+              ),
+              if (conLinea)
+                Expanded(
+                  child: Container(width: 2, margin: const EdgeInsets.symmetric(vertical: 2), color: colorScheme.outlineVariant),
+                ),
+            ],
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(top: 4, bottom: conLinea ? 14 : 2),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(etiqueta, style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant)),
+                  ),
+                  Text(
+                    hay ? valor! : "—",
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: hay ? (tono ?? colorScheme.onSurface) : colorScheme.outline,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -600,65 +521,46 @@ class _CasillaStat extends StatelessWidget {
   }
 }
 
-class _LineaConsola extends StatefulWidget {
-  final String texto;
-  final Color color;
-  final bool conCursor;
+/// Dato tecnico: etiqueta a la izquierda y valor a la derecha (mono y copiable si es un identificador).
+class _FilaDato extends StatelessWidget {
+  const _FilaDato({required this.etiqueta, required this.valor, this.mono = false});
 
-  const _LineaConsola(
-      {required this.texto, required this.color, this.conCursor = false});
-
-  @override
-  State<_LineaConsola> createState() => _LineaConsolaState();
-}
-
-class _LineaConsolaState extends State<_LineaConsola>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 900))
-      ..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  final String etiqueta;
+  final String valor;
+  final bool mono;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          Flexible(
-            child: Text(
-              "> ${widget.texto}",
-              style: AppTextStyles.tech(
-                  color: widget.color,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w400),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (widget.conCursor)
-            FadeTransition(
-              opacity: _controller,
-              child: Text(
-                " _",
-                style: AppTextStyles.tech(
-                    color: widget.color,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700),
-              ),
-            ),
-        ],
-      ),
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 92,
+          child: Text(etiqueta, style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
+        ),
+        Expanded(
+          child: mono
+              ? GestureDetector(
+                  onLongPress: () {
+                    Clipboard.setData(ClipboardData(text: valor));
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$etiqueta copiado.")));
+                  },
+                  child: Text(
+                    valor,
+                    textAlign: TextAlign.right,
+                    style: AppTextStyles.tech(
+                        color: colorScheme.onSurface, fontSize: 11.5, fontWeight: FontWeight.w500, letterSpacing: 0.2),
+                  ),
+                )
+              : Text(
+                  valor,
+                  textAlign: TextAlign.right,
+                  style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+        ),
+      ],
     );
   }
 }
@@ -668,22 +570,19 @@ class _IconoEstado extends StatefulWidget {
   final bool animado;
   final ColorScheme colorScheme;
 
-  const _IconoEstado(
-      {required this.color, required this.animado, required this.colorScheme});
+  const _IconoEstado({required this.color, required this.animado, required this.colorScheme});
 
   @override
   State<_IconoEstado> createState() => _IconoEstadoState();
 }
 
-class _IconoEstadoState extends State<_IconoEstado>
-    with SingleTickerProviderStateMixin {
+class _IconoEstadoState extends State<_IconoEstado> with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller =
-        AnimationController(vsync: this, duration: const Duration(seconds: 2));
+    _controller = AnimationController(vsync: this, duration: const Duration(seconds: 2));
     if (widget.animado) _controller.repeat(reverse: true);
   }
 
@@ -695,8 +594,10 @@ class _IconoEstadoState extends State<_IconoEstado>
 
   IconData get _icono {
     if (widget.animado) return Icons.sync;
-    if (widget.color == widget.colorScheme.error) return Icons.error_outline;
-    return Icons.circle;
+    if (widget.color == StatusColors.critico) return Icons.error_outline_rounded;
+    if (widget.color == StatusColors.exitoso) return Icons.check_circle_outline_rounded;
+    if (widget.color == StatusColors.advertencia) return Icons.schedule_rounded;
+    return Icons.circle_outlined;
   }
 
   @override
@@ -709,21 +610,15 @@ class _IconoEstadoState extends State<_IconoEstado>
         return Transform.scale(
           scale: escala,
           child: Container(
-            width: 36,
-            height: 36,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: widget.color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(color: widget.color.withValues(alpha: 0.3)),
-              boxShadow: widget.animado
-                  ? [
-                      BoxShadow(
-                          color: widget.color.withValues(alpha: 0.35 * t),
-                          blurRadius: 10)
-                    ]
-                  : null,
+              boxShadow: widget.animado ? [BoxShadow(color: widget.color.withValues(alpha: 0.35 * t), blurRadius: 10)] : null,
             ),
-            child: Icon(_icono, color: widget.color, size: 18),
+            child: Icon(_icono, color: widget.color, size: 20),
           ),
         );
       },
@@ -741,15 +636,13 @@ class _BarraEstado extends StatefulWidget {
   State<_BarraEstado> createState() => _BarraEstadoState();
 }
 
-class _BarraEstadoState extends State<_BarraEstado>
-    with SingleTickerProviderStateMixin {
+class _BarraEstadoState extends State<_BarraEstado> with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1400));
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400));
     if (widget.animada) _controller.repeat();
   }
 
@@ -781,8 +674,7 @@ class _BarraEstadoState extends State<_BarraEstado>
           animation: _controller,
           builder: (context, _) {
             return CustomPaint(
-              painter: _BarraShimmerPainter(
-                  color: widget.color, t: _controller.value),
+              painter: _BarraShimmerPainter(color: widget.color, t: _controller.value),
               size: const Size(double.infinity, 4),
             );
           },
@@ -806,11 +698,9 @@ class _BarraShimmerPainter extends CustomPainter {
     final anchoBarra = size.width * 0.35;
     final desplazamiento = (size.width + anchoBarra) * t - anchoBarra;
     final barra = Paint()..color = color;
-    canvas.drawRect(
-        Rect.fromLTWH(desplazamiento, 0, anchoBarra, size.height), barra);
+    canvas.drawRect(Rect.fromLTWH(desplazamiento, 0, anchoBarra, size.height), barra);
   }
 
   @override
-  bool shouldRepaint(covariant _BarraShimmerPainter oldDelegate) =>
-      oldDelegate.t != t;
+  bool shouldRepaint(covariant _BarraShimmerPainter oldDelegate) => oldDelegate.t != t;
 }
