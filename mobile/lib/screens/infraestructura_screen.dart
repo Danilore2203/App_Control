@@ -22,7 +22,7 @@ import "../widgets/titulo_seccion.dart";
 class InfraestructuraScreen extends StatelessWidget {
   const InfraestructuraScreen({super.key, this.escenaInicial = 0});
 
-  /// 0 Netezza, 1 Bloqueos, 2 PG DEV, 3 PG PROD.
+  /// 0 Netezza (con sus bloqueos), 1 PG DEV, 2 PG PROD.
   final int escenaInicial;
 
   @override
@@ -50,7 +50,7 @@ typedef _DatosNz = ({List<NetezzaSesion> activas, List<NetezzaSesion> idle});
 typedef _DatosPg = ({List<PostgresSesion> filas, int total, int activas});
 
 class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
-  static const _escenas = ["Netezza", "Bloqueos", "PG DEV", "PG PROD"];
+  static const _escenas = ["Netezza", "PG DEV", "PG PROD"];
   static const _cadaBloqueos = Duration(seconds: 30);
 
   final _infra = InfraService();
@@ -81,10 +81,10 @@ class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
     _devFuture = _pg(prod: false);
     _prodFuture = _pg(prod: true);
     _cargarBloqueos();
-    // La espera de una sesion se mide entre lecturas: mientras se mira la
-    // pestaña se vuelve a revisar sola, como la web.
+    // La espera de una sesion se mide entre lecturas: mientras se mira
+    // Netezza los bloqueos se vuelven a revisar solos, como la web.
     _relojBloqueos = Timer.periodic(_cadaBloqueos, (_) {
-      if (mounted && _escena == 1) _cargarBloqueos();
+      if (mounted && _escena == 0) _cargarBloqueos();
     });
   }
 
@@ -177,10 +177,10 @@ class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
           child: PestanasSimples(
             seleccionada: _escena,
             opciones: _escenas,
-            alertas: [0, _bloqueos?.alertas ?? 0, _bloqueadasDev, _bloqueadasProd],
+            alertas: [_bloqueos?.alertas ?? 0, _bloqueadasDev, _bloqueadasProd],
             onCambiar: (i) {
               setState(() => _escena = i);
-              if (i == 1) _cargarBloqueos();
+              if (i == 0) _cargarBloqueos();
             },
           ),
         ),
@@ -188,8 +188,7 @@ class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
         Expanded(
           child: switch (_escena) {
             0 => _vistaNetezza(),
-            1 => _vistaBloqueos(),
-            2 => _vistaPostgres(prod: false),
+            1 => _vistaPostgres(prod: false),
             _ => _vistaPostgres(prod: true),
           },
         ),
@@ -222,7 +221,6 @@ class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
           ..sort((a, b) => (b.qsEstcost ?? 0).compareTo(a.qsEstcost ?? 0));
         final idle = snapshot.data!.idle;
         final pesadas = activas.where((s) => (s.qsEstcost ?? 0) >= costoAlto).length;
-        final b = _bloqueos;
 
         return RefreshIndicator(
           onRefresh: () async {
@@ -237,20 +235,10 @@ class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
                 ("Idle", "${idle.length}", null, Icons.pause_circle_outline_rounded),
                 ("Pesadas", "$pesadas", pesadas > 0 ? StatusColors.advertencia : null, Icons.speed_rounded),
               ]),
-              if (b != null && b.alertas > 0) ...[
-                const SizedBox(height: 12),
-                AvisoTocable(
-                  texto: _textoAvisoBloqueos(b),
-                  icono: Icons.lock_outline_rounded,
-                  color: StatusColors.critico,
-                  accion: "Ver",
-                  onTap: () {
-                    setState(() => _escena = 1);
-                    _cargarBloqueos();
-                  },
-                ),
-              ],
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
+              // Bloqueos arriba de las sesiones: lo primero que hay que ver si algo se traba.
+              _bloqueNetezza(),
+              const SizedBox(height: 6),
               TituloSeccion("Sesiones activas", accion: _contador(activas.length)),
               const SizedBox(height: 8),
               if (activas.isEmpty)
@@ -306,16 +294,6 @@ class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
     );
   }
 
-  String _textoAvisoBloqueos(BloqueosNetezza b) {
-    final partes = <String>[
-      if (b.cuenta("esperando") > 0) "${b.cuenta("esperando")} esperando",
-      if (b.cuenta("bloqueadoras") > 0) "${b.cuenta("bloqueadoras")} las frenan",
-      if (b.cuenta("sin_avance") > 0) "${b.cuenta("sin_avance")} sin avanzar",
-      if (b.cuenta("en_cola") > 0) "${b.cuenta("en_cola")} en cola",
-    ];
-    return "Netezza: ${partes.join(" · ")}.";
-  }
-
   Widget _contador(int n) => Text(
         "$n",
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
@@ -324,33 +302,42 @@ class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
             ),
       );
 
-  // ---- Bloqueos ----
+  // ---- Bloqueos de Netezza (dentro de la vista de Netezza) ----
 
-  Widget _vistaBloqueos() {
+  Widget _bloqueNetezza() {
     final b = _bloqueos;
+    final error = _errorBloqueos?.toString().replaceFirst("Exception: ", "");
     if (b == null) {
-      if (_errorBloqueos != null) return _error(_errorBloqueos!, _cargarBloqueos);
-      return const Center(child: CircularProgressIndicator());
+      if (error != null) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: AvisoTocable(
+            texto: "No se pudieron revisar los bloqueos: $error",
+            icono: Icons.sync_problem_rounded,
+            color: StatusColors.advertencia,
+            accion: "Reintentar",
+            onTap: _cargarBloqueos,
+          ),
+        );
+      }
+      return const Padding(
+        padding: EdgeInsets.only(bottom: 10),
+        child: MensajeInline("Revisando bloqueos…", color: StatusColors.info, icono: Icons.lock_clock_outlined),
+      );
     }
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_errorBloqueos != null)
+        if (error != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: MensajeInline(
-              "No se pudo actualizar: ${_errorBloqueos.toString().replaceFirst("Exception: ", "")}",
-              color: StatusColors.advertencia,
-              icono: Icons.sync_problem_rounded,
-            ),
+            padding: const EdgeInsets.only(bottom: 10),
+            child: MensajeInline("No se pudo actualizar: $error", color: StatusColors.advertencia, icono: Icons.sync_problem_rounded),
           ),
-        Expanded(
-          child: BloqueosNetezzaVista(
-            datos: b,
-            actualizando: _cargandoBloqueos,
-            onRefrescar: _cargarBloqueos,
-            onAbortar: _esAdmin ? (s) => _abortar(s.sessionId) : null,
-            onMatar: _esAdmin ? (s) => _matar(s.sessionId) : null,
-          ),
+        BloqueosNetezzaVista(
+          datos: b,
+          actualizando: _cargandoBloqueos,
+          onAbortar: _esAdmin ? (s) => _abortar(s.sessionId) : null,
+          onMatar: _esAdmin ? (s) => _matar(s.sessionId) : null,
         ),
       ],
     );
