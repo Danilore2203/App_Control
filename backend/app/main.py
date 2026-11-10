@@ -55,6 +55,7 @@ def _migrar_columnas_legacy():
         ("poller_state", "ultimo_cambio_revisado INTEGER NOT NULL DEFAULT 0"),
         ("bitacora_errores", "origen_id INTEGER"),
         ("usuarios", "password_hash_web VARCHAR(255)"),
+        ("administradores", "origen VARCHAR(10)"),
     )
     for tabla, columna in columnas_nuevas:
         with engine.begin() as conn:

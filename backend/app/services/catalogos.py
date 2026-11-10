@@ -142,9 +142,9 @@ def _aplicar_usuarios(db: Session, seccion: schemas.UsuariosIn) -> schemas.Usuar
     """Replica la tabla usuarios de MySQL (cuentas del monitor web) por
     username. MySQL manda en todo menos en lo que es propio de la app: si un
     usuario ya tiene email_google vinculado aca y alla viene vacio, se
-    conserva. Nunca borra usuarios ni quita administradores (los admins de
-    MySQL se suman a los que ya haya aca, p.ej. el primero creado por
-    /internal/administradores)."""
+    conserva. Nunca borra usuarios. Los administradores de MySQL se suman a
+    los de aca, y el que deja de serlo alla deja de serlo aca; los designados
+    en la app (p.ej. el primero, por /internal/administradores) se quedan."""
     from sqlalchemy import func
 
     por_username = {u.username.lower(): u for u in db.query(models.Usuario).all()}
@@ -194,18 +194,36 @@ def _aplicar_usuarios(db: Session, seccion: schemas.UsuariosIn) -> schemas.Usuar
             existente.email_google = fila.email_google
     db.flush()
 
-    nuevos_admin = 0
+    nuevos_admin = quitados_admin = 0
+    admins_web: set[int] = set()
     for username in seccion.administradores:
         usuario = por_username.get(username.strip().lower())
         if usuario is None:
             continue
+        admins_web.add(usuario.id)
         ya = db.query(models.Administrador).filter(models.Administrador.usuario_id == usuario.id).first()
         if ya is None:
-            db.add(models.Administrador(usuario_id=usuario.id))
+            db.add(models.Administrador(usuario_id=usuario.id, origen="web"))
             nuevos_admin += 1
+        elif ya.origen is None:
+            ya.origen = "web"
+
+    # Quien dejo de ser administrador en la web deja de serlo aca. Solo los
+    # que vinieron de la web: los designados en la app se quedan. Una lista
+    # vacia se ignora: es mas probable una lectura fallida en OP_PROD que una
+    # web sin ningun administrador, y vaciarla dejaria la app sin ninguno.
+    if admins_web:
+        for admin in db.query(models.Administrador).filter(models.Administrador.origen == "web").all():
+            if admin.usuario_id not in admins_web:
+                db.delete(admin)
+                quitados_admin += 1
 
     return schemas.UsuariosOut(
-        insertados=insertados, actualizados=actualizados, administradores_nuevos=nuevos_admin, omitidos=omitidos
+        insertados=insertados,
+        actualizados=actualizados,
+        administradores_nuevos=nuevos_admin,
+        administradores_quitados=quitados_admin,
+        omitidos=omitidos,
     )
 
 

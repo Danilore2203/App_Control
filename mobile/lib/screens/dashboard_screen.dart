@@ -18,6 +18,7 @@ import "infraestructura_screen.dart";
 import "../widgets/alerta_banner.dart";
 import "../widgets/app_drawer.dart";
 import "../widgets/barra_navegacion.dart";
+import "../widgets/boton_actualizar_todos.dart";
 import "../widgets/indicador_ejecucion.dart";
 import "../services/ejecucion_actual.dart";
 import "../widgets/detalle_proceso_sheet.dart";
@@ -345,7 +346,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final puedeActualizar = (_usuario?.esAdmin ?? false) && _vista != "GENERAL";
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 8, 8),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       child: Row(
         children: [
           Text(_tituloLista, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
@@ -356,18 +357,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const Spacer(),
           if (puedeActualizar)
-            TextButton.icon(
-              onPressed: _actualizandoTodos ? null : _actualizarTodos,
-              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-              icon: _actualizandoTodos
-                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text("Actualizar todos"),
+            // Sigue la barra de avance: mientras OP_PROD relanza en lotes, el
+            // boton gira y muestra cuantos lleva, y no se puede volver a tocar.
+            ValueListenableBuilder<EstadoEjecucion?>(
+              valueListenable: EjecucionActual.notifier,
+              builder: (context, e, _) {
+                final enCurso = e != null && e.titulo == _tituloActualizarTodos && !e.terminado;
+                return BotonActualizarTodos(
+                  onPressed: _actualizarTodos,
+                  ocupado: _actualizandoTodos || enCurso,
+                  completados: enCurso ? e.completados : null,
+                  total: enCurso ? e.total : null,
+                );
+              },
             ),
         ],
       ),
     );
   }
+
+  String get _tituloActualizarTodos =>
+      _vista == "TABLAS" ? "Actualizar todas las tablas" : "Actualizar todos los procesos";
 
   bool _actualizandoTodos = false;
 
@@ -393,7 +403,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (confirmar != true || !mounted) return;
     setState(() => _actualizandoTodos = true);
     final que = esTablas ? "tablas" : "procesos";
-    final titulo = esTablas ? "Actualizar todas las tablas" : "Actualizar todos los procesos";
+    final titulo = _tituloActualizarTodos;
     try {
       final r = await ComandosService().ejecutar(
         esTablas ? "tablas.actualizar_todos" : "procesos.actualizar_todos",

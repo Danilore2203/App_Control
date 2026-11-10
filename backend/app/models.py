@@ -202,6 +202,11 @@ class Administrador(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False, unique=True)
+    # "web": viene de la lista de administradores del monitor web (push de
+    # usuarios) y se quita cuando alla deja de serlo. "app": designado aca a
+    # proposito (/internal/administradores); el push no lo toca. NULL: de
+    # antes de esta columna; si aparece en la lista de la web pasa a "web".
+    origen = Column(String(10), nullable=True)
 
 
 class BitacoraError(Base):

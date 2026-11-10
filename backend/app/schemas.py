@@ -450,6 +450,7 @@ class UsuariosOut(BaseModel):
     insertados: int
     actualizados: int
     administradores_nuevos: int
+    administradores_quitados: int = 0  # dejaron de ser administradores en la web
     omitidos: list[str]  # usernames cuyo email ya pertenece a otro usuario local
 
 
