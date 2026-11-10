@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <!--
+    `--base-href` de `flutter build web` reemplaza este valor. El backend
+    la sirve en /app/ (ver mobile/publicar_web.sh).
+  -->
+  <base href="/app/">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Controles · Monitoreo y alertas de Centinela DWH">
+  <meta name="theme-color" content="#101312">
+
+  <!-- iPhone: «Agregar a pantalla de inicio» la abre a pantalla completa, como una app -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Controles">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>Controles</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    html, body { margin: 0; height: 100%; background: #101312; }
+    #cargando {
+      position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 14px; color: #9aa39f;
+      font: 600 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #cargando img { width: 72px; height: 72px; border-radius: 18px; }
+  </style>
+</head>
+<body>
+  <div id="cargando"><img src="icons/Icon-192.png" alt=""><span>Cargando Controles…</span></div>
+  <script>
+    // Se quita el aviso de carga apenas Flutter dibuja la primera pantalla.
+    window.addEventListener("flutter-first-frame", function () {
+      var el = document.getElementById("cargando");
+      if (el) el.remove();
+    });
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

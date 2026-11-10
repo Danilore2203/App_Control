@@ -1,0 +1,2 @@
+# Version web generada por mobile/publicar_web.sh: se sube tal cual, sin tocar fines de linea.
+backend/web_app/** -text linguist-generated=true

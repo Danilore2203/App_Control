@@ -1,3 +1,4 @@
+import "package:flutter/foundation.dart" show kIsWeb;
 import "package:flutter/material.dart";
 
 import "../services/auth_service.dart";
@@ -309,10 +310,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                         onPressed: _irACrearCuenta,
                                         child: const Text("¿No tienes cuenta? Crear cuenta"),
                                       ),
-                                      const SizedBox(height: 8),
-                                      const _Separador(texto: "o ingresá con"),
-                                      const SizedBox(height: 16),
-                                      _BotonAncho(onTap: _iniciarSesionConGoogle),
+                                      // En la version web (Safari en iPhone) Google no esta
+                                      // autorizado para ese dominio: solo usuario y contraseña.
+                                      if (!kIsWeb) ...[
+                                        const SizedBox(height: 8),
+                                        const _Separador(texto: "o ingresá con"),
+                                        const SizedBox(height: 16),
+                                        _BotonAncho(onTap: _iniciarSesionConGoogle),
+                                      ],
                                     ],
                                   ],
                                 ),
