@@ -34,7 +34,8 @@ class _RaScreenState extends State<RaScreen> {
   @override
   void initState() {
     super.initState();
-    _future = _cargar();
+    // Sin permisos no se pide nada: el backend lo rechazaria igual.
+    _future = SesionActual.esAdmin ? _cargar() : Future.value(const RaMonitor(filas: [], resumen: {}));
   }
 
   Future<RaMonitor> _cargar() async {
@@ -68,7 +69,7 @@ class _RaScreenState extends State<RaScreen> {
       final errores = r.conError;
       EjecucionActual.mostrar(EstadoEjecucion(
         titulo: _titulo,
-        detalle: errores == 0 ? "${r.mensaje} (${_duracion(r.duracionSeg)})" : "${r.mensaje} (${_duracion(r.duracionSeg)})",
+        detalle: "${r.mensaje} (${_duracion(r.duracionSeg)})",
         fase: errores == 0 ? FaseEjecucion.listo : FaseEjecucion.error,
         progreso: 1,
       ));
@@ -94,7 +95,17 @@ class _RaScreenState extends State<RaScreen> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final esAdmin = SesionActual.esAdmin;
+    if (!SesionActual.esAdmin) {
+      return Scaffold(
+        appBar: AppBar(title: const Text("Monitor RA")),
+        body: EstadoVacio(
+          icono: Icons.lock_outline_rounded,
+          mensaje: "Solo administradores",
+          detalle: "El Monitor RA está disponible solo para administradores.",
+          colorIcono: colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text("Monitor RA"),
@@ -134,14 +145,12 @@ class _RaScreenState extends State<RaScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
-                if (esAdmin) ...[
-                  _TarjetaActualizar(
-                    actualizando: _actualizando,
-                    onActualizar: _actualizando ? null : _actualizar,
-                    ultima: _ultima,
-                  ),
-                  const SizedBox(height: 14),
-                ],
+                _TarjetaActualizar(
+                  actualizando: _actualizando,
+                  onActualizar: _actualizando ? null : _actualizar,
+                  ultima: _ultima,
+                ),
+                const SizedBox(height: 14),
                 _Resumen(
                   monitor: m,
                   seleccionado: _filtroColor,

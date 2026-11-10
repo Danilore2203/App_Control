@@ -117,6 +117,14 @@ class AppDrawer extends StatelessWidget {
                     activo: tabActual == 3,
                     onTap: () => _irATab(context, 3),
                   ),
+                  // Monitor RA: solo administradores (el backend tambien lo exige).
+                  if (usuario?.esAdmin ?? false)
+                    _ItemMenu(
+                      icono: Icons.sync_rounded,
+                      texto: "Monitor RA",
+                      subtitulo: "Archivos FTP y actualizar ahora",
+                      onTap: () => _abrir(context, const RaScreen()),
+                    ),
                   const _SeccionMenu("Más"),
                   _ItemMenu(
                     icono: Icons.dns_outlined,
@@ -136,12 +144,6 @@ class AppDrawer extends StatelessWidget {
                   ),
                   if (usuario?.esAdmin ?? false) ...[
                     const _SeccionMenu("Administración"),
-                    _ItemMenu(
-                      icono: Icons.sync_rounded,
-                      texto: "Monitor RA",
-                      subtitulo: "Archivos FTP y actualizar ahora",
-                      onTap: () => _abrir(context, const RaScreen()),
-                    ),
                     _ItemMenu(
                       icono: Icons.how_to_reg_outlined,
                       texto: "Solicitudes de acceso",
