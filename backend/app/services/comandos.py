@@ -37,6 +37,7 @@ TIPOS_COMANDO: dict[str, bool] = {
     "procesos.actualizar_todos.estado": False,
     "tablas.actualizar_todos": True,
     "tablas.actualizar_todos.estado": False,
+    "tablas.serie": False,  # payload: {"tabla": str}; filas cargadas por dia (ultimos 40), la grafica de la web
     # Airflow
     "airflow.trigger": True,  # payload: {"dag_id": str}
     "airflow.pausar": True,  # payload: {"dag_id": str, "pausar": bool}

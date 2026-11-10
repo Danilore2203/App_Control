@@ -9,6 +9,7 @@ import "../services/seguimiento_lanzamiento.dart";
 import "../services/sesion_actual.dart";
 import "../theme.dart";
 import "../utils/formato.dart";
+import "grafica_filas.dart";
 import "titulo_seccion.dart";
 
 /// Abre el detalle de un proceso (o tabla) como bottom sheet, con lo que el
@@ -377,6 +378,12 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                           ],
                         ),
                       ),
+                      if (esTabla) ...[
+                        const SizedBox(height: 18),
+                        const Eyebrow("Filas por día · últimos 40 días"),
+                        const SizedBox(height: 8),
+                        _Tarjeta(child: GraficaFilasPorDia(tabla: control.nombre)),
+                      ],
                       const SizedBox(height: 18),
                       const Eyebrow("Datos"),
                       const SizedBox(height: 8),
