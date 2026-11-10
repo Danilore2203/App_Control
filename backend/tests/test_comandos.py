@@ -52,8 +52,12 @@ def test_seguir_la_corrida_lanzada_lo_puede_pedir_cualquiera(db):
     assert (c.estado, c.payload["nombre"]) == ("pendiente", "X")
 
 
-@pytest.mark.parametrize("tipo", ["ra.resumen", "ra.actualizar_todos"])
-def test_monitor_ra_solo_administradores(db, tipo):
+@pytest.mark.parametrize("tipo", [
+    "ra.resumen", "ra.actualizar_todos",
+    "reportes.resumen", "reportes.lanzar", "reportes.lanzar.estado", "reportes.cola.candidatos",
+    "reportes.cola.iniciar", "reportes.cola.estado", "reportes.cola.detener",
+])
+def test_monitor_ra_y_reportes_solo_administradores(db, tipo):
     ana = usuario(db, "ana")
     admin = usuario(db, "root", admin=True)
     with pytest.raises(HTTPException) as exc:

@@ -41,6 +41,14 @@ TIPOS_COMANDO: dict[str, bool] = {
     # RA (archivos FTP -> MySQL, el «Actualizar» del Monitor RA de la web)
     "ra.resumen": True,  # devuelve filas del monitor RA + contadores por estado (solo administradores)
     "ra.actualizar_todos": True,  # sincroniza todas las configuraciones FTP activas y devuelve el resumen
+    # Reportes (Monitor FTP de la web: Excel que se abren en el servidor 208). Todo solo administradores.
+    "reportes.resumen": True,  # reportes con su estado, contadores y la cola del 208
+    "reportes.lanzar": True,  # payload: {"archivo": str}; abre el libro en el 208 (respeta el maximo abiertos)
+    "reportes.lanzar.estado": True,  # payload: {"job_id": str}; como va esa apertura
+    "reportes.cola.candidatos": True,  # que entraria a la cola y que no
+    "reportes.cola.iniciar": True,  # «Iniciar cola»: abre los elegibles, cada uno a su hora
+    "reportes.cola.estado": True,
+    "reportes.cola.detener": True,  # «Cancelar pendientes»
 }
 
 # Si OP_PROD no lo retiro en este tiempo esta caido o sin red: la app no
