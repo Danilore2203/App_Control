@@ -15,18 +15,19 @@ String _plural(int n, String uno, String varios) => "$n ${n == 1 ? uno : varios}
 /// quien frena a quien (y por que tabla), las que no avanzan, las que estan
 /// en cola y quien ocupa el turno, las que esperan sin culpable a la vista,
 /// y las transacciones abiertas. Administradores: abortar o matar.
+///
+/// Es un bloque (Column), no una lista: va dentro de la vista de Netezza,
+/// arriba de las sesiones.
 class BloqueosNetezzaVista extends StatelessWidget {
   const BloqueosNetezzaVista({
     super.key,
     required this.datos,
-    required this.onRefrescar,
     this.actualizando = false,
     this.onAbortar,
     this.onMatar,
   });
 
   final BloqueosNetezza datos;
-  final Future<void> Function() onRefrescar;
   final bool actualizando;
   final ValueChanged<SesionBloqueo>? onAbortar;
   final ValueChanged<SesionBloqueo>? onMatar;
@@ -37,7 +38,7 @@ class BloqueosNetezzaVista extends StatelessWidget {
     final minimo = d.esperaMinS;
     final hijos = <Widget>[
       _Encabezado(datos: d, actualizando: actualizando),
-      const SizedBox(height: 16),
+      const SizedBox(height: 14),
     ];
 
     FilaBloqueo fila(SesionBloqueo s, {required String tiempo, required String etiqueta, required Color tono,
@@ -221,6 +222,8 @@ class BloqueosNetezzaVista extends StatelessWidget {
       ));
     }
 
+    if (d.todoEnOrden) return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: hijos);
+
     hijos.add(_Plegable(
       titulo: "Cómo se calcula",
       hijos: [
@@ -231,20 +234,14 @@ class BloqueosNetezzaVista extends StatelessWidget {
             "y del historial de consultas. Una sesión cuenta como esperando cuando lleva $minimo s sin poder empezar su consulta.\n\n"
             "«No avanzan»: corren hace más de ${duracionCorta(d.largaMinS)} y en ${duracionCorta(d.sinAvanceS)} no cambian de paso "
             "ni devuelven filas. Un paso pesado puede tardar eso y estar bien. Toca el chip de color para ver qué la frena.\n\n"
-            "Se revisa sola cada 30 s mientras estás en esta pestaña.",
+            "Se revisa sola cada 30 s mientras estás en la pestaña Netezza.",
             style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.45),
           ),
         ),
       ],
     ));
 
-    return RefreshIndicator(
-      onRefresh: onRefrescar,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-        children: hijos,
-      ),
-    );
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: hijos);
   }
 
   static (String?, String?) _causaTrabada(SesionBloqueo t) {

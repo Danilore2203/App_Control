@@ -690,7 +690,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _BannerBloqueosProd(
               cantidad: _bloqueadasProd,
               onVerDetalle: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const InfraestructuraScreen(escenaInicial: 3)),
+                MaterialPageRoute(builder: (_) => const InfraestructuraScreen(escenaInicial: 2)),
               ),
               onCerrar: () => setState(() => _bannerBloqueosDescartado = true),
             ),

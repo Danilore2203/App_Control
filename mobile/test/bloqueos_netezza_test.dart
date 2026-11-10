@@ -126,12 +126,17 @@ void main() {
     var abortadas = <int>[];
     await tester.pumpWidget(MaterialApp(
       theme: AppTheme.dark,
+      // Va dentro de la lista de Netezza: aca, dentro de una lista cualquiera.
       home: Scaffold(
-        body: BloqueosNetezzaVista(
-          datos: BloqueosNetezza.fromJson(_respuesta),
-          onRefrescar: () async {},
-          onAbortar: (s) => abortadas.add(s.sessionId),
-          onMatar: (_) {},
+        body: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            BloqueosNetezzaVista(
+              datos: BloqueosNetezza.fromJson(_respuesta),
+              onAbortar: (s) => abortadas.add(s.sessionId),
+              onMatar: (_) {},
+            ),
+          ],
         ),
       ),
     ));
@@ -156,10 +161,11 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       theme: AppTheme.light,
       home: Scaffold(
-        body: BloqueosNetezzaVista(datos: BloqueosNetezza.fromJson(const {"resumen": {}}), onRefrescar: () async {}),
+        body: ListView(children: [BloqueosNetezzaVista(datos: BloqueosNetezza.fromJson(const {"resumen": {}}))]),
       ),
     ));
     expect(find.textContaining("Todo en orden"), findsOneWidget);
+    expect(find.text("Cómo se calcula"), findsNothing); // sin problemas, sin la ayuda
   });
 
   testWidgets("tarjetas de sesiones de Netezza y PostgreSQL", (tester) async {
