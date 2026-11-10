@@ -165,7 +165,7 @@ def test_usuarios_de_mysql_se_replican_por_username_sin_tocar_lo_local(db):
     )
     out = aplicar_push_catalogos(db, envio)
 
-    assert out.usuarios.model_dump(exclude_none=True) == {"insertados": 3, "actualizados": 0, "administradores_nuevos": 1, "omitidos": []}
+    assert out.usuarios.model_dump(exclude_none=True) == {"insertados": 3, "actualizados": 0, "administradores_nuevos": 1, "administradores_quitados": 0, "omitidos": []}
     darejas = db.query(models.Usuario).filter_by(username="darejas").one()
     assert (darejas.password_hash, darejas.email) == ("$2b$12$x", "Danilo.Rejas@nuevatel.com")
     assert db.query(models.Usuario).filter_by(username="jebutron").one().password_hash is None
@@ -343,3 +343,41 @@ def test_un_completo_sin_relaciones_no_las_borra(db):
     out = aplicar_push_catalogos(db, envio)
     assert out.relaciones.eliminadas == 0 and "no se borra nada" in out.relaciones.advertencia
     assert db.query(models.ProcesoTabla).count() == 30
+
+
+def test_quien_deja_de_ser_admin_en_la_web_deja_de_serlo_en_la_app(db):
+    from app.services.usuarios import designar_administrador
+
+    # Designado a proposito en la app (como el primer administrador).
+    designar_administrador(db, "jefe@nuevatel.com", "Jefe")
+    # De antes de la columna origen: estaba como admin y la web lo sigue listando.
+    db.add(models.Usuario(username="viejo", email="viejo@nuevatel.com", activo=True))
+    db.commit()
+    db.add(models.Administrador(usuario_id=db.query(models.Usuario).filter_by(username="viejo").one().id))
+    db.commit()
+
+    def enviar(admins):
+        envio = push(completo=True)
+        envio.usuarios = schemas.UsuariosIn(
+            upsert=[usuario_mysql("ana", "ana@nuevatel.com"), usuario_mysql("beto", "beto@nuevatel.com"),
+                    usuario_mysql("viejo", "viejo@nuevatel.com")],
+            administradores=admins,
+        )
+        out = aplicar_push_catalogos(db, envio)
+        db.commit()
+        nombres = {db.get(models.Usuario, a.usuario_id).username for a in db.query(models.Administrador).all()}
+        return out.usuarios, nombres
+
+    out, admins = enviar(["ana", "beto", "viejo"])
+    assert (out.administradores_nuevos, out.administradores_quitados) == (2, 0)
+    assert admins == {"jefe", "ana", "beto", "viejo"}
+
+    # En la web le quitan el permiso a beto y a viejo.
+    out, admins = enviar(["ana"])
+    assert (out.administradores_nuevos, out.administradores_quitados) == (0, 2)
+    assert admins == {"jefe", "ana"}  # el designado en la app se queda
+
+    # Una lista vacia (lectura fallida en OP_PROD) no deja la app sin administradores.
+    out, admins = enviar([])
+    assert out.administradores_quitados == 0
+    assert admins == {"jefe", "ana"}

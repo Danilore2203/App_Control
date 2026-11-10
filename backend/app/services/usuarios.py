@@ -58,8 +58,12 @@ def designar_administrador(db: Session, email: str, nombre: str | None = None) -
             usuario.email_google = email
 
     ya_admin = db.query(models.Administrador).filter(models.Administrador.usuario_id == usuario.id).first()
+    # Designado a proposito en la app: el push de la web no se lo quita
+    # aunque alla no sea administrador.
     if ya_admin is None:
-        db.add(models.Administrador(usuario_id=usuario.id))
+        db.add(models.Administrador(usuario_id=usuario.id, origen="app"))
+    else:
+        ya_admin.origen = "app"
 
     solicitud = (
         db.query(models.SolicitudAccesoGoogle)
