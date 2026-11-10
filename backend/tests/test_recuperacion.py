@@ -273,3 +273,44 @@ def test_diagnostico_dice_por_que_no_llega_sin_mostrar_el_codigo(db):
     assert (d["correo"], d["puede_pedir"], d["codigos_ultima_hora"]) == ("A***@nuevatel.com", True, 0)
     assert [(c["estado"], c["error"]) for c in d["correos_24h"]] == [("error", "SMTP caido")]
     assert codigo not in json.dumps(d)
+
+
+def test_un_administrador_genera_el_codigo_cuando_el_correo_no_llega(db):
+    from app.routers.admin import buscar_usuarios, generar_codigo_recuperacion
+
+    admin = usuario(db, "root", email="root@nuevatel.com")
+    db.add(models.Administrador(usuario_id=admin.id))
+    jhoj = usuario(db, "jhojrodriguez", email="Jhojans.Rodriguez@nuevatel.com")
+    db.commit()
+    # Ya pidio 3 por correo (no le llegaron): el del administrador igual sirve.
+    for i in range(3):
+        R.solicitar(db, "jhojrodriguez", ahora=datetime.utcnow())
+    correos_antes = db.query(models.Comando).count()
+
+    encontrados = buscar_usuarios(q="jhojans", db=db, _admin=admin)
+    assert [u.username for u in encontrados] == ["jhojrodriguez"]
+    assert [u.username for u in buscar_usuarios(q="%", db=db, _admin=admin)] == []  # sin comodines
+
+    out = generar_codigo_recuperacion(jhoj.id, db=db, admin=admin)
+    assert (out.username, out.minutos, len(out.codigo)) == ("jhojrodriguez", 30, 6)
+    assert db.query(models.Comando).count() == correos_antes  # no manda correo
+    # El correo que seguia en la cola ya no sale (llevaria un codigo anulado).
+    assert all(c.estado != "pendiente" for c in db.query(models.Comando).all())
+
+    assert R.restablecer(db, "jhojrodriguez", out.codigo, NUEVA) is not None
+    assert R.restablecer(db, "jhojrodriguez", out.codigo, NUEVA) is None  # una sola vez
+
+
+def test_codigo_de_administrador_no_para_cuentas_desactivadas(db):
+    import pytest
+    from fastapi import HTTPException
+
+    from app.routers.admin import generar_codigo_recuperacion
+
+    admin = usuario(db, "root", email="root@nuevatel.com")
+    baja = usuario(db, "baja", email="baja@nuevatel.com")
+    baja.activo = False
+    db.commit()
+    with pytest.raises(HTTPException) as exc:
+        generar_codigo_recuperacion(baja.id, db=db, admin=admin)
+    assert exc.value.status_code == 400

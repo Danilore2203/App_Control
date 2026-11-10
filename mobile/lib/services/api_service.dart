@@ -10,6 +10,7 @@ import "../models/control.dart";
 import "../models/historial_falla.dart";
 import "../models/solicitud_acceso.dart";
 import "../models/usuario.dart";
+import "../utils/formato.dart";
 import "api_client.dart";
 import "auth_service.dart";
 
@@ -166,6 +167,36 @@ class ApiService {
 
     final todas = [...google, ...registro]..sort((a, b) => b.creadoEn.compareTo(a.creadoEn));
     return todas;
+  }
+
+  /// Cuentas para Administración → Usuarios (por usuario, nombre o correo).
+  Future<List<Usuario>> buscarUsuarios(String texto) async {
+    final uri = Uri.parse("${AppConfig.apiBaseUrl}/admin/usuarios").replace(queryParameters: {"q": texto, "limite": "60"});
+    final response = await ApiClient.enviar(() async => http
+        .get(uri, headers: await _headers())
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
+    if (response.statusCode != 200) {
+      throw Exception(_extraerDetalleError(response, "No se pudieron cargar los usuarios"));
+    }
+    return (jsonDecode(response.body) as List).map((j) => Usuario.fromJson(j as Map<String, dynamic>)).toList();
+  }
+
+  /// Código de un solo uso para que esa persona cambie su contraseña sin
+  /// correo («Olvidé mi contraseña» → «Ya tengo un código»).
+  Future<({String codigo, int minutos, DateTime expiraEn})> generarCodigoRecuperacion(int usuarioId) async {
+    final response = await ApiClient.enviar(() async => http
+        .post(Uri.parse("${AppConfig.apiBaseUrl}/admin/usuarios/$usuarioId/codigo-recuperacion"),
+            headers: await _headers())
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
+    if (response.statusCode != 200) {
+      throw Exception(_extraerDetalleError(response, "No se pudo generar el código"));
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return (
+      codigo: data["codigo"] as String,
+      minutos: (data["minutos"] as num).toInt(),
+      expiraEn: fechaUtc(data["expira_en"] as String),
+    );
   }
 
   Future<void> aprobarSolicitud(SolicitudAcceso solicitud) async {

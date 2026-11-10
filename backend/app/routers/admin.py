@@ -58,6 +58,64 @@ def aprobar_solicitud(
     return usuario
 
 
+@router.get("/usuarios", response_model=List[schemas.UsuarioOut])
+def buscar_usuarios(
+    q: str = "",
+    limite: int = 50,
+    db: Session = Depends(get_db),
+    _admin: models.Usuario = Depends(auth.requerir_admin),
+):
+    """Cuentas para la pantalla de administracion (por usuario, nombre o correo)."""
+    consulta = db.query(models.Usuario)
+    texto = q.strip().lower()
+    if texto:
+        consulta = consulta.filter(
+            func.lower(models.Usuario.username).contains(texto, autoescape=True)
+            | func.lower(models.Usuario.nombre).contains(texto, autoescape=True)
+            | func.lower(models.Usuario.email).contains(texto, autoescape=True)
+        )
+    usuarios = (
+        consulta.order_by(models.Usuario.activo.desc(), func.lower(models.Usuario.username))
+        .limit(max(1, min(limite, 100)))
+        .all()
+    )
+    admins = {a.usuario_id for a in db.query(models.Administrador).all()}
+    return [
+        schemas.UsuarioOut(
+            id=u.id,
+            username=u.username,
+            nombre=u.nombre,
+            email=u.email,
+            email_google=u.email_google,
+            activo=bool(u.activo),
+            es_admin=u.id in admins,
+        )
+        for u in usuarios
+    ]
+
+
+@router.post("/usuarios/{usuario_id}/codigo-recuperacion", response_model=schemas.CodigoAdminOut)
+def generar_codigo_recuperacion(
+    usuario_id: int,
+    db: Session = Depends(get_db),
+    admin: models.Usuario = Depends(auth.requerir_admin),
+):
+    """Codigo de un solo uso para que la persona cambie su contrasena en la app
+    («Olvidé mi contraseña» -> «Ya tengo un código»), cuando el correo no le
+    llega. El administrador no elige ni ve la contrasena nueva."""
+    from app.services import recuperacion
+
+    usuario = db.get(models.Usuario, usuario_id)
+    if usuario is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    if not usuario.activo:
+        raise HTTPException(status_code=400, detail="La cuenta está desactivada en el monitor web")
+    codigo, expira = recuperacion.generar_por_admin(db, usuario, admin)
+    return schemas.CodigoAdminOut(
+        username=usuario.username, codigo=codigo, expira_en=expira, minutos=recuperacion.MINUTOS_VIGENCIA_ADMIN
+    )
+
+
 @router.post("/usuarios/{usuario_id}/password", response_model=schemas.MensajeOut)
 def asignar_password(
     usuario_id: int,

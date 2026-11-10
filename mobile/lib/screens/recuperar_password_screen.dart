@@ -46,6 +46,10 @@ class _RecuperarPasswordScreenState extends State<RecuperarPasswordScreen> {
   final _confirmarController = TextEditingController();
 
   bool _codigoPedido = false;
+
+  /// false: entró con «Ya tengo un código» (se lo dio un administrador). No
+  /// se ofrece reenviar por correo: pedir otro anularía el que tiene.
+  bool _viaCorreo = true;
   bool _cargando = false;
   bool _ocultarNueva = true;
   String? _error;
@@ -99,6 +103,7 @@ class _RecuperarPasswordScreenState extends State<RecuperarPasswordScreen> {
       if (!mounted) return;
       setState(() {
         _codigoPedido = true;
+        _viaCorreo = true;
         _info = respuesta.mensaje;
         _infoDemora = !respuesta.ok;
         _codigoController.clear();
@@ -138,6 +143,20 @@ class _RecuperarPasswordScreenState extends State<RecuperarPasswordScreen> {
     } finally {
       if (mounted) setState(() => _cargando = false);
     }
+  }
+
+  void _yaTengoCodigo() {
+    if (!(_formUsuario.currentState?.validate() ?? false)) return;
+    _timer?.cancel();
+    setState(() {
+      _codigoPedido = true;
+      _viaCorreo = false;
+      _info = "Escribe el código que te dio un administrador o que te llegó por correo.";
+      _infoDemora = false;
+      _error = null;
+      _segundosReenvio = 0;
+      _codigoController.clear();
+    });
   }
 
   void _cambiarUsuario() {
@@ -195,7 +214,7 @@ class _RecuperarPasswordScreenState extends State<RecuperarPasswordScreen> {
                       ),
                       const SizedBox(height: 14),
                       Text(
-                        _codigoPedido ? "Revisa tu correo" : "Recuperar contraseña",
+                        _codigoPedido ? (_viaCorreo ? "Revisa tu correo" : "Escribe tu código") : "Recuperar contraseña",
                         style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.6),
                         textAlign: TextAlign.center,
                       ),
@@ -261,6 +280,14 @@ class _RecuperarPasswordScreenState extends State<RecuperarPasswordScreen> {
             cargando: _cargando,
             onPressed: _pedirCodigo,
           ),
+          const SizedBox(height: 8),
+          Center(
+            child: TextButton(
+              key: const Key("ya_tengo_codigo"),
+              onPressed: _cargando ? null : _yaTengoCodigo,
+              child: const Text("Ya tengo un código"),
+            ),
+          ),
         ],
       ),
     );
@@ -310,21 +337,29 @@ class _RecuperarPasswordScreenState extends State<RecuperarPasswordScreen> {
             decoration: const InputDecoration(hintText: "······"),
             validator: (v) => (v ?? "").trim().length == 6 ? null : "El código tiene 6 dígitos",
           ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: _cargando || _segundosReenvio > 0 ? null : _pedirCodigo,
-              style: TextButton.styleFrom(
-                padding: EdgeInsets.zero,
-                minimumSize: const Size(0, 32),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: Text(
-                _segundosReenvio > 0 ? "Reenviar en $_segundosReenvio s" : "¿No llegó? Reenviar código",
-                style: const TextStyle(fontSize: 12),
+          if (_viaCorreo) ...[
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _cargando || _segundosReenvio > 0 ? null : _pedirCodigo,
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  _segundosReenvio > 0 ? "Reenviar en $_segundosReenvio s" : "¿No llegó? Reenviar código",
+                  style: const TextStyle(fontSize: 12),
+                ),
               ),
             ),
-          ),
+            Text(
+              "¿No te llega? Revisa «Correo no deseado» o pídele a un administrador un código "
+              "(Administración → Usuarios y contraseñas).",
+              style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant, height: 1.35),
+            ),
+          ] else
+            const SizedBox(height: 8),
           const SizedBox(height: 8),
           Divider(color: colorScheme.outlineVariant),
           const SizedBox(height: 14),

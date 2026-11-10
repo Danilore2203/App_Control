@@ -8,6 +8,7 @@ import "../screens/login_screen.dart";
 import "../screens/mi_cuenta_screen.dart";
 import "../screens/ra_screen.dart";
 import "../screens/solicitudes_screen.dart";
+import "../screens/usuarios_admin_screen.dart";
 import "../services/auth_service.dart";
 import "../theme.dart";
 import "titulo_seccion.dart";
@@ -156,6 +157,12 @@ class AppDrawer extends StatelessWidget {
                       icono: Icons.how_to_reg_outlined,
                       texto: "Solicitudes de acceso",
                       onTap: () => _abrir(context, const SolicitudesScreen()),
+                    ),
+                    _ItemMenu(
+                      icono: Icons.manage_accounts_outlined,
+                      texto: "Usuarios y contraseñas",
+                      subtitulo: "Código para quien no recibe el correo",
+                      onTap: () => _abrir(context, const UsuariosAdminScreen()),
                     ),
                   ],
                 ],
