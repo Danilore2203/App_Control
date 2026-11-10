@@ -24,6 +24,12 @@ class FtpService {
     return ReportesMonitor.fromJson(r.resultado);
   }
 
+  /// Los almacenados van aparte (son miles): los mas recientes y el total.
+  Future<ReportesMonitor> obtenerAlmacenados() async {
+    final r = await _comandos.ejecutar("reportes.resumen", payload: const {"almacenados": true});
+    return ReportesMonitor.fromJson(r.resultado);
+  }
+
   Future<CandidatosCola> candidatosCola() async {
     final r = await _comandos.ejecutar("reportes.cola.candidatos");
     return CandidatosCola.fromJson(r.resultado);

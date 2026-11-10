@@ -35,7 +35,18 @@ void main() {
 
   test("sin cola en la respuesta queda inactiva", () {
     final m = ReportesMonitor.fromJson({"filas": [], "resumen": {}});
-    expect((m.cola.estado, m.cola.enMarcha, m.cola.finalizada), ("inactiva", false, true));
+    expect((m.cola.estado, m.cola.enMarcha, m.cola.finalizada, m.almacenadosTotal), ("inactiva", false, true, null));
+  });
+
+  test("almacenados: trae el total aunque solo vengan los mas recientes", () {
+    final m = ReportesMonitor.fromJson({
+      "filas": [
+        {"archivo": "H1.xlsx", "color": "blue", "estado": "ALMACENADO"},
+      ],
+      "almacenados_total": 14438,
+      "resumen": {"blue": 14438, "todos": 196},
+    });
+    expect((m.filas.length, m.almacenadosTotal, m.todos), (1, 14438, 196));
   });
 
   test("la barra flotante resume la cola: en curso, pausada y terminada", () {

@@ -32,6 +32,16 @@ class _FtpScreenState extends State<FtpScreen> {
   String _filtro = "todos"; // todos | green | red | orange | gray | blue
   bool _ocupadoCola = false;
 
+  /// Almacenados: se piden aparte la primera vez que se tocan (son miles).
+  Future<ReportesMonitor>? _almacenados;
+
+  void _seleccionar(String color) {
+    setState(() {
+      _filtro = (_filtro == color && color != "todos") ? "todos" : color;
+      if (_filtro == "blue") _almacenados ??= _servicio.obtenerAlmacenados();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -51,7 +61,10 @@ class _FtpScreenState extends State<FtpScreen> {
     return m;
   }
 
-  void _recargar() => setState(() => _future = _cargar());
+  void _recargar() => setState(() {
+        _future = _cargar();
+        _almacenados = _filtro == "blue" ? _servicio.obtenerAlmacenados() : null;
+      });
 
   void _avisar(String texto, {bool error = false}) {
     if (!mounted) return;
@@ -170,15 +183,46 @@ class _FtpScreenState extends State<FtpScreen> {
     );
   }
 
-  List<ReporteFtp> _filtradas(ReportesMonitor m) {
+  List<ReporteFtp> _filtradas(List<ReporteFtp> filas) {
     final q = _busqueda.text.trim().toLowerCase();
-    return m.filas.where((f) {
+    return filas.where((f) {
       final porEstado = _filtro == "todos" ? f.color != "blue" : f.color == _filtro;
       if (!porEstado) return false;
       if (q.isEmpty) return true;
       bool hay(String? s) => (s ?? "").toLowerCase().contains(q);
       return hay(f.archivo) || hay(f.tipo) || hay(f.horaProgramada) || hay(f.horaDeposito);
     }).toList();
+  }
+
+  List<Widget> _lista(List<ReporteFtp> filas, {String? nota}) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return [
+      TituloSeccion(
+        "Reportes · ${_etiqueta(_filtro)}",
+        accion: Text(
+          "${filas.length}",
+          style: theme.textTheme.labelLarge?.copyWith(color: colorScheme.onSurfaceVariant, fontWeight: FontWeight.w800),
+        ),
+      ),
+      if (nota != null) ...[
+        const SizedBox(height: 4),
+        Text(nota, style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
+      ],
+      const SizedBox(height: 8),
+      if (filas.isEmpty)
+        EstadoVacio(
+          icono: Icons.inbox_outlined,
+          mensaje: "Sin reportes para mostrar",
+          colorIcono: colorScheme.onSurfaceVariant,
+        )
+      else
+        for (final f in filas)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _TarjetaReporte(reporte: f, onTap: () => _verDetalle(f)),
+          ),
+    ];
   }
 
   @override
@@ -219,7 +263,6 @@ class _FtpScreenState extends State<FtpScreen> {
             );
           }
           final m = monitor ?? ReportesMonitor.vacio;
-          final filas = _filtradas(m);
           return RefreshIndicator(
             onRefresh: () async {
               _recargar();
@@ -238,7 +281,7 @@ class _FtpScreenState extends State<FtpScreen> {
                 _Contadores(
                   monitor: m,
                   seleccionado: _filtro,
-                  onSeleccionar: (c) => setState(() => _filtro = (_filtro == c && c != "todos") ? "todos" : c),
+                  onSeleccionar: _seleccionar,
                 ),
                 const SizedBox(height: 14),
                 TextField(
@@ -253,29 +296,38 @@ class _FtpScreenState extends State<FtpScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                TituloSeccion(
-                  "Reportes · ${_etiqueta(_filtro)}",
-                  accion: Text(
-                    "${filas.length}",
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w800,
+                if (_filtro == "blue")
+                  FutureBuilder<ReportesMonitor>(
+                    future: _almacenados,
+                    builder: (context, s) {
+                      if (s.connectionState == ConnectionState.waiting) {
+                        return const Padding(
+                          padding: EdgeInsets.all(28),
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+                      if (s.hasError) {
+                        return EstadoVacio(
+                          icono: Icons.cloud_off_outlined,
+                          mensaje: "No se pudieron leer los almacenados",
+                          detalle: s.error.toString().replaceFirst("Exception: ", ""),
+                          colorIcono: colorScheme.error,
+                          onReintentar: () => setState(() => _almacenados = _servicio.obtenerAlmacenados()),
+                        );
+                      }
+                      final a = s.data ?? ReportesMonitor.vacio;
+                      final total = a.almacenadosTotal ?? a.filas.length;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: _lista(
+                          _filtradas(a.filas),
+                          nota: total > a.filas.length ? "Los ${a.filas.length} más recientes de $total." : null,
                         ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                if (filas.isEmpty)
-                  EstadoVacio(
-                    icono: Icons.inbox_outlined,
-                    mensaje: "Sin reportes para mostrar",
-                    colorIcono: colorScheme.onSurfaceVariant,
+                      );
+                    },
                   )
                 else
-                  for (final f in filas)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _TarjetaReporte(reporte: f, onTap: () => _verDetalle(f)),
-                    ),
+                  ..._lista(_filtradas(m.filas)),
               ],
             ),
           );
