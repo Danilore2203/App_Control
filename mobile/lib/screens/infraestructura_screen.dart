@@ -414,7 +414,7 @@ class _InfraestructuraContenidoState extends State<InfraestructuraContenido> {
               const SizedBox(height: 14),
               Row(
                 children: [
-                  Expanded(child: TituloSeccion("Sesiones", accion: _contador(filas.length))),
+                  Expanded(child: TituloSeccion("Sesiones · ${filas.length}")),
                   Text(
                     "Solo activas",
                     style: theme.textTheme.labelMedium?.copyWith(color: colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600),
