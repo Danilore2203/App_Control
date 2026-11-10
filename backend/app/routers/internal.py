@@ -154,11 +154,13 @@ def estado_recuperacion(identificador: str, db: Session = Depends(get_db)):
     response_model=list[schemas.ComandoOut],
     dependencies=[Depends(auth.verificar_internal_key)],
 )
-def comandos_pendientes(limite: int = 10, db: Session = Depends(get_db)):
-    """OP_PROD retira los comandos que la app dejo (quedan en curso)."""
+def comandos_pendientes(limite: int = 10, tipos: str | None = None, db: Session = Depends(get_db)):
+    """OP_PROD retira los comandos que la app dejo (quedan en curso).
+    `tipos`: separados por coma, lo que esa copia de OP_PROD sabe hacer."""
     from app.services import comandos as servicio
 
-    return servicio.tomar_pendientes(db, min(limite, 50))
+    anunciados = {t.strip() for t in tipos.split(",") if t.strip()} if tipos else None
+    return servicio.tomar_pendientes(db, min(limite, 50), anunciados)
 
 
 @router.post(

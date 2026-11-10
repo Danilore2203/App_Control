@@ -105,11 +105,22 @@ def recuperar_password(request: Request, payload: schemas.RecuperarPasswordIn, d
     anterior (ver services/recuperacion.py). Responde lo mismo exista o no la
     cuenta, para que no sirva para averiguar usuarios."""
     recuperacion.solicitar(db, payload.identificador)
+    # Si OP_PROD no esta atendiendo se avisa igual para todos (no dice nada de
+    # la cuenta): el pedido queda en la cola y sale apenas vuelva.
+    if not recuperacion.envio_disponible(db):
+        return schemas.MensajeOut(
+            ok=False,
+            mensaje=(
+                "El servidor que envía los correos no responde en este momento. Si la cuenta existe, "
+                f"el código sale apenas vuelva (lo esperamos {recuperacion.MINUTOS_VIGENCIA} minutos). "
+                "Si no te llega, intenta más tarde."
+            ),
+        )
     return schemas.MensajeOut(
         ok=True,
         mensaje=(
             "Si la cuenta existe y tiene un correo registrado, en unos minutos te llega un código "
-            f"de 6 dígitos. Vale {recuperacion.MINUTOS_VIGENCIA} minutos."
+            f"de 6 dígitos. Vale {recuperacion.MINUTOS_VIGENCIA} minutos. Revisa también «Correo no deseado»."
         ),
     )
 

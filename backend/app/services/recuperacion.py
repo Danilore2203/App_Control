@@ -125,7 +125,33 @@ def solicitar(db: Session, identificador: str, ahora: Optional[datetime] = None)
     codigos.filter(models.CodigoRecuperacion.usado_en.is_(None)).update(
         {models.CodigoRecuperacion.usado_en: ahora}, synchronize_session=False
     )
+    # El correo anterior que todavia espera en la cola llevaria un codigo ya
+    # anulado: no se manda (si no, llegan dos correos y el primero no sirve).
+    for viejo in _correos_de(db, usuario.id, ahora - timedelta(days=1)).filter(models.Comando.estado == "pendiente"):
+        viejo.estado = "cancelado"  # no es una falla: sigue contando para el limite por hora
+        viejo.terminado_en = ahora
+        viejo.error = "Reemplazado por un pedido nuevo"
+        viejo.payload = json.dumps({**json.loads(viejo.payload or "{}"), "codigo": "***"}, ensure_ascii=False)
+
     codigo = f"{secrets.randbelow(10**6):06d}"
+    comando = models.Comando(
+        tipo=TIPO_COMANDO,
+        payload=json.dumps(
+            {
+                "para": para,
+                "nombre": usuario.nombre or usuario.username,
+                "usuario": usuario.username,
+                "codigo": codigo,
+                "minutos": MINUTOS_VIGENCIA,
+            },
+            ensure_ascii=False,
+        ),
+        estado="pendiente",
+        creado_por_id=usuario.id,
+        creado_en=ahora,
+    )
+    db.add(comando)
+    db.flush()
     db.add(
         models.CodigoRecuperacion(
             usuario_id=usuario.id,
@@ -133,28 +159,31 @@ def solicitar(db: Session, identificador: str, ahora: Optional[datetime] = None)
             creado_en=ahora,
             expira_en=ahora + timedelta(minutes=MINUTOS_VIGENCIA),
             intentos=0,
-        )
-    )
-    db.add(
-        models.Comando(
-            tipo=TIPO_COMANDO,
-            payload=json.dumps(
-                {
-                    "para": para,
-                    "nombre": usuario.nombre or usuario.username,
-                    "usuario": usuario.username,
-                    "codigo": codigo,
-                    "minutos": MINUTOS_VIGENCIA,
-                },
-                ensure_ascii=False,
-            ),
-            estado="pendiente",
-            creado_por_id=usuario.id,
-            creado_en=ahora,
+            comando_id=comando.id,
         )
     )
     db.commit()
     return True
+
+
+def correo_enviado(db: Session, comando_id: int, cuando: Optional[datetime]) -> None:
+    """OP_PROD mando el correo: los 15 minutos del codigo cuentan desde ahora
+    (si OP tardo en mandarlo, la persona igual tiene su tiempo completo)."""
+    cuando = cuando or datetime.utcnow()
+    fila = (
+        db.query(models.CodigoRecuperacion)
+        .filter(models.CodigoRecuperacion.comando_id == comando_id, models.CodigoRecuperacion.usado_en.is_(None))
+        .first()
+    )
+    if fila is not None:
+        fila.expira_en = max(fila.expira_en, cuando + timedelta(minutes=MINUTOS_VIGENCIA))
+
+
+def envio_disponible(db: Session) -> bool:
+    """Si hay un OP_PROD atendiendo que sabe mandar este correo."""
+    from app.services import comandos
+
+    return comandos.op_atiende(db, TIPO_COMANDO)
 
 
 def restablecer(

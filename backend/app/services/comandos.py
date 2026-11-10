@@ -58,6 +58,16 @@ TIPOS_COMANDO: dict[str, bool] = {
 EXPIRA_PENDIENTE_SEGUNDOS = 120
 # Y si lo retiro pero nunca contesto (se reinicio en el medio).
 EXPIRA_EN_CURSO_SEGUNDOS = 3 * 3600  # un job DataStage puede tardar mucho; OP_PROD responde al terminar
+# Lo que puede esperar mas en la cola: nadie esta mirando la pantalla, y si
+# OP_PROD vuelve dentro de ese tiempo (reinicio, corte de red) igual sale.
+EXPIRA_PENDIENTE_POR_TIPO: dict[str, int] = {
+    "correo.recuperar_password": 15 * 60,  # lo que vale el codigo
+}
+# Veces que un comando vuelve a la cola porque una copia de OP_PROD no lo conocia.
+MAX_RECHAZOS = 5
+# OP_PROD consulta cada ~3 s: si no aparece en este tiempo, nadie atiende.
+OP_CAIDO_SIN_LATIDO_SEGUNDOS = 90
+LATIDO_CADA_SEGUNDOS = 20
 
 
 # Comandos que crea el propio backend (la app no los puede pedir: no estan en
@@ -136,9 +146,18 @@ def listar_recientes(db: Session, limite: int = 50) -> list[schemas.ComandoOut]:
 
 def expirar_vencidos(db: Session, ahora: Optional[datetime] = None) -> int:
     ahora = ahora or datetime.utcnow()
-    pendiente_vencido = (models.Comando.estado == "pendiente") & (
-        models.Comando.creado_en < ahora - timedelta(seconds=EXPIRA_PENDIENTE_SEGUNDOS)
+    especiales = list(EXPIRA_PENDIENTE_POR_TIPO)
+    pendiente_vencido = (
+        (models.Comando.estado == "pendiente")
+        & models.Comando.tipo.notin_(especiales)
+        & (models.Comando.creado_en < ahora - timedelta(seconds=EXPIRA_PENDIENTE_SEGUNDOS))
     )
+    for tipo, segundos in EXPIRA_PENDIENTE_POR_TIPO.items():
+        pendiente_vencido = pendiente_vencido | (
+            (models.Comando.estado == "pendiente")
+            & (models.Comando.tipo == tipo)
+            & (models.Comando.creado_en < ahora - timedelta(seconds=segundos))
+        )
     en_curso_vencido = (models.Comando.estado == "en_curso") & (
         models.Comando.tomado_en < ahora - timedelta(seconds=EXPIRA_EN_CURSO_SEGUNDOS)
     )
@@ -153,21 +172,52 @@ def expirar_vencidos(db: Session, ahora: Optional[datetime] = None) -> int:
     return len(vencidos)
 
 
-def tomar_pendientes(db: Session, limite: int = 10) -> list[schemas.ComandoOut]:
+def _anotar_latido(db: Session, tipos: Optional[set[str]], ahora: datetime) -> None:
+    """Deja constancia de que OP_PROD esta atendiendo (y que sabe hacer). Se
+    escribe como mucho cada LATIDO_CADA_SEGUNDOS: OP consulta cada pocos."""
+    if tipos is None:
+        return
+    fila = db.get(models.LatidoOp, "comandos")
+    texto = ",".join(sorted(tipos))
+    if fila is None:
+        db.add(models.LatidoOp(clave="comandos", visto_en=ahora, tipos=texto))
+    elif fila.tipos != texto or fila.visto_en < ahora - timedelta(seconds=LATIDO_CADA_SEGUNDOS):
+        fila.visto_en = ahora
+        fila.tipos = texto
+
+
+def op_atiende(db: Session, tipo: str, ahora: Optional[datetime] = None) -> bool:
+    """Si hay una copia de OP_PROD retirando comandos y sabe hacer `tipo`."""
+    ahora = ahora or datetime.utcnow()
+    fila = db.get(models.LatidoOp, "comandos")
+    if fila is None:
+        # Ningun OP_PROD anuncio todavia lo que sabe hacer (version anterior):
+        # no hay como saberlo, se asume que si, como antes.
+        return True
+    if fila.visto_en < ahora - timedelta(seconds=OP_CAIDO_SIN_LATIDO_SEGUNDOS):
+        return False
+    return tipo in (fila.tipos or "").split(",")
+
+
+def tomar_pendientes(db: Session, limite: int = 10, tipos: Optional[set[str]] = None) -> list[schemas.ComandoOut]:
     """Para OP_PROD: devuelve los pendientes mas viejos y los marca en curso,
-    asi dos copias de OP_PROD no ejecutan el mismo comando."""
+    asi dos copias de OP_PROD no ejecutan el mismo comando.
+
+    `tipos`: lo que esa copia de OP_PROD dice saber hacer; solo recibe eso.
+    Una copia vieja no lo manda: recibe todo menos lo que ya rechazo alguna
+    copia por no conocerlo (eso queda para una que lo anuncie)."""
     expirar_vencidos(db)
-    pendientes = (
-        db.query(models.Comando)
-        .filter(models.Comando.estado == "pendiente")
-        .order_by(models.Comando.creado_en)
-        .limit(limite)
-        .all()
-    )
+    consulta = db.query(models.Comando).filter(models.Comando.estado == "pendiente")
+    if tipos is not None:
+        consulta = consulta.filter(models.Comando.tipo.in_(sorted(tipos)))
+    else:
+        consulta = consulta.filter((models.Comando.rechazos == 0) | models.Comando.rechazos.is_(None))
+    pendientes = consulta.order_by(models.Comando.creado_en).limit(limite).all()
     ahora = datetime.utcnow()
     for c in pendientes:
         c.estado = "en_curso"
         c.tomado_en = ahora
+    _anotar_latido(db, tipos, ahora)
     db.commit()
     return [_a_salida(c, completo=True) for c in pendientes]
 
@@ -176,12 +226,31 @@ def registrar_resultado(db: Session, comando_id: int, resultado: schemas.Comando
     comando = db.get(models.Comando, comando_id)
     if comando is None:
         raise HTTPException(status_code=404, detail="Comando no encontrado")
+    # «Comando desconocido»: lo retiro una copia de OP_PROD que no lo sabe
+    # hacer (vieja, o el .150 sin reiniciar) y no ejecuto nada. Vuelve a la
+    # cola para otra copia, en vez de fallar (ver tomar_pendientes).
+    if (
+        not resultado.ok
+        and (resultado.error or "").startswith("Comando desconocido")
+        and (comando.rechazos or 0) < MAX_RECHAZOS
+    ):
+        comando.rechazos = (comando.rechazos or 0) + 1
+        comando.estado = "pendiente"
+        comando.tomado_en = None
+        db.commit()
+        db.refresh(comando)
+        return _a_salida(comando)
+
     comando.estado = "ok" if resultado.ok else "error"
     comando.terminado_en = datetime.utcnow()
     comando.resultado = (
         json.dumps(resultado.resultado, ensure_ascii=False) if resultado.resultado is not None else None
     )
     comando.error = (resultado.error or "")[:2000] or None
+    if resultado.ok and comando.tipo == "correo.recuperar_password":
+        from app.services import recuperacion
+
+        recuperacion.correo_enviado(db, comando.id, comando.terminado_en)
     _borrar_reservados(comando)
     db.commit()
     db.refresh(comando)
