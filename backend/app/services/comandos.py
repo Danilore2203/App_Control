@@ -39,7 +39,7 @@ TIPOS_COMANDO: dict[str, bool] = {
     "airflow.trigger": True,  # payload: {"dag_id": str}
     "airflow.pausar": True,  # payload: {"dag_id": str, "pausar": bool}
     # RA (archivos FTP -> MySQL, el «Actualizar» del Monitor RA de la web)
-    "ra.resumen": False,  # devuelve filas del monitor RA + contadores por estado
+    "ra.resumen": True,  # devuelve filas del monitor RA + contadores por estado (solo administradores)
     "ra.actualizar_todos": True,  # sincroniza todas las configuraciones FTP activas y devuelve el resumen
 }
 

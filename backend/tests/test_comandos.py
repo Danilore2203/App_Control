@@ -52,14 +52,14 @@ def test_seguir_la_corrida_lanzada_lo_puede_pedir_cualquiera(db):
     assert (c.estado, c.payload["nombre"]) == ("pendiente", "X")
 
 
-def test_actualizar_ra_solo_administradores_y_el_resumen_cualquiera(db):
+@pytest.mark.parametrize("tipo", ["ra.resumen", "ra.actualizar_todos"])
+def test_monitor_ra_solo_administradores(db, tipo):
     ana = usuario(db, "ana")
     admin = usuario(db, "root", admin=True)
-    assert S.crear_comando(db, ana, schemas.ComandoIn(tipo="ra.resumen")).estado == "pendiente"
     with pytest.raises(HTTPException) as exc:
-        S.crear_comando(db, ana, schemas.ComandoIn(tipo="ra.actualizar_todos"))
+        S.crear_comando(db, ana, schemas.ComandoIn(tipo=tipo))
     assert exc.value.status_code == 403
-    assert S.crear_comando(db, admin, schemas.ComandoIn(tipo="ra.actualizar_todos")).tipo == "ra.actualizar_todos"
+    assert S.crear_comando(db, admin, schemas.ComandoIn(tipo=tipo)).tipo == tipo
 
 
 def test_tipo_desconocido_se_rechaza(db):
