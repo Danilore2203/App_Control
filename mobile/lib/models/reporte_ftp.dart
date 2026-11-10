@@ -147,11 +147,15 @@ class ColaReportes {
 
 /// Monitor de reportes completo: filas, contadores por color y la cola.
 class ReportesMonitor {
+  /// Reportes activos (sin almacenados), o solo almacenados si se pidieron.
   final List<ReporteFtp> filas;
   final Map<String, int> resumen; // green, red, orange, gray, blue, todos (sin almacenados)
   final ColaReportes cola;
 
-  const ReportesMonitor({required this.filas, required this.resumen, required this.cola});
+  /// Solo al pedir los almacenados: cuantos hay (se mandan los mas recientes).
+  final int? almacenadosTotal;
+
+  const ReportesMonitor({required this.filas, required this.resumen, required this.cola, this.almacenadosTotal});
 
   static const vacio = ReportesMonitor(filas: [], resumen: {}, cola: ColaReportes.vacia);
 
@@ -165,6 +169,7 @@ class ReportesMonitor {
             e.key.toString(): leerNumero(e.value)?.toInt() ?? 0,
         },
         cola: ColaReportes.fromJson((json["cola"] as Map?)?.cast<String, dynamic>()),
+        almacenadosTotal: leerNumero(json["almacenados_total"])?.toInt(),
       );
 
   int cuenta(String color) => resumen[color] ?? 0;
