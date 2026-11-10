@@ -108,6 +108,16 @@ class RestablecerPasswordIn(BaseModel):
         return valor
 
 
+class CodigoAdminOut(BaseModel):
+    """Codigo que genera un administrador para que alguien cambie su
+    contrasena sin correo. Se muestra una sola vez."""
+
+    username: str
+    codigo: str
+    expira_en: datetime
+    minutos: int
+
+
 class FcmTokenIn(BaseModel):
     fcm_token: str
 

@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 TIPO_COMANDO = "correo.recuperar_password"
 MINUTOS_VIGENCIA = 15
+MINUTOS_VIGENCIA_ADMIN = 30  # el que genera un administrador: hay que pasarlo a mano
 MAX_INTENTOS = 5
 MAX_CODIGOS_POR_HORA = 3
 
@@ -104,6 +105,45 @@ def diagnostico(db: Session, identificador: str, ahora: Optional[datetime] = Non
     }
 
 
+def _anular_anteriores(db: Session, usuario_id: int, ahora: datetime) -> None:
+    """Un codigo nuevo deja sin efecto los anteriores de la cuenta."""
+    db.query(models.CodigoRecuperacion).filter(
+        models.CodigoRecuperacion.usuario_id == usuario_id, models.CodigoRecuperacion.usado_en.is_(None)
+    ).update({models.CodigoRecuperacion.usado_en: ahora}, synchronize_session=False)
+    # El correo anterior que todavia espera en la cola llevaria un codigo ya
+    # anulado: no se manda (si no, llegan dos correos y el primero no sirve).
+    for viejo in _correos_de(db, usuario_id, ahora - timedelta(days=1)).filter(models.Comando.estado == "pendiente"):
+        viejo.estado = "cancelado"  # no es una falla: sigue contando para el limite por hora
+        viejo.terminado_en = ahora
+        viejo.error = "Reemplazado por un pedido nuevo"
+        viejo.payload = json.dumps({**json.loads(viejo.payload or "{}"), "codigo": "***"}, ensure_ascii=False)
+
+
+def generar_por_admin(
+    db: Session, usuario: models.Usuario, admin: models.Usuario, ahora: Optional[datetime] = None
+) -> tuple[str, datetime]:
+    """Un administrador genera el codigo y se lo pasa a la persona (Teams, en
+    persona): sirve cuando el correo no llega. La persona elige su contrasena
+    en la app con ese codigo, asi el administrador nunca la conoce. Vale
+    MINUTOS_VIGENCIA_ADMIN, una sola vez, con el mismo limite de intentos."""
+    ahora = ahora or datetime.utcnow()
+    _anular_anteriores(db, usuario.id, ahora)
+    codigo = f"{secrets.randbelow(10**6):06d}"
+    expira = ahora + timedelta(minutes=MINUTOS_VIGENCIA_ADMIN)
+    db.add(
+        models.CodigoRecuperacion(
+            usuario_id=usuario.id,
+            codigo_hash=_hash_codigo(usuario.id, codigo),
+            creado_en=ahora,
+            expira_en=expira,
+            intentos=0,
+        )
+    )
+    db.commit()
+    logger.info("Codigo de recuperacion para %s generado por el administrador %s", usuario.username, admin.username)
+    return codigo, expira
+
+
 def solicitar(db: Session, identificador: str, ahora: Optional[datetime] = None) -> bool:
     """True si se pidio el correo. Quien llama no le cuenta el resultado al
     usuario (asi no se puede averiguar que cuentas existen)."""
@@ -116,23 +156,12 @@ def solicitar(db: Session, identificador: str, ahora: Optional[datetime] = None)
         logger.info("Recuperacion pedida para %s, que no tiene correo", usuario.username)
         return False
 
-    codigos = db.query(models.CodigoRecuperacion).filter(models.CodigoRecuperacion.usuario_id == usuario.id)
     recientes = _codigos_que_cuentan(db, usuario.id, ahora)
     if recientes >= MAX_CODIGOS_POR_HORA:
         logger.info("Recuperacion de %s: ya pidio %s codigos en la ultima hora", usuario.username, recientes)
         return False
 
-    codigos.filter(models.CodigoRecuperacion.usado_en.is_(None)).update(
-        {models.CodigoRecuperacion.usado_en: ahora}, synchronize_session=False
-    )
-    # El correo anterior que todavia espera en la cola llevaria un codigo ya
-    # anulado: no se manda (si no, llegan dos correos y el primero no sirve).
-    for viejo in _correos_de(db, usuario.id, ahora - timedelta(days=1)).filter(models.Comando.estado == "pendiente"):
-        viejo.estado = "cancelado"  # no es una falla: sigue contando para el limite por hora
-        viejo.terminado_en = ahora
-        viejo.error = "Reemplazado por un pedido nuevo"
-        viejo.payload = json.dumps({**json.loads(viejo.payload or "{}"), "codigo": "***"}, ensure_ascii=False)
-
+    _anular_anteriores(db, usuario.id, ahora)
     codigo = f"{secrets.randbelow(10**6):06d}"
     comando = models.Comando(
         tipo=TIPO_COMANDO,

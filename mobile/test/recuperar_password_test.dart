@@ -85,4 +85,32 @@ void main() {
 
     await tester.pumpWidget(const SizedBox()); // cancela el temporizador
   });
+
+  testWidgets("con «Ya tengo un código» no pide correo ni ofrece reenviar (anularía el del administrador)",
+      (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+
+    final auth = _AuthFalso();
+    await tester.pumpWidget(
+        MaterialApp(theme: AppTheme.dark, home: RecuperarPasswordScreen(servicio: auth, usuarioInicial: "jhojrodriguez")));
+    await tester.tap(find.byKey(const Key("ya_tengo_codigo")));
+    await tester.pump();
+
+    expect(auth.pedidos, isEmpty);
+    expect(find.text("Escribe tu código"), findsOneWidget);
+    expect(find.textContaining("te dio un administrador"), findsOneWidget);
+    expect(find.textContaining("Reenviar"), findsNothing);
+
+    await tester.enterText(find.byKey(const Key("recuperar_codigo")), "654321");
+    await tester.enterText(find.byKey(const Key("recuperar_nueva")), "Nueva#2026");
+    await tester.enterText(find.byKey(const Key("recuperar_confirmar")), "Nueva#2026");
+    await tester.ensureVisible(find.text("Cambiar y entrar"));
+    await tester.tap(find.text("Cambiar y entrar"));
+    await tester.pump();
+    await tester.pump();
+    expect(auth.cambios, [("jhojrodriguez", "654321", "Nueva#2026")]);
+    expect(tester.takeException(), isNull);
+  });
 }
