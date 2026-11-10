@@ -138,9 +138,15 @@ class FtpService {
 
   /// «Iniciar cola»: OP_PROD abre los reportes elegibles de a pocos, cada uno
   /// a su hora. Se sigue el avance hasta que la cola termina o hasta
-  /// [maximoCola]; despues la cola sigue sola en el servidor.
-  Future<void> lanzarTodos({required String titulo}) async {
-    final r = await _comandos.ejecutar("reportes.cola.iniciar", titulo: titulo, anunciarFinal: false);
+  /// [maximoCola]; despues la cola sigue sola en el servidor. Con `archivos`
+  /// solo encola esos (los que se marcaron en la lista, como en la web).
+  Future<void> lanzarTodos({required String titulo, List<String>? archivos}) async {
+    final r = await _comandos.ejecutar(
+      "reportes.cola.iniciar",
+      payload: archivos == null ? const {} : {"archivos": archivos},
+      titulo: titulo,
+      anunciarFinal: false,
+    );
     final cola = ColaReportes.fromJson(r.resultado);
     EjecucionActual.mostrar(estadoDeCola(titulo, cola));
     final limite = DateTime.now().add(maximoCola);

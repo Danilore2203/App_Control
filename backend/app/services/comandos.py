@@ -37,12 +37,14 @@ TIPOS_COMANDO: dict[str, bool] = {
     "procesos.actualizar_todos.estado": False,
     "tablas.actualizar_todos": True,
     "tablas.actualizar_todos.estado": False,
+    "tablas.serie": False,  # payload: {"tabla": str}; filas cargadas por dia (ultimos 40), la grafica de la web
     # Airflow
     "airflow.trigger": True,  # payload: {"dag_id": str}
     "airflow.pausar": True,  # payload: {"dag_id": str, "pausar": bool}
     # RA (archivos FTP -> MySQL, el «Actualizar» del Monitor RA de la web)
     "ra.resumen": True,  # devuelve filas del monitor RA + contadores por estado (solo administradores)
     "ra.actualizar_todos": True,  # sincroniza todas las configuraciones FTP activas y devuelve el resumen
+    "ra.detalle": True,  # payload: {"archivo": str}; ruta FTP, de que procesos depende y quien lo usa
     # Reportes (Monitor FTP de la web: Excel que se abren en el servidor 208). Todo solo administradores.
     "reportes.resumen": True,  # reportes con su estado, contadores y la cola del 208
     "reportes.lanzar": True,  # payload: {"archivo": str}; abre el libro en el 208 (respeta el maximo abiertos)

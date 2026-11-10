@@ -134,3 +134,45 @@ class SeguimientoLanzamiento {
     }
   }
 }
+
+/// Ejecuta un comando de OP_PROD con su barra de avance y, con `seguir`
+/// (lanzar un proceso), se queda siguiendo la corrida hasta que termina:
+/// DataStage responde al terminar (resultado y duracion vienen en la
+/// respuesta); Pentaho y el resto se siguen con `procesos.lanzar.estado`.
+/// Lo usan el detalle de un proceso y las dependencias de un archivo RA.
+Future<void> ejecutarYSeguir({
+  required String tipo,
+  required Map<String, dynamic> payload,
+  required String titulo,
+  bool seguir = false,
+  ComandosService? comandos,
+}) async {
+  final servicio = comandos ?? ComandosService();
+  final inicio = DateTime.now();
+  // Un job DataStage se ejecuta de verdad y OP_PROD responde recien cuando
+  // termina (puede tardar minutos): la barra muestra el cronometro mientras tanto.
+  final r = await servicio.ejecutar(
+    tipo,
+    payload: payload,
+    titulo: titulo,
+    anunciarFinal: !seguir,
+    espera: seguir ? const Duration(hours: 2) : const Duration(seconds: 90),
+  );
+  if (!seguir) return;
+  if (r.resultado["modo"] == "datastage") {
+    final (texto, ok) = SeguimientoLanzamiento.resumenFinal(r.resultado, DateTime.now().difference(inicio));
+    EjecucionActual.mostrar(EstadoEjecucion(
+      titulo: titulo,
+      detalle: texto,
+      fase: ok ? FaseEjecucion.listo : FaseEjecucion.error,
+      progreso: 1,
+    ));
+    return;
+  }
+  // «Actualizar proceso» (Pentaho): OP_PROD lo lanzo; se sigue la tarea.
+  await SeguimientoLanzamiento(comandos: servicio).seguir(
+    titulo: titulo,
+    nombre: payload["nombre"].toString(),
+    lanzadoEnServidor: (r.resultado["lanzado_en"] ?? "").toString(),
+  );
+}

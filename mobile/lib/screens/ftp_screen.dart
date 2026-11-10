@@ -3,7 +3,6 @@ import "dart:async";
 import "package:flutter/material.dart";
 
 import "../models/reporte_ftp.dart";
-import "../services/comandos_service.dart";
 import "../services/ftp_service.dart";
 import "../services/sesion_actual.dart";
 import "../theme.dart";
@@ -11,6 +10,7 @@ import "../widgets/estado_vacio.dart";
 import "../widgets/fondo_app.dart";
 import "../widgets/indicador_ejecucion.dart";
 import "../widgets/titulo_seccion.dart";
+import "seleccion_cola_screen.dart";
 
 /// Monitor FTP como en la web (/ftp): cada reporte con su estado, los
 /// contadores, la «Cola de aperturas» del 208 y, en el detalle de cada
@@ -66,14 +66,6 @@ class _FtpScreenState extends State<FtpScreen> {
         _almacenados = _filtro == "blue" ? _servicio.obtenerAlmacenados() : null;
       });
 
-  void _avisar(String texto, {bool error = false}) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(texto),
-      backgroundColor: error ? StatusColors.critico : null,
-    ));
-  }
-
   Future<bool> _confirmar(String titulo, Widget contenido, String accion) async {
     final r = await showDialog<bool>(
       context: context,
@@ -89,46 +81,14 @@ class _FtpScreenState extends State<FtpScreen> {
     return r == true;
   }
 
+  /// Como «Iniciar cola» de la web: abre la lista de No depositados / En
+  /// proceso para marcar cuáles (por tipo y hora) y lanza esos.
   Future<void> _lanzarTodos() async {
-    setState(() => _ocupadoCola = true);
-    CandidatosCola cand;
-    try {
-      cand = await _servicio.candidatosCola();
-    } catch (e) {
-      _avisar(e is ComandoFallidoException ? e.mensaje : e.toString(), error: true);
-      if (mounted) setState(() => _ocupadoCola = false);
-      return;
-    }
-    if (!mounted) return;
-    setState(() => _ocupadoCola = false);
-    if (cand.elegibles.isEmpty) {
-      _avisar("No hay reportes para lanzar ahora: la cola solo toma No depositado y En proceso de tipo ROBBY_REPORT, 24X7 u OP.");
-      return;
-    }
-    final esperan = cand.elegibles.length - cand.yaTocan;
-    final ok = await _confirmar(
-      "¿Lanzar ${cand.elegibles.length} reporte(s)?",
-      Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "Se abren en el 208 de a ${_monitor?.cola.maxAbiertos ?? 2}, como «Iniciar cola» en la web. "
-            "${cand.yaTocan} ya están en hora${esperan > 0 ? " y $esperan esperan su hora programada" : ""}.",
-          ),
-          if (cand.omitidos.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              "${cand.omitidos.length} no entran (otro tipo o ya abiertos).",
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-        ],
-      ),
-      "Lanzar",
+    final archivos = await Navigator.of(context).push<List<String>>(
+      MaterialPageRoute(builder: (_) => SeleccionColaScreen(maxAbiertos: _monitor?.cola.maxAbiertos ?? 2)),
     );
-    if (!ok || !mounted) return;
-    await _correrEnCola(() => _servicio.lanzarTodos(titulo: _tituloCola));
+    if (archivos == null || archivos.isEmpty || !mounted) return;
+    await _correrEnCola(() => _servicio.lanzarTodos(titulo: _tituloCola, archivos: archivos));
   }
 
   Future<void> _detenerCola() async {

@@ -53,7 +53,7 @@ def test_seguir_la_corrida_lanzada_lo_puede_pedir_cualquiera(db):
 
 
 @pytest.mark.parametrize("tipo", [
-    "ra.resumen", "ra.actualizar_todos",
+    "ra.resumen", "ra.actualizar_todos", "ra.detalle",
     "reportes.resumen", "reportes.lanzar", "reportes.lanzar.estado", "reportes.cola.candidatos",
     "reportes.cola.iniciar", "reportes.cola.estado", "reportes.cola.detener",
 ])
