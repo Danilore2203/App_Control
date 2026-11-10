@@ -144,6 +144,7 @@ class TablaOut(BaseModel):
     layer: Optional[str] = None
     hora_programada: Optional[str] = None
     ultima_fecha: Optional[str] = None
+    core: Optional[str] = None  # 'SI' = tabla core
     snapshot_fecha: date
     snapshot_ts: datetime
     estado_ts: Optional[datetime] = None
@@ -292,6 +293,7 @@ class CatalogoTablaIn(BaseModel):
     layer: Optional[str] = None
     hora_programada: Optional[str] = None
     ultima_fecha: Optional[str] = None
+    core: Optional[str] = None  # OP_PROD lo manda desde zbx.qa_tablas.CORE
     snapshot_fecha: date
     snapshot_ts: datetime
     estado_ts: Optional[datetime] = None

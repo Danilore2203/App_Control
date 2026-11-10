@@ -38,3 +38,29 @@ def test_listar_tablas_devuelve_una_fila_por_tabla_con_sus_campos(db):
     assert (clientes.color, clientes.estado, clientes.cantidad, clientes.layer) == ("red", "VACÍA", 0, "silver")
     fact = next(f for f in filas if f.nombre == "FACT_LLAMADAS")
     assert (fact.fuente, fact.hora_programada, fact.ultima_fecha) == ("QA_CONTROL", "06:00", "2026-11-05 05:58")
+
+
+def test_la_marca_core_llega_del_push_y_sale_en_tablas(db):
+    from app import schemas
+    from app.services.catalogos import aplicar_push_catalogos
+
+    def fila(id_, nombre, core=None):
+        return {"id": id_, "nombre": nombre, "fuente": "QA_CONTROL", "estado": "OK", "color": "green", "cantidad": 5,
+                "snapshot_fecha": HOY.isoformat(), "snapshot_ts": "2026-11-05T08:00:00", "core": core}
+
+    aplicar_push_catalogos(db, schemas.CatalogoPushIn(**{
+        "fecha": HOY.isoformat(), "completo": False,
+        "tablas": {"upsert": [fila(1, "DW.DIM_PERSONA", "SI"), fila(2, "DW.OTRA")]},
+    }))
+    filas = {f.nombre: schemas.TablaOut.model_validate(f).core for f in listar_tablas(db=db, usuario_actual=None)}
+    assert filas == {"DW.DIM_PERSONA": "SI", "DW.OTRA": None}
+
+    # Un OP_PROD viejo manda la tabla sin «core»: la marca se conserva.
+    sin_core = fila(1, "DW.DIM_PERSONA")
+    del sin_core["core"]
+    sin_core["estado"] = "ERROR"
+    aplicar_push_catalogos(db, schemas.CatalogoPushIn(**{
+        "fecha": HOY.isoformat(), "completo": False, "tablas": {"upsert": [sin_core]},
+    }))
+    persona = next(f for f in listar_tablas(db=db, usuario_actual=None) if f.nombre == "DW.DIM_PERSONA")
+    assert (persona.estado, persona.core) == ("ERROR", "SI")
