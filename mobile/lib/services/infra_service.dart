@@ -1,3 +1,4 @@
+import "../models/netezza_bloqueos.dart";
 import "../models/netezza_sesion.dart";
 import "../models/postgres_sesion.dart";
 import "comandos_service.dart";
@@ -24,6 +25,16 @@ class InfraService {
 
   Future<void> abortarTransaccionNetezza(int sessionId) =>
       _comandos.ejecutar("infra.netezza.abort_txn", payload: {"session_id": sessionId});
+
+  /// DROP SESSION: desconecta al cliente (abortar solo deshace la transaccion).
+  Future<void> matarSesionNetezza(int sessionId) =>
+      _comandos.ejecutar("infra.netezza.kill", payload: {"session_id": sessionId});
+
+  /// Quien frena a quien, transacciones abiertas y consultas trabadas (como la web).
+  Future<BloqueosNetezza> obtenerBloqueosNetezza() async {
+    final r = await _comandos.ejecutar("infra.netezza.bloqueos");
+    return BloqueosNetezza.fromJson(r.resultado);
+  }
 
   // ---- PostgreSQL (DEV y PROD, mismo formato) ----
 

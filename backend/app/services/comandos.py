@@ -26,6 +26,8 @@ TIPOS_COMANDO: dict[str, bool] = {
     # Infraestructura
     "infra.netezza.sesiones": False,
     "infra.netezza.abort_txn": True,  # payload: {"session_id": int}
+    "infra.netezza.kill": True,  # payload: {"session_id": int}; DROP SESSION
+    "infra.netezza.bloqueos": False,  # quien frena a quien, transacciones abiertas y consultas trabadas
     "infra.postgres.sesiones": False,  # payload: {"entorno": "dev"|"prod", "solo_activas": bool}
     "infra.postgres.cancel": True,  # payload: {"entorno": "dev"|"prod", "pid": int}
     # Procesos
