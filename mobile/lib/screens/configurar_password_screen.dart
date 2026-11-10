@@ -7,6 +7,7 @@ import "../widgets/fondo_app.dart";
 import "../widgets/titulo_seccion.dart";
 import "../widgets/version_app.dart";
 import "dashboard_screen.dart";
+import "recuperar_password_screen.dart";
 
 /// Para cuentas (tipicamente AD) que todavia no tienen una contraseña local
 /// configurada, o quieren cambiarla. Se valida la contraseña actual (contra
@@ -209,6 +210,29 @@ class _ConfigurarPasswordScreenState extends State<ConfigurarPasswordScreen> {
                             ),
                             validator: (valor) =>
                                 (valor?.isEmpty ?? true) ? "Ingresa tu contraseña actual" : null,
+                          ),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () => Navigator.of(context).pushReplacement(
+                                MaterialPageRoute(
+                                  builder: (_) => RecuperarPasswordScreen(
+                                    usuarioInicial: _usuarioController.text.trim().isEmpty
+                                        ? null
+                                        : _usuarioController.text.trim(),
+                                  ),
+                                ),
+                              ),
+                              style: TextButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                minimumSize: const Size(0, 32),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: const Text(
+                                "¿No la recuerdas? Recibir un código por correo",
+                                style: TextStyle(fontSize: 12),
+                              ),
+                            ),
                           ),
                         ],
                         const SizedBox(height: 20),

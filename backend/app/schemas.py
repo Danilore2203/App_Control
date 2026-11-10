@@ -84,6 +84,30 @@ class ConfigurarPasswordIn(BaseModel):
         return self
 
 
+class RecuperarPasswordIn(BaseModel):
+    identificador: str = Field(min_length=1, max_length=150)  # usuario o correo
+
+
+class RestablecerPasswordIn(BaseModel):
+    identificador: str = Field(min_length=1, max_length=150)
+    codigo: str = Field(pattern=r"^\d{6}$")
+    password_nueva: str = Field(min_length=8, max_length=128)
+
+    @field_validator("codigo", mode="before")
+    @classmethod
+    def _sin_espacios(cls, valor):
+        return valor.strip() if isinstance(valor, str) else valor
+
+    @field_validator("password_nueva")
+    @classmethod
+    def validar_fortaleza(cls, valor: str) -> str:
+        if not re.search(r"\d", valor):
+            raise ValueError("La contrasena debe incluir al menos un numero")
+        if not re.search(r"[^A-Za-z0-9]", valor):
+            raise ValueError("La contrasena debe incluir al menos un simbolo")
+        return valor
+
+
 class FcmTokenIn(BaseModel):
     fcm_token: str
 

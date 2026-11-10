@@ -149,6 +149,56 @@ class AuthService {
     await _guardarTokens(data);
   }
 
+  /// Pide el código de 6 dígitos por correo. El backend responde lo mismo
+  /// exista o no la cuenta; devuelve ese mensaje para mostrarlo.
+  Future<String> solicitarRecuperacion(String identificador) async {
+    final response = await http
+        .post(
+          Uri.parse("${AppConfig.apiBaseUrl}/auth/recuperar"),
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode({"identificador": identificador}),
+        )
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+
+    if (response.statusCode == 429) {
+      throw Exception("Pediste varios códigos seguidos. Espera un minuto y vuelve a intentar.");
+    }
+    if (response.statusCode != 200) {
+      throw Exception(_extraerDetalle(response, "No se pudo pedir el código."));
+    }
+    final data = jsonDecode(response.body);
+    return (data is Map ? data["mensaje"] as String? : null) ?? "Revisa tu correo.";
+  }
+
+  /// Cambia la contraseña con el código del correo y deja la sesión iniciada.
+  Future<void> restablecerPassword({
+    required String identificador,
+    required String codigo,
+    required String passwordNueva,
+  }) async {
+    final response = await http
+        .post(
+          Uri.parse("${AppConfig.apiBaseUrl}/auth/restablecer"),
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode({
+            "identificador": identificador,
+            "codigo": codigo,
+            "password_nueva": passwordNueva,
+          }),
+        )
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg));
+
+    if (response.statusCode == 429) {
+      throw Exception("Demasiados intentos. Espera un minuto y vuelve a intentar.");
+    }
+    if (response.statusCode != 200) {
+      throw Exception(_extraerDetalle(response, "No se pudo cambiar la contraseña."));
+    }
+    final data = jsonDecode(response.body);
+    await _guardarTokens(data);
+    await _guardarInfraToken(data);
+  }
+
   Future<void> loginConGoogle() async {
     final cuenta = await _googleSignIn.signIn();
     if (cuenta == null) {

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app import auth, models, schemas
 from app.database import get_db
 from app.rate_limit import limiter
+from app.services import recuperacion
 from app.services.fcm import enviar_alerta_push
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
                     "codigo": "sin_password",
                     "mensaje": (
                         "Tu cuenta todavia no tiene una contrasena configurada para la app. "
-                        "Usa 'Olvide mi contrasena' e ingresa tu contrasena habitual (AD) para crearla."
+                        "Usa 'Olvidé mi contraseña': te llega un código al correo para crearla."
                     ),
                 },
             )
@@ -92,6 +93,33 @@ def configurar_password(request: Request, payload: schemas.ConfigurarPasswordIn,
     if not usuario:
         raise HTTPException(status_code=401, detail="Usuario o contrasena actual incorrectos")
 
+    access_token = auth.crear_access_token(data={"sub": usuario.username})
+    refresh_token = auth.crear_refresh_token(usuario.username)
+    return schemas.Token(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/recuperar", response_model=schemas.MensajeOut)
+@limiter.limit("3/minute")
+def recuperar_password(request: Request, payload: schemas.RecuperarPasswordIn, db: Session = Depends(get_db)):
+    """Manda un codigo por correo para cambiar la contrasena sin saber la
+    anterior (ver services/recuperacion.py). Responde lo mismo exista o no la
+    cuenta, para que no sirva para averiguar usuarios."""
+    recuperacion.solicitar(db, payload.identificador)
+    return schemas.MensajeOut(
+        ok=True,
+        mensaje=(
+            "Si la cuenta existe y tiene un correo registrado, en unos minutos te llega un código "
+            f"de 6 dígitos. Vale {recuperacion.MINUTOS_VIGENCIA} minutos."
+        ),
+    )
+
+
+@router.post("/restablecer", response_model=schemas.Token)
+@limiter.limit("10/minute")
+def restablecer_password(request: Request, payload: schemas.RestablecerPasswordIn, db: Session = Depends(get_db)):
+    usuario = recuperacion.restablecer(db, payload.identificador, payload.codigo, payload.password_nueva)
+    if not usuario:
+        raise HTTPException(status_code=400, detail="El código no es válido o ya venció. Pide uno nuevo.")
     access_token = auth.crear_access_token(data={"sub": usuario.username})
     refresh_token = auth.crear_refresh_token(usuario.username)
     return schemas.Token(access_token=access_token, refresh_token=refresh_token)

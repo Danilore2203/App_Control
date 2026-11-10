@@ -17,6 +17,10 @@ class Usuario(Base):
     nombre = Column(String(150), nullable=True)
     email = Column(String(150), nullable=True)
     password_hash = Column(String(255), nullable=True)
+    # Ultimo hash que mando la web (push de usuarios). Propio de esta app:
+    # sirve para tomar el de la web solo cuando cambia alla, y no pisar
+    # todos los dias una contrasena que el usuario cambio aca.
+    password_hash_web = Column(String(255), nullable=True)
     activo = Column(Boolean, default=True)
     fecha_creacion = Column(DateTime, default=datetime.utcnow)
     # Vincula esta cuenta AD con un correo de Google (puede ser distinto al
@@ -330,3 +334,20 @@ class Comando(Base):
     error = Column(String(2000), nullable=True)
 
     creado_por = relationship("Usuario", lazy="joined")
+
+
+class CodigoRecuperacion(Base):
+    """Codigo de 6 digitos que se manda por correo para cambiar la contrasena
+    sin saber la anterior (ver services/recuperacion.py). Solo se guarda un
+    HMAC del codigo, nunca el codigo; vence a los 15 minutos, sirve una sola
+    vez y se anula despues de 5 intentos fallidos."""
+
+    __tablename__ = "codigos_recuperacion"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False, index=True)
+    codigo_hash = Column(String(64), nullable=False)
+    creado_en = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expira_en = Column(DateTime, nullable=False)
+    usado_en = Column(DateTime, nullable=True)
+    intentos = Column(Integer, nullable=False, default=0)

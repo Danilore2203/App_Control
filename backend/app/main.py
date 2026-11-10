@@ -54,6 +54,7 @@ def _migrar_columnas_legacy():
         ("dataops_catalogo_tablas", "core VARCHAR(10)"),
         ("poller_state", "ultimo_cambio_revisado INTEGER NOT NULL DEFAULT 0"),
         ("bitacora_errores", "origen_id INTEGER"),
+        ("usuarios", "password_hash_web VARCHAR(255)"),
     )
     for tabla, columna in columnas_nuevas:
         with engine.begin() as conn:
@@ -61,6 +62,20 @@ def _migrar_columnas_legacy():
                 conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {columna}"))
             except Exception:
                 logger.exception("No se pudo agregar la columna %s a %s (revisar a mano si persiste)", columna, tabla)
+    # Los hashes de la web que ya estan en password_hash vinieron del push:
+    # se anotan como «el ultimo de la web» para que el proximo push no los
+    # vuelva a escribir encima de una contrasena cambiada en la app.
+    with engine.begin() as conn:
+        try:
+            conn.execute(
+                text(
+                    "UPDATE usuarios SET password_hash_web = password_hash "
+                    "WHERE password_hash_web IS NULL "
+                    "AND (password_hash LIKE 'scrypt:%' OR password_hash LIKE 'pbkdf2:%')"
+                )
+            )
+        except Exception:
+            logger.exception("No se pudo marcar password_hash_web (revisar a mano si persiste)")
     with engine.begin() as conn:
         try:
             conn.execute(

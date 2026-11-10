@@ -60,11 +60,36 @@ EXPIRA_PENDIENTE_SEGUNDOS = 120
 EXPIRA_EN_CURSO_SEGUNDOS = 3 * 3600  # un job DataStage puede tardar mucho; OP_PROD responde al terminar
 
 
-def _a_salida(c: models.Comando) -> schemas.ComandoOut:
+# Comandos que crea el propio backend (la app no los puede pedir: no estan en
+# TIPOS_COMANDO) y cuyo payload lleva datos que solo OP_PROD debe ver. El
+# codigo de recuperacion viaja para que OP lo mande por correo, pero en
+# cualquier otra salida va tapado y se borra del registro al terminar.
+CAMPOS_RESERVADOS: dict[str, tuple[str, ...]] = {
+    "correo.recuperar_password": ("codigo",),
+}
+
+
+def _payload(c: models.Comando, completo: bool = False) -> dict:
+    datos = json.loads(c.payload or "{}")
+    if not completo and isinstance(datos, dict):
+        for campo in CAMPOS_RESERVADOS.get(c.tipo, ()):
+            if campo in datos:
+                datos[campo] = "***"
+    return datos
+
+
+def _borrar_reservados(c: models.Comando) -> None:
+    if c.tipo in CAMPOS_RESERVADOS:
+        c.payload = json.dumps(_payload(c), ensure_ascii=False)
+
+
+def _a_salida(c: models.Comando, completo: bool = False) -> schemas.ComandoOut:
+    """`completo` solo para OP_PROD (tomar_pendientes): es el unico que
+    necesita los campos reservados para ejecutar el comando."""
     return schemas.ComandoOut(
         id=c.id,
         tipo=c.tipo,
-        payload=json.loads(c.payload or "{}"),
+        payload=_payload(c, completo),
         estado=c.estado,
         creado_en=c.creado_en,
         tomado_en=c.tomado_en,
@@ -122,6 +147,7 @@ def expirar_vencidos(db: Session, ahora: Optional[datetime] = None) -> int:
         c.estado = "expirado"
         c.terminado_en = ahora
         c.error = "OP_PROD no respondio a tiempo (sin conexion o apagado)"
+        _borrar_reservados(c)
     if vencidos:
         db.commit()
     return len(vencidos)
@@ -143,7 +169,7 @@ def tomar_pendientes(db: Session, limite: int = 10) -> list[schemas.ComandoOut]:
         c.estado = "en_curso"
         c.tomado_en = ahora
     db.commit()
-    return [_a_salida(c) for c in pendientes]
+    return [_a_salida(c, completo=True) for c in pendientes]
 
 
 def registrar_resultado(db: Session, comando_id: int, resultado: schemas.ComandoResultadoIn) -> schemas.ComandoOut:
@@ -156,6 +182,7 @@ def registrar_resultado(db: Session, comando_id: int, resultado: schemas.Comando
         json.dumps(resultado.resultado, ensure_ascii=False) if resultado.resultado is not None else None
     )
     comando.error = (resultado.error or "")[:2000] or None
+    _borrar_reservados(comando)
     db.commit()
     db.refresh(comando)
     return _a_salida(comando)
