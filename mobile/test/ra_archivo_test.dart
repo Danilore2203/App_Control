@@ -6,7 +6,7 @@ void main() {
     final m = RaMonitor.fromJson({
       "filas": [
         {"archivo": "A.txt", "proceso": "P1", "estado": "OK", "color": "green", "fecha_hora": "2026-11-09 08:00:00", "tamano": 120, "tamano_ref": 100},
-        {"archivo": "B.txt", "proceso": "", "estado": "ERROR", "color": "red", "fecha_hora": null},
+        {"archivo": "B.txt", "proceso": "", "estado": "ERROR", "color": "red", "fecha_hora": null, "tamano": "1234.00", "tamano_ref": "x"},
         {"archivo": "C.txt", "proceso": "", "estado": "EN PROCESO", "color": "blue"},
       ],
       "resumen": {"green": 1, "red": 1, "orange": 0, "blue": 1, "gray": 0, "todos": 3},
@@ -14,6 +14,7 @@ void main() {
     expect(m.filas.map((f) => f.estado), ["OK", "ERROR", "EN PROCESO"]);
     expect(m.filas.first.fechaHora, "2026-11-09 08:00:00");
     expect(m.filas[1].fechaHora, isNull);
+    expect((m.filas[1].tamano, m.filas[1].tamanoRef), (1234, null)); // Decimal de MySQL llega como texto
     expect((m.total, m.cuenta("green"), m.cuenta("red"), m.enProceso), (3, 1, 1, 1));
   });
 
