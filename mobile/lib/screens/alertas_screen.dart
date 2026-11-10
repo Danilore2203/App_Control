@@ -6,6 +6,7 @@ import "../models/control.dart";
 import "../services/actualizaciones_service.dart";
 import "../services/api_service.dart";
 import "../theme.dart";
+import "../utils/formato.dart";
 import "../widgets/detalle_proceso_sheet.dart";
 import "../widgets/estado_vacio.dart";
 import "../widgets/fondo_app.dart";
@@ -121,12 +122,6 @@ class _AlertasScreenState extends State<AlertasScreen> {
     });
     _cargarIncoherencias();
     await Future.wait([futureAlertas, futureControles]);
-  }
-
-  String _formatearFecha(DateTime fecha) {
-    String dosDigitos(int n) => n.toString().padLeft(2, "0");
-    return "${dosDigitos(fecha.day)}/${dosDigitos(fecha.month)}/${fecha.year}"
-        " · ${dosDigitos(fecha.hour)}:${dosDigitos(fecha.minute)}";
   }
 
   String _horaControl(Control control) {
@@ -260,14 +255,18 @@ class _AlertasScreenState extends State<AlertasScreen> {
                       colorIcono: colorScheme.outline,
                     )
                   else
-                    for (final alerta in alertas)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _TarjetaAlerta(
-                          alerta: alerta,
-                          fecha: _formatearFecha(alerta.creadoEn),
+                    for (var i = 0; i < alertas.length; i++) ...[
+                      // Encabezado por dia: «Hoy», «Ayer», «9 nov».
+                      if (i == 0 || diaAmigable(alertas[i].creadoEn) != diaAmigable(alertas[i - 1].creadoEn))
+                        Padding(
+                          padding: EdgeInsets.only(top: i == 0 ? 2 : 10, bottom: 8, left: 2),
+                          child: Eyebrow(diaAmigable(alertas[i].creadoEn)),
                         ),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _TarjetaAlerta(alerta: alertas[i]),
                       ),
+                    ],
                 ],
               );
             },
@@ -278,54 +277,129 @@ class _AlertasScreenState extends State<AlertasScreen> {
   }
 }
 
+/// Lo que dice una alerta, separado: «[DATASTAGE] RUN_X: DEMORADO» o
+/// «Proceso X en incoherencia a las 09:01: finalizó OK pero ...».
+class AlertaLeida {
+  final String titulo;
+  final String? fuente;
+  final String? estado;
+  final String? detalle;
+
+  const AlertaLeida({required this.titulo, this.fuente, this.estado, this.detalle});
+
+  static final _reFuente = RegExp(r"^\[([^\]]+)\]\s*(.+?):\s*([A-Za-zÁÉÍÓÚáéíóúÑñ _]+)$");
+  static final _reIncoherencia = RegExp(r"^Proceso\s+(\S+)\s+en incoherencia(.*)$", dotAll: true);
+  static final _reHora = RegExp(r"^\s*a las \d{1,2}:\d{2}\s*:?\s*");
+
+  factory AlertaLeida.de(String mensaje) {
+    final m = mensaje.trim();
+    final f = _reFuente.firstMatch(m);
+    if (f != null) {
+      return AlertaLeida(titulo: f.group(2)!.trim(), fuente: f.group(1)!.trim(), estado: f.group(3)!.trim().toUpperCase());
+    }
+    final i = _reIncoherencia.firstMatch(m);
+    if (i != null) {
+      final resto = i.group(2)!.replaceFirst(_reHora, "").trim();
+      return AlertaLeida(
+        titulo: i.group(1)!,
+        estado: "INCOHERENCIA",
+        detalle: resto.isEmpty ? null : "${resto[0].toUpperCase()}${resto.substring(1)}",
+      );
+    }
+    return AlertaLeida(titulo: m);
+  }
+
+  /// (texto del estado, color, icono)
+  (String, Color, IconData) get tono {
+    final e = (estado ?? "").toUpperCase();
+    if (e.contains("DEMORA")) return ("Demorado", StatusColors.advertencia, Icons.schedule_rounded);
+    if (e == "INCOHERENCIA") return ("Incoherencia", StatusColors.critico, Icons.link_off_rounded);
+    if (e.contains("ERROR") || e.contains("FALL") || e.contains("ABORT")) {
+      return ("Error", StatusColors.critico, Icons.error_outline_rounded);
+    }
+    if (e.isEmpty) return ("Aviso", StatusColors.info, Icons.notifications_none_rounded);
+    return ("${e[0]}${e.substring(1).toLowerCase()}", StatusColors.info, Icons.notifications_none_rounded);
+  }
+}
+
 class _TarjetaAlerta extends StatelessWidget {
-  const _TarjetaAlerta({required this.alerta, required this.fecha});
+  const _TarjetaAlerta({required this.alerta});
 
   final Alerta alerta;
-  final String fecha;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final esCritica = alerta.nivel == "critica";
-    final color = esCritica ? StatusColors.critico : StatusColors.advertencia;
+    final leida = AlertaLeida.de(alerta.mensaje);
+    final (estadoTxt, tono, icono) = leida.tono;
+    final f = alerta.creadoEn;
+    final hora = "${f.hour.toString().padLeft(2, "0")}:${f.minute.toString().padLeft(2, "0")}";
 
     return Vidrio(
-      padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+      padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
       blur: 8,
+      borderColor: esCritica ? StatusColors.critico.withValues(alpha: 0.45) : null,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CajaIcono(
-            esCritica ? Icons.notification_important_rounded : Icons.notifications_rounded,
-            color: color,
-          ),
+          CajaIcono(icono, color: tono, tamano: 38, tamanoIcono: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  alerta.mensaje,
-                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600, height: 1.3),
-                ),
-                const SizedBox(height: 6),
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.schedule_rounded, size: 13, color: colorScheme.outline),
-                    const SizedBox(width: 4),
-                    Text(
-                      fecha,
-                      style: theme.textTheme.labelSmall?.copyWith(color: colorScheme.outline, fontWeight: FontWeight.w600),
+                    Expanded(
+                      child: Text(
+                        leida.titulo,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700, height: 1.25),
+                      ),
                     ),
+                    const SizedBox(width: 8),
+                    Text(hora, style: theme.textTheme.labelMedium?.copyWith(color: colorScheme.outline, fontWeight: FontWeight.w700)),
                   ],
                 ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          style: theme.textTheme.bodySmall,
+                          children: [
+                            if (leida.fuente != null) ...[
+                              TextSpan(
+                                text: leida.fuente,
+                                style: TextStyle(color: colorScheme.outline, fontWeight: FontWeight.w800, letterSpacing: 0.4, fontSize: 11),
+                              ),
+                              TextSpan(text: "  ·  ", style: TextStyle(color: colorScheme.outline)),
+                            ],
+                            TextSpan(text: estadoTxt, style: TextStyle(color: tono, fontWeight: FontWeight.w800)),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (esCritica) const PillEstado("Crítica", color: StatusColors.critico, icono: Icons.priority_high_rounded),
+                  ],
+                ),
+                if (leida.detalle != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    leida.detalle!,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant, height: 1.35),
+                  ),
+                ],
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          PillEstado(esCritica ? "Crítica" : "Normal", color: color),
         ],
       ),
     );

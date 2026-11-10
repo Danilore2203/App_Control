@@ -1,3 +1,5 @@
+import "../utils/formato.dart";
+
 class Alerta {
   final int id;
   final int controlId;
@@ -22,7 +24,8 @@ class Alerta {
       mensaje: json["mensaje"],
       nivel: json["nivel"],
       enviada: json["enviada"],
-      creadoEn: DateTime.parse(json["creado_en"]),
+      // El backend la guarda en UTC sin zona: a la hora del celular.
+      creadoEn: fechaUtc(json["creado_en"].toString()),
     );
   }
 }

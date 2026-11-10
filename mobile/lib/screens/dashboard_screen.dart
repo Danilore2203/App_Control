@@ -1,4 +1,5 @@
 import "dart:async";
+import "dart:ui" show ImageFilter;
 
 import "package:flutter/material.dart";
 
@@ -10,6 +11,7 @@ import "../services/comandos_service.dart";
 import "../services/infra_service.dart";
 import "../services/sesion_actual.dart";
 import "../theme.dart";
+import "../utils/formato.dart";
 import "bitacora_screen.dart";
 import "configuracion_guardia_screen.dart";
 import "infraestructura_screen.dart";
@@ -170,6 +172,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// monitor; se dejan afuera para que la app cuente lo mismo que la web.
   static const _fuentesTablasMonitor = {"QA_CONTROL"};
 
+  /// Ultimo catalogo cargado: mientras se recarga (cada vez que el backend
+  /// avisa cambios) se sigue mostrando este, asi la lista no se reemplaza
+  /// por un spinner ni vuelve arriba de golpe.
+  _Catalogo? _ultimoCatalogo;
+
   Future<_Catalogo> _cargarCatalogo() async {
     final resultados = await Future.wait([
       _apiService.obtenerControles(),
@@ -177,10 +184,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // procesos se muestran igual y la pestana Tablas queda en 0.
       _apiService.obtenerTablas().catchError((_) => <Control>[]),
     ]);
-    return _Catalogo(
+    final catalogo = _Catalogo(
       procesos: resultados[0],
       tablas: resultados[1].where((t) => _fuentesTablasMonitor.contains(t.fuente)).toList(),
     );
+    _ultimoCatalogo = catalogo;
+    return catalogo;
   }
 
   List<Control> _segunVista(_Catalogo catalogo) {
@@ -284,7 +293,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return SliverList.separated(
       itemCount: controles.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
         final esUltimo = index == controles.length - 1;
         return Padding(
@@ -298,6 +307,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// Alto fijo de la franja de filtros + buscador (va anclada arriba).
+  static const _altoFiltros = 124.0;
+
   Widget _buildBusqueda(ColorScheme colorScheme) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -307,6 +319,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onChanged: (valor) =>
             setState(() => _busqueda = valor.trim().toLowerCase()),
         decoration: InputDecoration(
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
           hintText: _vista == "TABLAS"
               ? "Buscar tablas..."
               : "Buscar procesos, ETLs o tablas...",
@@ -325,23 +339,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildEncabezadoLista(ColorScheme colorScheme) {
+  Widget _buildEncabezadoLista(ColorScheme colorScheme, int cantidad) {
     // "Actualizar todos" como en el monitor web: solo administradores y
     // solo en Procesos o Tablas (General mezcla las dos cosas).
     final puedeActualizar = (_usuario?.esAdmin ?? false) && _vista != "GENERAL";
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: TituloSeccion(
-        _tituloLista,
-        accion: puedeActualizar
-            ? TextButton.icon(
-                onPressed: _actualizandoTodos ? null : _actualizarTodos,
-                icon: _actualizandoTodos
-                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text("Actualizar todos"),
-              )
-            : null,
+      padding: const EdgeInsets.fromLTRB(16, 10, 8, 8),
+      child: Row(
+        children: [
+          Text(_tituloLista, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(width: 8),
+          Text(
+            formatearMiles(cantidad),
+            style: theme.textTheme.labelLarge?.copyWith(color: colorScheme.outline, fontWeight: FontWeight.w800),
+          ),
+          const Spacer(),
+          if (puedeActualizar)
+            TextButton.icon(
+              onPressed: _actualizandoTodos ? null : _actualizarTodos,
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+              icon: _actualizandoTodos
+                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text("Actualizar todos"),
+            ),
+        ],
       ),
     );
   }
@@ -476,10 +499,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return FutureBuilder<_Catalogo>(
       future: _controlesFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        final recargando = snapshot.connectionState == ConnectionState.waiting;
+        // Recargando con datos previos: se muestran los previos (sin spinner).
+        final datos = recargando ? _ultimoCatalogo : (snapshot.data ?? _ultimoCatalogo);
+        if (datos == null && recargando) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (snapshot.hasError) {
+        if (snapshot.hasError && datos == null) {
           return EstadoVacio(
             icono: Icons.cloud_off_rounded,
             mensaje: "No se pudieron cargar los controles",
@@ -489,7 +515,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           );
         }
 
-        final catalogo = snapshot.data ?? const _Catalogo();
+        final catalogo = datos ?? const _Catalogo();
         if (catalogo.procesos.isEmpty && catalogo.tablas.isEmpty) {
           return EstadoVacio(
             icono: Icons.checklist_rtl,
@@ -522,57 +548,64 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final criticos = todos.where((c) => c.color == "red" && !c.esDemorado).toList();
         final fuentesCriticas = criticos.map((c) => c.fuente).toSet().toList();
 
-        return Column(
-          children: [
-            AlertaBanner(
-              cantidadCriticos: criticos.length,
-              cantidadDemorados: todos.where((c) => c.esDemorado).length,
-              fuentesAfectadas: fuentesCriticas,
-              sustantivo: switch (_vista) {
-                "PROCESOS" => "proceso",
-                "TABLAS" => "tabla",
-                _ => "elemento",
-              },
-              onTap: () => setState(() => _filtroColor = "red"),
-            ),
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: _recargarControles,
-                child: CustomScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: Column(
-                        children: [
-                          _buildPestanas(catalogo),
-                          // La salud responde a la fuente/core elegidos, para
-                          // poder comparar AIRFLOW o DATASTAGE con su monitor.
-                          SaludSistema(controles: segunCore),
-                          MonitoreoPorFuente(
-                            controles: todos,
-                            fuenteSeleccionada: _filtroFuente,
-                            onSeleccionarFuente: (fuente) => setState(() =>
-                                _filtroFuente =
-                                    _filtroFuente == fuente ? null : fuente),
-                            coreSeleccionado: _filtroSoloCore,
-                            onSeleccionarCore: () => setState(
-                                () => _filtroSoloCore = !_filtroSoloCore),
-                          ),
-                          const SizedBox(height: 8),
-                          _buildFiltros(segunCore),
-                          const SizedBox(height: 14),
-                          _buildBusqueda(colorScheme),
-                          const SizedBox(height: 16),
-                          _buildEncabezadoLista(colorScheme),
-                        ],
-                      ),
+        return RefreshIndicator(
+          onRefresh: _recargarControles,
+          child: CustomScrollView(
+            // Guarda hasta donde se bajo, aunque se cambie de pestaña y se vuelva.
+            key: const PageStorageKey("lista-controles"),
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverToBoxAdapter(
+                child: Column(
+                  children: [
+                    // El aviso se va con el resto al bajar: antes quedaba
+                    // fijo y le quitaba espacio a la lista.
+                    AlertaBanner(
+                      cantidadCriticos: criticos.length,
+                      cantidadDemorados: todos.where((c) => c.esDemorado).length,
+                      fuentesAfectadas: fuentesCriticas,
+                      sustantivo: switch (_vista) {
+                        "PROCESOS" => "proceso",
+                        "TABLAS" => "tabla",
+                        _ => "elemento",
+                      },
+                      onTap: () => setState(() => _filtroColor = "red"),
                     ),
-                    _buildListaControlesSliver(controles, colorScheme),
+                    _buildPestanas(catalogo),
+                    // La salud responde a la fuente/core elegidos, para
+                    // poder comparar AIRFLOW o DATASTAGE con su monitor.
+                    SaludSistema(controles: segunCore),
+                    MonitoreoPorFuente(
+                      controles: todos,
+                      fuenteSeleccionada: _filtroFuente,
+                      onSeleccionarFuente: (fuente) =>
+                          setState(() => _filtroFuente = _filtroFuente == fuente ? null : fuente),
+                      coreSeleccionado: _filtroSoloCore,
+                      onSeleccionarCore: () => setState(() => _filtroSoloCore = !_filtroSoloCore),
+                    ),
+                    const SizedBox(height: 6),
                   ],
                 ),
               ),
-            ),
-          ],
+              // Filtros y buscador quedan fijos arriba al bajar por la lista.
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: _FiltrosFijos(
+                  alto: _altoFiltros,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _buildFiltros(segunCore),
+                      const SizedBox(height: 10),
+                      _buildBusqueda(colorScheme),
+                    ],
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(child: _buildEncabezadoLista(colorScheme, controles.length)),
+              _buildListaControlesSliver(controles, colorScheme),
+            ],
+          ),
         );
       },
     );
@@ -759,6 +792,46 @@ class _BannerBloqueosProd extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Franja anclada arriba de la lista con los filtros y el buscador. Fondo
+/// translucido con desenfoque para que la lista se vea pasar por debajo.
+class _FiltrosFijos extends SliverPersistentHeaderDelegate {
+  _FiltrosFijos({required this.alto, required this.child});
+
+  final double alto;
+  final Widget child;
+
+  @override
+  double get minExtent => alto;
+
+  @override
+  double get maxExtent => alto;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final fondo = Theme.of(context).brightness == Brightness.dark ? OpTokens.pageDark : OpTokens.pageLight;
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: Container(
+          decoration: BoxDecoration(
+            color: fondo.withValues(alpha: overlapsContent || shrinkOffset > 0 ? 0.86 : 0.0),
+            border: Border(
+              bottom: BorderSide(
+                color: overlapsContent || shrinkOffset > 0 ? colorScheme.outlineVariant.withValues(alpha: 0.6) : Colors.transparent,
+              ),
+            ),
+          ),
+          child: SizedBox(height: alto, child: child),
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _FiltrosFijos old) => true;
 }
 
 /// Pastilla de filtro tipo capsula: punto de color + etiqueta, sin el

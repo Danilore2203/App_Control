@@ -1,3 +1,5 @@
+import "../utils/formato.dart";
+
 /// Una solicitud de acceso pendiente de aprobar. Puede venir de dos origenes
 /// distintos en el backend (tablas separadas, por eso `tipo` no viaja en el
 /// JSON): "google" (inicio de sesion con una cuenta de Google desconocida) o
@@ -31,7 +33,8 @@ class SolicitudAcceso {
       username: json["username"],
       nombre: json["nombre"],
       estado: json["estado"],
-      creadoEn: DateTime.parse(json["creado_en"]),
+      // El backend la guarda en UTC sin zona: a la hora del celular.
+      creadoEn: fechaUtc(json["creado_en"].toString()),
     );
   }
 }

@@ -1,5 +1,7 @@
 import "formato.dart";
 
+export "formato.dart" show duracionCorta;
+
 /// Una consulta en pocas palabras, como en el monitor web de Netezza: que
 /// hace («Carga», «Borra», «Consulta»...) y sobre que tabla. La consulta
 /// completa se ve aparte.
@@ -78,16 +80,6 @@ ResumenSql resumirSql(String? comando) {
     return ResumenSql(verbo: verbo, tabla: t, temporal: temporal, externa: externa);
   }
   return ResumenSql(verbo: verbo, externa: externa);
-}
-
-/// «45 s», «12 min», «2 h 5 min» (como la web).
-String duracionCorta(num? segundos) {
-  final s = segundos == null || segundos < 0 ? 0 : segundos.round();
-  if (s < 60) return "$s s";
-  final m = s ~/ 60;
-  if (m < 60) return "$m min";
-  final r = m % 60;
-  return "${m ~/ 60} h${r > 0 ? " $r min" : ""}";
 }
 
 /// Costo estimado abreviado: «8 M», «80 mil», «1,2 mil M».
