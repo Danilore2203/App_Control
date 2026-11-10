@@ -56,6 +56,8 @@ def _migrar_columnas_legacy():
         ("bitacora_errores", "origen_id INTEGER"),
         ("usuarios", "password_hash_web VARCHAR(255)"),
         ("administradores", "origen VARCHAR(10)"),
+        ("comandos", "rechazos INTEGER NOT NULL DEFAULT 0"),
+        ("codigos_recuperacion", "comando_id INTEGER"),
     )
     for tabla, columna in columnas_nuevas:
         with engine.begin() as conn:

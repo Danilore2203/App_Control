@@ -50,6 +50,7 @@ class _RecuperarPasswordScreenState extends State<RecuperarPasswordScreen> {
   bool _ocultarNueva = true;
   String? _error;
   String? _info;
+  bool _infoDemora = false;
   int _segundosReenvio = 0;
   Timer? _timer;
 
@@ -94,11 +95,12 @@ class _RecuperarPasswordScreenState extends State<RecuperarPasswordScreen> {
       _error = null;
     });
     try {
-      final mensaje = await _auth.solicitarRecuperacion(_usuarioController.text.trim());
+      final respuesta = await _auth.solicitarRecuperacion(_usuarioController.text.trim());
       if (!mounted) return;
       setState(() {
         _codigoPedido = true;
-        _info = mensaje;
+        _info = respuesta.mensaje;
+        _infoDemora = !respuesta.ok;
         _codigoController.clear();
       });
       _arrancarEspera();
@@ -212,7 +214,11 @@ class _RecuperarPasswordScreenState extends State<RecuperarPasswordScreen> {
                         const SizedBox(height: 16),
                       ],
                       if (_info != null && _codigoPedido) ...[
-                        MensajeInline(_info!, color: StatusColors.exitoso, icono: Icons.forward_to_inbox_outlined),
+                        MensajeInline(
+                          _info!,
+                          color: _infoDemora ? StatusColors.advertencia : StatusColors.exitoso,
+                          icono: _infoDemora ? Icons.schedule_send_outlined : Icons.forward_to_inbox_outlined,
+                        ),
                         const SizedBox(height: 16),
                       ],
                       if (_error != null) ...[

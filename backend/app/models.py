@@ -337,8 +337,23 @@ class Comando(Base):
     terminado_en = Column(DateTime, nullable=True)
     resultado = Column(String, nullable=True)
     error = Column(String(2000), nullable=True)
+    # Veces que una copia de OP_PROD lo devolvio por no conocerlo (vieja o sin
+    # reiniciar). Vuelve a la cola y ya solo lo recibe una copia que diga que
+    # sabe hacerlo (ver services/comandos.tomar_pendientes).
+    rechazos = Column(Integer, nullable=False, default=0)
 
     creado_por = relationship("Usuario", lazy="joined")
+
+
+class LatidoOp(Base):
+    """Ultima vez que OP_PROD retiro comandos y que tipos dijo saber hacer.
+    Asi la app puede avisar «el correo va a demorar» si nadie esta atendiendo."""
+
+    __tablename__ = "op_latidos"
+
+    clave = Column(String(40), primary_key=True)
+    visto_en = Column(DateTime, nullable=False)
+    tipos = Column(String, nullable=False, default="")
 
 
 class CodigoRecuperacion(Base):
@@ -356,3 +371,6 @@ class CodigoRecuperacion(Base):
     expira_en = Column(DateTime, nullable=False)
     usado_en = Column(DateTime, nullable=True)
     intentos = Column(Integer, nullable=False, default=0)
+    # El comando de la cola que manda este codigo: cuando sale el correo, los
+    # 15 minutos empiezan a contar de nuevo (si OP_PROD tardo en mandarlo).
+    comando_id = Column(Integer, nullable=True)

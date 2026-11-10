@@ -120,8 +120,12 @@ def test_el_codigo_solo_lo_ve_op_y_se_borra_al_mandar_el_correo(db):
 def test_si_op_no_lo_retira_tambien_se_borra_al_expirar(db):
     usuario(db)
     R.solicitar(db, "ana", ahora=T0)
+    # El correo espera en la cola lo que vale el codigo (OP_PROD puede volver).
     C.expirar_vencidos(db, ahora=T0 + timedelta(minutes=5))
     (cmd,) = db.query(models.Comando).all()
+    assert cmd.estado == "pendiente"
+    C.expirar_vencidos(db, ahora=T0 + timedelta(minutes=16))
+    db.refresh(cmd)
     assert cmd.estado == "expirado"
     assert json.loads(cmd.payload)["codigo"] == "***"
 
@@ -173,12 +177,82 @@ def test_el_push_de_la_web_no_pisa_una_contrasena_cambiada_en_la_app(db):
 
 def test_los_correos_que_no_salieron_no_cuentan_para_el_limite(db):
     usuario(db)
+    # El SMTP fallo las tres veces.
     for i in range(3):
         R.solicitar(db, "ana", ahora=T0 + timedelta(minutes=i))
-    # OP_PROD estaba sin reiniciar: los tres volvieron con error.
-    for c in db.query(models.Comando).all():
-        C.registrar_resultado(db, c.id, schemas.ComandoResultadoIn(ok=False, error="Comando desconocido para OP_PROD"))
+        ultimo = db.query(models.Comando).order_by(models.Comando.id.desc()).first()
+        C.registrar_resultado(db, ultimo.id, schemas.ComandoResultadoIn(ok=False, error="SMTP caido"))
     assert R.solicitar(db, "ana", ahora=T0 + timedelta(minutes=5)) is True
+
+
+def test_pedir_otro_codigo_cancela_el_correo_que_seguia_en_la_cola(db):
+    usuario(db)
+    R.solicitar(db, "ana", ahora=T0)
+    R.solicitar(db, "ana", ahora=T0 + timedelta(minutes=1))
+    primero, segundo = db.query(models.Comando).order_by(models.Comando.id).all()
+    assert (primero.estado, segundo.estado) == ("cancelado", "pendiente")
+    assert json.loads(primero.payload)["codigo"] == "***"
+    # Los cancelados cuentan para el limite: no sirve para pedir sin parar.
+    R.solicitar(db, "ana", ahora=T0 + timedelta(minutes=2))
+    assert R.solicitar(db, "ana", ahora=T0 + timedelta(minutes=3)) is False
+
+
+def test_si_una_copia_vieja_de_op_no_lo_conoce_vuelve_a_la_cola_para_otra(db):
+    usuario(db)
+    R.solicitar(db, "ana", ahora=datetime.utcnow())
+    (cmd,) = db.query(models.Comando).all()
+
+    # Una copia vieja (no anuncia tipos) lo toma y no lo conoce.
+    assert [c.id for c in C.tomar_pendientes(db)] == [cmd.id]
+    C.registrar_resultado(db, cmd.id, schemas.ComandoResultadoIn(ok=False, error="Comando desconocido para OP_PROD: x"))
+    db.refresh(cmd)
+    assert (cmd.estado, cmd.rechazos) == ("pendiente", 1)
+    assert json.loads(cmd.payload)["codigo"].isdigit()  # todavia hay que mandarlo
+
+    # La vieja ya no lo recibe; la que anuncia que sabe mandarlo, si.
+    assert C.tomar_pendientes(db) == []
+    assert C.tomar_pendientes(db, tipos={"infra.netezza.sesiones"}) == []
+    assert [c.id for c in C.tomar_pendientes(db, tipos={R.TIPO_COMANDO})] == [cmd.id]
+
+
+def test_si_ninguna_copia_lo_conoce_al_final_falla(db):
+    usuario(db)
+    R.solicitar(db, "ana", ahora=datetime.utcnow())
+    (cmd,) = db.query(models.Comando).all()
+    for _ in range(C.MAX_RECHAZOS + 1):
+        C.registrar_resultado(db, cmd.id, schemas.ComandoResultadoIn(ok=False, error="Comando desconocido para OP_PROD"))
+    db.refresh(cmd)
+    assert (cmd.estado, cmd.rechazos) == ("error", C.MAX_RECHAZOS)
+    assert json.loads(cmd.payload)["codigo"] == "***"
+
+
+def test_el_codigo_vale_15_minutos_desde_que_sale_el_correo(db):
+    usuario(db)
+    R.solicitar(db, "ana", ahora=T0)
+    codigo = codigo_enviado(db)
+    (cmd,) = db.query(models.Comando).all()
+    # OP_PROD estuvo caido y lo mando 12 minutos despues.
+    R.correo_enviado(db, cmd.id, T0 + timedelta(minutes=12))
+    db.commit()
+    assert R.restablecer(db, "ana", codigo, NUEVA, ahora=T0 + timedelta(minutes=25)) is not None
+
+
+def test_avisa_si_op_no_esta_atendiendo(db):
+    # Sin datos (OP_PROD de antes, que no anuncia tipos): se asume que si.
+    assert R.envio_disponible(db) is True
+    C.tomar_pendientes(db)
+    assert db.get(models.LatidoOp, "comandos") is None
+    C.tomar_pendientes(db, tipos={R.TIPO_COMANDO, "infra.netezza.sesiones"})
+    assert R.envio_disponible(db) is True
+    # Una copia que no sabe mandar correos no cuenta.
+    db.get(models.LatidoOp, "comandos").tipos = "infra.netezza.sesiones"
+    db.commit()
+    assert R.envio_disponible(db) is False
+    # Ni una que dejo de consultar hace rato.
+    fila = db.get(models.LatidoOp, "comandos")
+    fila.tipos, fila.visto_en = R.TIPO_COMANDO, datetime.utcnow() - timedelta(minutes=5)
+    db.commit()
+    assert R.envio_disponible(db) is False
 
 
 def test_el_usuario_se_encuentra_aunque_el_celular_ponga_mayuscula(db):

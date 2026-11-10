@@ -10,9 +10,9 @@ class _AuthFalso extends AuthService {
   final cambios = <(String, String, String)>[];
 
   @override
-  Future<String> solicitarRecuperacion(String identificador) async {
+  Future<({bool ok, String mensaje})> solicitarRecuperacion(String identificador) async {
     pedidos.add(identificador);
-    return "Si la cuenta existe, en unos minutos te llega un código.";
+    return (ok: true, mensaje: "Si la cuenta existe, en unos minutos te llega un código.");
   }
 
   @override

@@ -150,8 +150,9 @@ class AuthService {
   }
 
   /// Pide el código de 6 dígitos por correo. El backend responde lo mismo
-  /// exista o no la cuenta; devuelve ese mensaje para mostrarlo.
-  Future<String> solicitarRecuperacion(String identificador) async {
+  /// exista o no la cuenta; devuelve ese mensaje para mostrarlo. `ok` falso:
+  /// el servidor que manda los correos no está atendiendo y va a demorar.
+  Future<({bool ok, String mensaje})> solicitarRecuperacion(String identificador) async {
     final response = await http
         .post(
           Uri.parse("${AppConfig.apiBaseUrl}/auth/recuperar"),
@@ -167,7 +168,8 @@ class AuthService {
       throw Exception(_extraerDetalle(response, "No se pudo pedir el código."));
     }
     final data = jsonDecode(response.body);
-    return (data is Map ? data["mensaje"] as String? : null) ?? "Revisa tu correo.";
+    final mapa = data is Map ? data : const {};
+    return (ok: mapa["ok"] != false, mensaje: (mapa["mensaje"] as String?) ?? "Revisa tu correo.");
   }
 
   /// Cambia la contraseña con el código del correo y deja la sesión iniciada.
