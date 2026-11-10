@@ -18,6 +18,12 @@ class RaService {
     return RaMonitor.fromJson(r.resultado);
   }
 
+  /// Ruta FTP del archivo, de que procesos depende y cuales lo usan.
+  Future<RaDetalle> obtenerDetalle(String archivo) async {
+    final r = await _comandos.ejecutar("ra.detalle", payload: {"archivo": archivo});
+    return RaDetalle.fromJson(r.resultado);
+  }
+
   /// Solo administradores (el backend lo exige). Publica el avance en la
   /// barra flotante con [titulo].
   Future<RaActualizacion> actualizarTodo({required String titulo}) async {

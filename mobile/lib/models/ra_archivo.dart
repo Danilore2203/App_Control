@@ -11,6 +11,9 @@ class RaArchivo {
   final num? tamano;
   final num? tamanoRef;
 
+  /// Carpeta del FTP donde se deposita el archivo (DIRECCION_FTP_2).
+  final String? ruta;
+
   const RaArchivo({
     required this.archivo,
     required this.proceso,
@@ -19,6 +22,7 @@ class RaArchivo {
     this.fechaHora,
     this.tamano,
     this.tamanoRef,
+    this.ruta,
   });
 
   factory RaArchivo.fromJson(Map<String, dynamic> json) => RaArchivo(
@@ -30,7 +34,81 @@ class RaArchivo {
         // MySQL devuelve TAMAÑO como Decimal y puede llegar como texto ("1234.00").
         tamano: leerNumero(json["tamano"]),
         tamanoRef: leerNumero(json["tamano_ref"]),
+        ruta: _textoRa(json["ruta"]),
       );
+}
+
+String? _textoRa(Object? v) {
+  final s = v?.toString().trim() ?? "";
+  return s.isEmpty ? null : s;
+}
+
+/// Proceso del que depende un archivo RA (el que lo genera) o que lo usa,
+/// como en el detalle del Monitor RA de la web.
+class RaDependencia {
+  final String proceso;
+  final String? tipo; // job_DataStage | job_Pentaho | job_airflow
+  final String? fuente; // DATASTAGE | PENTAHO | AIRFLOW (lo que entiende «Ejecutar»)
+  final String? ruta; // ruta del job DataStage (PROYECTO/.../Job)
+  final String? horaProgramada;
+  final String? horaLog; // ultima corrida registrada
+  final String estado; // OK | ERROR | DEMORADO | EN TIEMPO | SIN REGISTRO
+  final String? responsable;
+
+  const RaDependencia({
+    required this.proceso,
+    required this.estado,
+    this.tipo,
+    this.fuente,
+    this.ruta,
+    this.horaProgramada,
+    this.horaLog,
+    this.responsable,
+  });
+
+  factory RaDependencia.fromJson(Map<String, dynamic> json) => RaDependencia(
+        proceso: (json["proceso"] ?? "").toString(),
+        estado: (json["estado"] ?? "SIN REGISTRO").toString(),
+        tipo: _textoRa(json["tipo"]),
+        fuente: _textoRa(json["fuente"]),
+        ruta: _textoRa(json["ruta"]),
+        horaProgramada: _textoRa(json["hora_programada"]),
+        horaLog: _textoRa(json["hora_log"]),
+        responsable: _textoRa(json["responsable"]),
+      );
+
+  /// Se puede lanzar desde la app (DataStage, Pentaho o Airflow).
+  bool get lanzable => fuente != null && proceso.isNotEmpty;
+
+  /// «DataStage», «Pentaho», «Airflow» para mostrar.
+  String get fuenteLegible => switch (fuente) {
+        "DATASTAGE" => "DataStage",
+        "PENTAHO" => "Pentaho",
+        "AIRFLOW" => "Airflow",
+        _ => tipo ?? "",
+      };
+}
+
+/// `ra.detalle`: el archivo, de que procesos depende y cuales lo usan.
+class RaDetalle {
+  final RaArchivo? archivo;
+  final List<RaDependencia> dependeDe;
+  final List<RaDependencia> loUsan;
+
+  const RaDetalle({this.archivo, this.dependeDe = const [], this.loUsan = const []});
+
+  factory RaDetalle.fromJson(Map<String, dynamic> json) {
+    List<RaDependencia> lista(Object? v) => ((v as List?) ?? const [])
+        .whereType<Map>()
+        .map((d) => RaDependencia.fromJson(Map<String, dynamic>.from(d)))
+        .toList();
+    final detalle = json["detalle"];
+    return RaDetalle(
+      archivo: detalle is Map ? RaArchivo.fromJson(Map<String, dynamic>.from(detalle)) : null,
+      dependeDe: lista(json["padres"]),
+      loUsan: lista(json["hijos"]),
+    );
+  }
 }
 
 /// Resultado de sincronizar una configuracion FTP (una fila de qa_ftp_mysql).

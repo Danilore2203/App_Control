@@ -185,8 +185,16 @@ class CandidatoCola {
   final String? horaProgramada;
   final bool yaToca;
   final String? motivo;
+  final String color; // red = No depositado · gray = En proceso
 
-  const CandidatoCola({required this.archivo, required this.tipo, this.horaProgramada, this.yaToca = true, this.motivo});
+  const CandidatoCola({
+    required this.archivo,
+    required this.tipo,
+    this.horaProgramada,
+    this.yaToca = true,
+    this.motivo,
+    this.color = "red",
+  });
 
   factory CandidatoCola.fromJson(Map<String, dynamic> json) => CandidatoCola(
         archivo: (json["archivo"] ?? "").toString(),
@@ -194,7 +202,32 @@ class CandidatoCola {
         horaProgramada: _texto(json["hora_programada"]),
         yaToca: json["ya_toca"] != false,
         motivo: _texto(json["motivo"]),
+        color: (json["color"] ?? "red").toString(),
       );
+
+  String get estado => color == "red" ? "No depositado" : "En proceso";
+
+  /// Minutos desde medianoche de la hora programada (null si no tiene).
+  int? get minutoDelDia {
+    final h = horaProgramada;
+    if (h == null) return null;
+    final partes = h.split(":");
+    final hh = int.tryParse(partes.first);
+    final mm = partes.length > 1 ? int.tryParse(partes[1]) : 0;
+    if (hh == null || mm == null) return null;
+    return hh * 60 + mm;
+  }
+
+  /// «Mañana» como en la web: programado antes del mediodía.
+  bool get esDeManana => (minutoDelDia ?? 24 * 60) < 12 * 60;
+  bool get esDeTarde => minutoDelDia != null && minutoDelDia! >= 12 * 60;
+
+  /// «08:30» en vez de «08:30:00».
+  String? get horaCorta {
+    final h = horaProgramada;
+    if (h == null) return null;
+    return h.length >= 5 ? h.substring(0, 5) : h;
+  }
 }
 
 class CandidatosCola {

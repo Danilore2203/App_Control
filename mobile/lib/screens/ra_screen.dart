@@ -5,6 +5,8 @@ import "../services/ejecucion_actual.dart";
 import "../services/ra_service.dart";
 import "../services/sesion_actual.dart";
 import "../theme.dart";
+import "../utils/formato.dart";
+import "../widgets/detalle_ra_sheet.dart";
 import "../widgets/estado_vacio.dart";
 import "../widgets/fondo_app.dart";
 import "../widgets/indicador_ejecucion.dart";
@@ -197,13 +199,6 @@ class _RaScreenState extends State<RaScreen> {
       };
 }
 
-Color _colorRa(String color, ColorScheme colorScheme) => switch (color) {
-      "green" => StatusColors.exitoso,
-      "red" => StatusColors.critico,
-      "orange" => StatusColors.advertencia,
-      "blue" => StatusColors.info,
-      _ => colorScheme.outline,
-    };
 
 class _Resumen extends StatelessWidget {
   const _Resumen({required this.monitor, required this.seleccionado, required this.onSeleccionar});
@@ -238,7 +233,7 @@ class _Resumen extends StatelessWidget {
               child: IndicadorTile(
                 etiqueta: tiles[0].$2,
                 valor: "${tiles[0].$3}",
-                color: _colorRa(tiles[0].$1, colorScheme),
+                color: colorRa(tiles[0].$1, colorScheme),
                 icono: tiles[0].$4,
                 onTap: () => onSeleccionar(tiles[0].$1),
               ),
@@ -255,7 +250,7 @@ class _Resumen extends StatelessWidget {
                   child: IndicadorTile(
                     etiqueta: tiles[i].$2,
                     valor: "${tiles[i].$3}",
-                    color: _colorRa(tiles[i].$1, colorScheme),
+                    color: colorRa(tiles[i].$1, colorScheme),
                     icono: tiles[i].$4,
                     onTap: () => onSeleccionar(tiles[i].$1),
                   ),
@@ -375,15 +370,18 @@ class _TarjetaArchivo extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final tono = _colorRa(archivo.color, colorScheme);
+    final tono = colorRa(archivo.color, colorScheme);
+    final fecha = archivo.fechaHora == null ? null : (fechaCatalogo(archivo.fechaHora) ?? archivo.fechaHora);
     final detalle = <String>[
       if (archivo.proceso.isNotEmpty) archivo.proceso,
-      if (archivo.fechaHora != null && archivo.fechaHora!.isNotEmpty) archivo.fechaHora!,
-      if (archivo.tamano != null) "${archivo.tamano} B${archivo.tamanoRef != null ? " · ref ${archivo.tamanoRef} B" : ""}",
+      if (fecha != null && fecha.isNotEmpty) fecha,
+      if (archivo.tamano != null)
+        "${formatearMiles(archivo.tamano!.round())} B${archivo.tamanoRef != null ? " · ref ${formatearMiles(archivo.tamanoRef!.round())} B" : ""}",
     ].join("  ·  ");
     return Vidrio(
-      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
       blur: 10,
+      onTap: () => DetalleRaSheet.mostrar(context, archivo),
       child: Row(
         children: [
           CajaIcono(Icons.description_outlined, color: tono),
@@ -407,11 +405,35 @@ class _TarjetaArchivo extends StatelessWidget {
                     style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant, height: 1.3),
                   ),
                 ],
+                if (archivo.ruta != null) ...[
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Icon(Icons.folder_open_rounded, size: 13, color: colorScheme.outline),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          archivo.ruta!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.tech(color: colorScheme.outline, fontSize: 11, letterSpacing: 0.1),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          PillEstado(archivo.estado, color: tono),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              PillEstado(archivo.estado, color: tono),
+              const SizedBox(height: 6),
+              Icon(Icons.chevron_right_rounded, size: 20, color: colorScheme.outline),
+            ],
+          ),
         ],
       ),
     );
