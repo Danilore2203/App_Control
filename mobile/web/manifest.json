@@ -1,11 +1,11 @@
 {
-    "name": "app_controles",
-    "short_name": "app_controles",
+    "name": "Controles · Centinela DWH",
+    "short_name": "Controles",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#101312",
+    "theme_color": "#101312",
+    "description": "Monitoreo y alertas de Centinela DWH",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

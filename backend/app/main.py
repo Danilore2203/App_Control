@@ -1,9 +1,11 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
@@ -165,9 +167,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    # La app movil (Android nativo) no esta sujeta a CORS -esto solo importa
-    # para cuando se prueba con `flutter run -d chrome`. Si algun dia hay un
-    # panel/monitor web real que llame esta API, agregar su dominio aca.
+    # La app movil (Android nativo) no esta sujeta a CORS, y la version web se
+    # sirve desde este mismo dominio (/app, ver abajo). Esto solo importa
+    # para cuando se prueba con `flutter run -d chrome` en localhost.
     allow_origin_regex=r"^https?://localhost(:\d+)?$",
     allow_credentials=False,
     allow_methods=["*"],
@@ -188,3 +190,27 @@ app.include_router(bitacora_router.router)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# Version web de la app (Flutter web) para usarla desde Safari en iPhone:
+# https://<este servicio>/app/ y «Agregar a pantalla de inicio». Mismo dominio
+# que la API, asi que no hace falta CORS. Se genera con mobile/publicar_web.sh
+# (CanvasKit no se sube: Flutter lo baja de gstatic).
+WEB_APP_DIR = Path(__file__).resolve().parent.parent / "web_app"
+
+
+@app.middleware("http")
+async def _cabeceras_web_app(request: Request, call_next):
+    respuesta = await call_next(request)
+    if request.url.path.startswith("/app"):
+        # Revalida siempre (ETag -> 304): si no, Safari sigue con una version
+        # vieja de main.dart.js despues de publicar una nueva.
+        respuesta.headers["Cache-Control"] = "no-cache"
+        respuesta.headers["X-Content-Type-Options"] = "nosniff"
+        respuesta.headers["X-Frame-Options"] = "DENY"
+        respuesta.headers["Referrer-Policy"] = "no-referrer"
+    return respuesta
+
+
+if WEB_APP_DIR.is_dir():
+    app.mount("/app", StaticFiles(directory=WEB_APP_DIR, html=True), name="web_app")
