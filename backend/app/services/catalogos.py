@@ -180,10 +180,13 @@ def _aplicar_usuarios(db: Session, seccion: schemas.UsuariosIn) -> schemas.Usuar
         existente.nombre = fila.nombre
         existente.email = fila.email
         # La contrasena local que un usuario configuro en la app NO se pisa
-        # con un NULL de MySQL (alla casi nadie tiene hash): solo se toma la
-        # de MySQL cuando existe, que es cuando alguien la cambio alla.
-        if fila.password_hash:
+        # con un NULL de MySQL (alla casi nadie tiene hash), ni con el mismo
+        # hash de la web que ya llego antes: solo se toma el de MySQL cuando
+        # cambio alla. Si no, cada push devolvia la contrasena vieja de la web
+        # encima de la que el usuario cambio en la app.
+        if fila.password_hash and fila.password_hash != existente.password_hash_web:
             existente.password_hash = fila.password_hash
+            existente.password_hash_web = fila.password_hash
         existente.activo = fila.activo
         if fila.fecha_creacion is not None:
             existente.fecha_creacion = fila.fecha_creacion

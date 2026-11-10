@@ -12,6 +12,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from werkzeug.security import check_password_hash
 
 from app import models
 from app.config import settings
@@ -31,8 +32,25 @@ class AccesoGoogleNoConcedido(Exception):
         self.mensaje = mensaje
 
 
+# Formatos de werkzeug (generate_password_hash), que es lo que guarda el
+# monitor web cuando un administrador cambia la contrasena en «Adm. Usuarios».
+# Esos hashes llegan aca con el push de usuarios.
+_PREFIJOS_WERKZEUG = ("scrypt:", "pbkdf2:")
+
+
 def verificar_password(password_plano: str, password_hash: str) -> bool:
-    return pwd_context.verify(password_plano, password_hash)
+    """Acepta los hashes de la app (bcrypt) y los de la web (werkzeug). Un
+    hash que no se reconoce cuenta como contrasena incorrecta en vez de
+    romper el login con un error 500."""
+    if not password_plano or not password_hash:
+        return False
+    try:
+        if password_hash.startswith(_PREFIJOS_WERKZEUG):
+            return check_password_hash(password_hash, password_plano)
+        return pwd_context.verify(password_plano, password_hash)
+    except Exception as exc:
+        logger.warning("No se pudo verificar un hash de contrasena (%s)", type(exc).__name__)
+        return False
 
 
 def hashear_password(password: str) -> str:

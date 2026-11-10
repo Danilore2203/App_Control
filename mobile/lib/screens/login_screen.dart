@@ -6,8 +6,8 @@ import "../services/notification_service.dart";
 import "../widgets/fondo_app.dart";
 import "../widgets/titulo_seccion.dart";
 import "../widgets/version_app.dart";
-import "configurar_password_screen.dart";
 import "dashboard_screen.dart";
+import "recuperar_password_screen.dart";
 import "register_screen.dart";
 
 class LoginScreen extends StatefulWidget {
@@ -136,13 +136,8 @@ class _LoginScreenState extends State<LoginScreen> {
       await _entrarADashboard();
     } on RequiereConfigurarPasswordException catch (_) {
       if (!mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ConfigurarPasswordScreen(
-            usuarioInicial: _usuarioController.text.trim(),
-            esPrimeraVez: true,
-          ),
-        ),
+      _irARecuperarPassword(
+        aviso: "Tu cuenta todavía no tiene contraseña para la app. Te mandamos un código al correo para crearla.",
       );
     } catch (e) {
       setState(() => _error = e.toString().replaceFirst("Exception: ", ""));
@@ -180,11 +175,11 @@ class _LoginScreenState extends State<LoginScreen> {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RegisterScreen()));
   }
 
-  void _irAConfigurarPassword() {
+  void _irARecuperarPassword({String? aviso}) {
     final usuario = _usuarioController.text.trim();
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ConfigurarPasswordScreen(usuarioInicial: usuario.isEmpty ? null : usuario),
+        builder: (_) => RecuperarPasswordScreen(usuarioInicial: usuario.isEmpty ? null : usuario, aviso: aviso),
       ),
     );
   }
@@ -288,7 +283,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       Align(
                                         alignment: Alignment.centerRight,
                                         child: TextButton(
-                                          onPressed: _irAConfigurarPassword,
+                                          onPressed: _irARecuperarPassword,
                                           style: TextButton.styleFrom(
                                             padding: EdgeInsets.zero,
                                             minimumSize: const Size(0, 32),
