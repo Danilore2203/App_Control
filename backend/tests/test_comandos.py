@@ -66,6 +66,16 @@ def test_monitor_ra_y_reportes_solo_administradores(db, tipo):
     assert S.crear_comando(db, admin, schemas.ComandoIn(tipo=tipo)).tipo == tipo
 
 
+def test_bloqueos_netezza_los_ve_cualquiera_y_matar_solo_administradores(db):
+    ana = usuario(db, "ana")
+    admin = usuario(db, "root", admin=True)
+    assert S.crear_comando(db, ana, schemas.ComandoIn(tipo="infra.netezza.bloqueos")).estado == "pendiente"
+    with pytest.raises(HTTPException) as exc:
+        S.crear_comando(db, ana, schemas.ComandoIn(tipo="infra.netezza.kill", payload={"session_id": 7}))
+    assert exc.value.status_code == 403
+    assert S.crear_comando(db, admin, schemas.ComandoIn(tipo="infra.netezza.kill", payload={"session_id": 7})).payload == {"session_id": 7}
+
+
 def test_tipo_desconocido_se_rechaza(db):
     ana = usuario(db, "ana")
     with pytest.raises(HTTPException) as exc:

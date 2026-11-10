@@ -107,6 +107,16 @@ class AppTextStyles {
     FontWeight fontWeight = FontWeight.w600,
     double letterSpacing = 1.4,
   }) {
+    if (!AppTheme.usarGoogleFonts) {
+      // Pruebas: sin red para bajar la fuente.
+      return TextStyle(
+        fontFamily: "monospace",
+        color: color,
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        letterSpacing: letterSpacing,
+      );
+    }
     return GoogleFonts.jetBrainsMono(
       color: color,
       fontSize: fontSize,

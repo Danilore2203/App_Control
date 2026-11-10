@@ -1,3 +1,5 @@
+import "../utils/formato.dart";
+
 class NetezzaSesion {
   final String estado;
   final int sessionId;
@@ -44,18 +46,18 @@ class NetezzaSesion {
       username: (json["USERNAME"] ?? "").toString(),
       qscState: json["QSC_STATE"]?.toString(),
       qsState: json["QS_STATE"]?.toString(),
-      qsEstcost: json["QS_ESTCOST"] as num?,
-      qsEstdisk: json["QS_ESTDISK"] as num?,
-      qsEstmem: json["QS_ESTMEM"] as num?,
-      qsSnippets: (json["QS_SNIPPETS"] as num?)?.toInt(),
+      qsEstcost: leerNumero(json["QS_ESTCOST"]),
+      qsEstdisk: leerNumero(json["QS_ESTDISK"]),
+      qsEstmem: leerNumero(json["QS_ESTMEM"]),
+      qsSnippets: leerNumero(json["QS_SNIPPETS"])?.toInt(),
       conntime: json["CONNTIME"]?.toString(),
       ipaddr: json["IPADDR"]?.toString(),
       clientOsUsername: json["CLIENT_OS_USERNAME"]?.toString(),
       dbname: json["DBNAME"]?.toString(),
       priority: json["PRIORITY"]?.toString(),
       command: json["COMMAND"]?.toString(),
-      qsResbytes: json["QS_RESBYTES"] as num?,
-      qsResrows: json["QS_RESROWS"] as num?,
+      qsResbytes: leerNumero(json["QS_RESBYTES"]),
+      qsResrows: leerNumero(json["QS_RESROWS"]),
     );
   }
 }

@@ -10,11 +10,15 @@ class PestanasSimples extends StatelessWidget {
     required this.seleccionada,
     required this.opciones,
     required this.onCambiar,
+    this.alertas,
   });
 
   final int seleccionada;
   final List<String> opciones;
   final ValueChanged<int> onCambiar;
+
+  /// Por opcion, cuantas cosas piden atencion (0 = nada): un globito rojo.
+  final List<int>? alertas;
 
   @override
   Widget build(BuildContext context) {
@@ -36,14 +40,38 @@ class PestanasSimples extends StatelessWidget {
                   onTap: () => onCambiar(i),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 9),
-                    child: Center(
-                      child: Text(
-                        opciones[i],
-                        style: theme.textTheme.labelLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: i == seleccionada ? colorScheme.onPrimary : colorScheme.onSurfaceVariant,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            opciones[i],
+                            maxLines: 1,
+                            overflow: TextOverflow.fade,
+                            softWrap: false,
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: i == seleccionada ? colorScheme.onPrimary : colorScheme.onSurfaceVariant,
+                            ),
+                          ),
                         ),
-                      ),
+                        if ((alertas != null && i < alertas!.length ? alertas![i] : 0) > 0) ...[
+                          const SizedBox(width: 4),
+                          Container(
+                            constraints: const BoxConstraints(minWidth: 18),
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFD93448),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              "${alertas![i]}",
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.labelSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
