@@ -71,6 +71,8 @@ class Control {
       cantidad: json["cantidad"],
       layer: json["layer"],
       ultimaFecha: json["ultima_fecha"],
+      // 'SI' en las tablas core (modal «Tablas core» de la web), como en los procesos.
+      core: json["core"],
       snapshotFecha: DateTime.parse(json["snapshot_fecha"]),
       snapshotTs: DateTime.parse(json["snapshot_ts"]),
     );

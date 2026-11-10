@@ -51,6 +51,7 @@ def _migrar_columnas_legacy():
     columnas_nuevas = (
         ("dataops_catalogo_procesos", "estado_ts TIMESTAMP WITHOUT TIME ZONE"),
         ("dataops_catalogo_tablas", "estado_ts TIMESTAMP WITHOUT TIME ZONE"),
+        ("dataops_catalogo_tablas", "core VARCHAR(10)"),
         ("poller_state", "ultimo_cambio_revisado INTEGER NOT NULL DEFAULT 0"),
         ("bitacora_errores", "origen_id INTEGER"),
     )

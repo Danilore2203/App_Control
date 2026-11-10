@@ -58,6 +58,15 @@ void main() {
     });
   });
 
+  test("las tablas core se leen del catalogo como los procesos core", () {
+    Map<String, dynamic> json(String nombre, String? core) => {
+          "id": 1, "nombre": nombre, "fuente": "QA_CONTROL", "estado": "OK", "color": "green", "cantidad": 10,
+          "snapshot_fecha": "2026-11-10", "snapshot_ts": "2026-11-10T10:00:00", "core": core,
+        };
+    expect(esCore(Control.fromTablaJson(json("DW.DIM_PERSONA", "SI"))), isTrue);
+    expect(esCore(Control.fromTablaJson(json("DW.OTRA", null))), isFalse);
+  });
+
   group("AlertaLeida", () {
     test("[FUENTE] NOMBRE: ESTADO", () {
       final a = AlertaLeida.de("[DATASTAGE] RUN_SCHURN_PRE_LOG_ALL: DEMORADO");

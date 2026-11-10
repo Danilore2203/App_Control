@@ -97,6 +97,8 @@ class Tabla(Base):
     layer = Column(String(30), nullable=True)
     hora_programada = Column(String(20), nullable=True)
     ultima_fecha = Column(String(30), nullable=True)
+    # 'SI' si es una tabla core (zbx.qa_tablas.CORE en OP_PROD, modal «Tablas core» de la web).
+    core = Column(String(10), nullable=True)
     snapshot_fecha = Column(Date, nullable=False)
     snapshot_ts = Column(DateTime, nullable=False)
     estado_ts = Column(DateTime, nullable=True)

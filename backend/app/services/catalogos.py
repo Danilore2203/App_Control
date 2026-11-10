@@ -57,7 +57,9 @@ def _aplicar_catalogo(
 
     insertadas = actualizadas = 0
     for fila in seccion.upsert:
-        datos = {k: v for k, v in fila.model_dump().items() if k in columnas}
+        # exclude_unset: un campo que el envio no trae no se pisa. Un OP_PROD viejo manda las
+        # tablas sin «core»; sin esto les borraba la marca en cada envio.
+        datos = {k: v for k, v in fila.model_dump(exclude_unset=True).items() if k in columnas}
         obj = existentes.get(fila.id)
         if obj is None:
             db.add(modelo(**datos))
