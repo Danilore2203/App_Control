@@ -1,3 +1,5 @@
+import "../utils/formato.dart";
+
 /// Fila del Monitor RA (ultima carga por archivo en la tabla silver), tal
 /// como la devuelve OP_PROD con el comando `ra.resumen`.
 class RaArchivo {
@@ -25,18 +27,10 @@ class RaArchivo {
         estado: (json["estado"] ?? "").toString(),
         color: (json["color"] ?? "gray").toString(),
         fechaHora: json["fecha_hora"]?.toString(),
-        tamano: _numero(json["tamano"]),
-        tamanoRef: _numero(json["tamano_ref"]),
+        // MySQL devuelve TAMAÑO como Decimal y puede llegar como texto ("1234.00").
+        tamano: leerNumero(json["tamano"]),
+        tamanoRef: leerNumero(json["tamano_ref"]),
       );
-
-  /// MySQL devuelve TAMAÑO como Decimal y llega como texto ("1234.00").
-  static num? _numero(Object? v) {
-    if (v == null) return null;
-    if (v is num) return v;
-    final n = num.tryParse(v.toString().trim());
-    if (n == null) return null;
-    return n == n.truncate() ? n.toInt() : n;
-  }
 }
 
 /// Resultado de sincronizar una configuracion FTP (una fila de qa_ftp_mysql).

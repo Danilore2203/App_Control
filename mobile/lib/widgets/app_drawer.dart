@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 
 import "../models/usuario.dart";
 import "../screens/ajustes_screen.dart";
+import "../screens/ftp_screen.dart";
 import "../screens/infraestructura_screen.dart";
 import "../screens/login_screen.dart";
 import "../screens/mi_cuenta_screen.dart";
@@ -117,14 +118,21 @@ class AppDrawer extends StatelessWidget {
                     activo: tabActual == 3,
                     onTap: () => _irATab(context, 3),
                   ),
-                  // Monitor RA: solo administradores (el backend tambien lo exige).
-                  if (usuario?.esAdmin ?? false)
+                  // Monitor RA y Monitor FTP: solo administradores (el backend tambien lo exige).
+                  if (usuario?.esAdmin ?? false) ...[
                     _ItemMenu(
                       icono: Icons.sync_rounded,
                       texto: "Monitor RA",
                       subtitulo: "Archivos FTP y actualizar ahora",
                       onTap: () => _abrir(context, const RaScreen()),
                     ),
+                    _ItemMenu(
+                      icono: Icons.table_view_rounded,
+                      texto: "Monitor FTP",
+                      subtitulo: "Reportes Excel y abrir en el 208",
+                      onTap: () => _abrir(context, const FtpScreen()),
+                    ),
+                  ],
                   const _SeccionMenu("Más"),
                   _ItemMenu(
                     icono: Icons.dns_outlined,
