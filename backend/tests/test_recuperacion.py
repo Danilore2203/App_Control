@@ -169,3 +169,33 @@ def test_el_push_de_la_web_no_pisa_una_contrasena_cambiada_en_la_app(db):
     web_2 = generate_password_hash("Web#2")
     ana = push(web_2)
     assert (ana.password_hash, ana.password_hash_web) == (web_2, web_2)
+
+
+def test_los_correos_que_no_salieron_no_cuentan_para_el_limite(db):
+    usuario(db)
+    for i in range(3):
+        R.solicitar(db, "ana", ahora=T0 + timedelta(minutes=i))
+    # OP_PROD estaba sin reiniciar: los tres volvieron con error.
+    for c in db.query(models.Comando).all():
+        C.registrar_resultado(db, c.id, schemas.ComandoResultadoIn(ok=False, error="Comando desconocido para OP_PROD"))
+    assert R.solicitar(db, "ana", ahora=T0 + timedelta(minutes=5)) is True
+
+
+def test_el_usuario_se_encuentra_aunque_el_celular_ponga_mayuscula(db):
+    usuario(db, "darejas", email="d@nuevatel.com")
+    assert R.solicitar(db, "Darejas", ahora=T0) is True
+    assert auth.buscar_usuario_por_identificador("DAREJAS", db).username == "darejas"
+
+
+def test_diagnostico_dice_por_que_no_llega_sin_mostrar_el_codigo(db):
+    assert R.diagnostico(db, "nadie") == {"encontrado": False}
+    usuario(db)
+    R.solicitar(db, "ana", ahora=datetime.utcnow())
+    (cmd,) = db.query(models.Comando).all()
+    codigo = json.loads(cmd.payload)["codigo"]
+    C.registrar_resultado(db, cmd.id, schemas.ComandoResultadoIn(ok=False, error="SMTP caido"))
+
+    d = R.diagnostico(db, "ana")
+    assert (d["correo"], d["puede_pedir"], d["codigos_ultima_hora"]) == ("A***@nuevatel.com", True, 0)
+    assert [(c["estado"], c["error"]) for c in d["correos_24h"]] == [("error", "SMTP caido")]
+    assert codigo not in json.dumps(d)

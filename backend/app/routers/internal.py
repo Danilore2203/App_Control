@@ -139,6 +139,16 @@ def recibir_estados_airflow(payload: schemas.AirflowEstadosIn, db: Session = Dep
     return schemas.AirflowEstadosOut(recibidos=len(payload.estados), actualizado_en=ahora)
 
 
+@router.get("/recuperacion/estado", dependencies=[Depends(auth.verificar_internal_key)])
+def estado_recuperacion(identificador: str, db: Session = Depends(get_db)):
+    """Por que no le llega a alguien el correo para cambiar la contrasena:
+    si la cuenta tiene correo, si llego al limite por hora y como terminaron
+    sus ultimos pedidos en la cola (sin el codigo)."""
+    from app.services import recuperacion
+
+    return recuperacion.diagnostico(db, identificador)
+
+
 @router.get(
     "/comandos/pendientes",
     response_model=list[schemas.ComandoOut],

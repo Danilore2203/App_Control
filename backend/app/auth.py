@@ -129,7 +129,7 @@ def buscar_usuario_por_identificador(identificador: str, db: Session) -> Optiona
     mayusculas), no con ilike(): ilike trata "%" y "_" del identificador
     como comodines, asi que un identificador como "%" matcheaba la primera
     cuenta con email no nulo en vez de no matchear ninguna."""
-    return (
+    exacto = (
         db.query(models.Usuario)
         .filter(
             (models.Usuario.username == identificador)
@@ -137,6 +137,17 @@ def buscar_usuario_por_identificador(identificador: str, db: Session) -> Optiona
         )
         .first()
     )
+    if exacto is not None:
+        return exacto
+    # El teclado del celular suele poner la primera letra en mayuscula
+    # («Darejas»): sin distinguir mayusculas, si hay una sola cuenta asi.
+    parecidos = (
+        db.query(models.Usuario)
+        .filter(func.lower(models.Usuario.username) == identificador.strip().lower())
+        .limit(2)
+        .all()
+    )
+    return parecidos[0] if len(parecidos) == 1 else None
 
 
 def autenticar_usuario(

@@ -43,6 +43,67 @@ def _correo(usuario: models.Usuario) -> Optional[str]:
     return (usuario.email or usuario.email_google or "").strip() or None
 
 
+def _correos_de(db: Session, usuario_id: int, desde: datetime):
+    return db.query(models.Comando).filter(
+        models.Comando.tipo == TIPO_COMANDO,
+        models.Comando.creado_por_id == usuario_id,
+        models.Comando.creado_en >= desde,
+    )
+
+
+def _codigos_que_cuentan(db: Session, usuario_id: int, ahora: datetime) -> int:
+    """Codigos de la ultima hora para el limite, sin contar los que nunca
+    salieron (OP_PROD caido, sin reiniciar o con el SMTP fallando): si no, un
+    problema del servidor dejaba al usuario una hora sin poder pedir otro."""
+    desde = ahora - timedelta(hours=1)
+    pedidos = (
+        db.query(models.CodigoRecuperacion)
+        .filter(models.CodigoRecuperacion.usuario_id == usuario_id, models.CodigoRecuperacion.creado_en >= desde)
+        .count()
+    )
+    fallidos = _correos_de(db, usuario_id, desde).filter(models.Comando.estado.in_(("error", "expirado"))).count()
+    return max(pedidos - fallidos, 0)
+
+
+def _tapar(correo: str) -> str:
+    usuario, _, dominio = correo.partition("@")
+    return f"{usuario[:1]}***@{dominio}" if dominio else "***"
+
+
+def diagnostico(db: Session, identificador: str, ahora: Optional[datetime] = None) -> dict:
+    """Para soporte (GET /internal/recuperacion/estado, con la clave interna):
+    por que no llega el correo de una cuenta. Sin el codigo y con el correo
+    tapado."""
+    ahora = ahora or datetime.utcnow()
+    usuario = auth.buscar_usuario_por_identificador(identificador.strip(), db)
+    if usuario is None:
+        return {"encontrado": False}
+    para = _correo(usuario)
+    cuentan = _codigos_que_cuentan(db, usuario.id, ahora)
+    correos = (
+        _correos_de(db, usuario.id, ahora - timedelta(days=1)).order_by(models.Comando.creado_en.desc()).limit(10).all()
+    )
+    return {
+        "encontrado": True,
+        "username": usuario.username,
+        "activo": bool(usuario.activo),
+        "correo": _tapar(para) if para else None,
+        "codigos_ultima_hora": cuentan,
+        "puede_pedir": bool(usuario.activo and para and cuentan < MAX_CODIGOS_POR_HORA),
+        "correos_24h": [
+            {
+                "id": c.id,
+                "estado": c.estado,
+                "creado_en": c.creado_en.isoformat() if c.creado_en else None,
+                "terminado_en": c.terminado_en.isoformat() if c.terminado_en else None,
+                "error": c.error,
+                "resultado": c.resultado,
+            }
+            for c in correos
+        ],
+    }
+
+
 def solicitar(db: Session, identificador: str, ahora: Optional[datetime] = None) -> bool:
     """True si se pidio el correo. Quien llama no le cuenta el resultado al
     usuario (asi no se puede averiguar que cuentas existen)."""
@@ -56,7 +117,7 @@ def solicitar(db: Session, identificador: str, ahora: Optional[datetime] = None)
         return False
 
     codigos = db.query(models.CodigoRecuperacion).filter(models.CodigoRecuperacion.usuario_id == usuario.id)
-    recientes = codigos.filter(models.CodigoRecuperacion.creado_en >= ahora - timedelta(hours=1)).count()
+    recientes = _codigos_que_cuentan(db, usuario.id, ahora)
     if recientes >= MAX_CODIGOS_POR_HORA:
         logger.info("Recuperacion de %s: ya pidio %s codigos en la ultima hora", usuario.username, recientes)
         return False
