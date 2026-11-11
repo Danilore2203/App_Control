@@ -7,6 +7,7 @@ import "../screens/infraestructura_screen.dart";
 import "../screens/login_screen.dart";
 import "../screens/mi_cuenta_screen.dart";
 import "../screens/ra_screen.dart";
+import "../screens/robby_screen.dart";
 import "../screens/solicitudes_screen.dart";
 import "../screens/usuarios_admin_screen.dart";
 import "../services/auth_service.dart";
@@ -132,6 +133,12 @@ class AppDrawer extends StatelessWidget {
                       texto: "Monitor FTP",
                       subtitulo: "Reportes Excel y abrir en el 208",
                       onTap: () => _abrir(context, const FtpScreen()),
+                    ),
+                    _ItemMenu(
+                      icono: Icons.smart_toy_outlined,
+                      texto: "Robby",
+                      subtitulo: "Verificar e insertar procesos en ALFA",
+                      onTap: () => _abrir(context, const RobbyScreen()),
                     ),
                   ],
                   const _SeccionMenu("Más"),
