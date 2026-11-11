@@ -586,10 +586,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     // La salud responde a la fuente/core elegidos, para
                     // poder comparar AIRFLOW o DATASTAGE con su monitor.
                     SaludSistema(controles: segunCore),
+                    // Airflow sale del catalogo; DataStage y Pentaho, de OP en
+                    // vivo (el «Corriendo» de la web), cada minuto.
                     CorriendoAhora(
                       controles: segunCore,
                       titulo: _vista == "TABLAS" ? "Actualizándose ahora" : "Corriendo ahora",
-                      onVerTodos: () => setState(() => _filtroColor = "blue"),
+                      consultarEnVivo: _vista != "TABLAS",
+                      mostrarOtros: _filtroFuente == null && !_filtroSoloCore,
                     ),
                     MonitoreoPorFuente(
                       controles: todos,

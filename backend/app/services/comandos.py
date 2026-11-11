@@ -38,6 +38,7 @@ TIPOS_COMANDO: dict[str, bool] = {
     "tablas.actualizar_todos": True,
     "tablas.actualizar_todos.estado": False,
     "tablas.serie": False,  # payload: {"tabla": str}; filas cargadas por dia (ultimos 40), la grafica de la web
+    "procesos.corriendo": False,  # lo que corre ahora en DataStage (SSH) y Pentaho (Carte), el «Corriendo» de la web
     # Robby (modal de /procesos en la web). Solo administradores: insertar escribe en Netezza.
     "robby.verificar": True,  # payload: {"proceso": str}; estado en Robby (qa_ctr_log) y en flujos ALFA
     "robby.insertar": True,  # payload: {"nombre_proceso": str}; INSERT en flujos ALFA para que Robby lo ejecute
