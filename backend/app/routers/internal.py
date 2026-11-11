@@ -139,6 +139,26 @@ def recibir_estados_airflow(payload: schemas.AirflowEstadosIn, db: Session = Dep
     return schemas.AirflowEstadosOut(recibidos=len(payload.estados), actualizado_en=ahora)
 
 
+@router.get(
+    "/comandos/ultimos",
+    response_model=list[schemas.ComandoOut],
+    dependencies=[Depends(auth.verificar_internal_key)],
+)
+def comandos_ultimos(tipo: str, limite: int = 3, db: Session = Depends(get_db)):
+    """Soporte: como terminaron los ultimos comandos de un tipo (lo que respondio
+    OP_PROD), sin datos reservados. No retira ni cambia nada."""
+    from app.services import comandos as servicio
+
+    filas = (
+        db.query(models.Comando)
+        .filter(models.Comando.tipo == tipo)
+        .order_by(models.Comando.creado_en.desc())
+        .limit(max(1, min(limite, 20)))
+        .all()
+    )
+    return [servicio._a_salida(c) for c in filas]
+
+
 @router.get("/recuperacion/estado", dependencies=[Depends(auth.verificar_internal_key)])
 def estado_recuperacion(identificador: str, db: Session = Depends(get_db)):
     """Por que no le llega a alguien el correo para cambiar la contrasena:

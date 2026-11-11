@@ -102,3 +102,17 @@ def test_solo_el_autor_o_un_admin_ven_el_comando(db):
     with pytest.raises(HTTPException):
         S.obtener_comando(db, c.id, beto)
     assert S.obtener_comando(db, c.id, admin).id == c.id
+
+
+def test_soporte_ve_los_ultimos_de_un_tipo_sin_datos_reservados(db):
+    from app.routers.internal import comandos_ultimos
+    from app.services import recuperacion
+
+    ana = usuario(db, "ana")
+    S.crear_comando(db, ana, schemas.ComandoIn(tipo="procesos.corriendo"))
+    recuperacion.solicitar(db, "ana")
+    corriendo = comandos_ultimos(tipo="procesos.corriendo", db=db)
+    assert [c.tipo for c in corriendo] == ["procesos.corriendo"]
+    (correo,) = comandos_ultimos(tipo=recuperacion.TIPO_COMANDO, db=db)
+    assert correo.payload["codigo"] == "***"
+    assert db.query(models.Comando).filter_by(estado="pendiente").count() == 2  # no retira nada
