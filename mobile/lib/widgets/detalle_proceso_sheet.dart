@@ -9,6 +9,7 @@ import "../services/seguimiento_lanzamiento.dart";
 import "../services/sesion_actual.dart";
 import "../theme.dart";
 import "../utils/formato.dart";
+import "../screens/robby_screen.dart";
 import "grafica_filas.dart";
 import "titulo_seccion.dart";
 
@@ -139,6 +140,22 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
               ],
             ],
           ),
+          // Robby: ver si el proceso esta en la tabla de flujos ALFA e
+          // insertarlo para que Robby lo corra (DataStage / Pentaho).
+          if (!esAirflow) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const Key("abrir_robby"),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => RobbyScreen(procesoInicial: control.nombre)),
+                ),
+                icon: const Icon(Icons.smart_toy_outlined, size: 18),
+                label: const Text("Robby: verificar o insertar"),
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           // Mientras la hoja esta abierta, el avance se ve aca mismo.
           ValueListenableBuilder<EstadoEjecucion?>(
