@@ -19,6 +19,7 @@ import "../widgets/alerta_banner.dart";
 import "../widgets/app_drawer.dart";
 import "../widgets/barra_navegacion.dart";
 import "../widgets/boton_actualizar_todos.dart";
+import "../widgets/corriendo_ahora.dart";
 import "../widgets/indicador_ejecucion.dart";
 import "../services/ejecucion_actual.dart";
 import "../widgets/detalle_proceso_sheet.dart";
@@ -585,6 +586,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     // La salud responde a la fuente/core elegidos, para
                     // poder comparar AIRFLOW o DATASTAGE con su monitor.
                     SaludSistema(controles: segunCore),
+                    CorriendoAhora(
+                      controles: segunCore,
+                      titulo: _vista == "TABLAS" ? "Actualizándose ahora" : "Corriendo ahora",
+                      onVerTodos: () => setState(() => _filtroColor = "blue"),
+                    ),
                     MonitoreoPorFuente(
                       controles: todos,
                       fuenteSeleccionada: _filtroFuente,
