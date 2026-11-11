@@ -3,36 +3,96 @@ import "dart:async";
 import "package:flutter/material.dart";
 
 import "../models/control.dart";
+import "../services/comandos_service.dart";
 import "../theme.dart";
 import "../utils/formato.dart";
 import "detalle_proceso_sheet.dart";
 import "fondo_app.dart";
 import "titulo_seccion.dart";
 
-/// «Corriendo ahora»: los procesos (o tablas) en ejecución en este momento,
-/// con cuánto llevan. Se actualiza solo (el tiempo avanza cada 30 s y la
-/// lista con cada lectura del catálogo). Tocar uno abre su detalle.
+/// Lo que OP_PROD ve corriendo ahora en DataStage (ps DSD.RUN en el engine) y
+/// Pentaho (Carte): el contador «Corriendo» de la web (`procesos.corriendo`).
+class CorriendoEnVivo {
+  final List<Map<String, dynamic>> procesos;
+  final List<Map<String, dynamic>> otros;
+  final List<String> fuentesConError;
+
+  const CorriendoEnVivo({this.procesos = const [], this.otros = const [], this.fuentesConError = const []});
+
+  factory CorriendoEnVivo.fromJson(Map<String, dynamic> j) {
+    List<Map<String, dynamic>> lista(Object? v) =>
+        ((v as List?) ?? const []).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+    return CorriendoEnVivo(
+      procesos: lista(j["procesos"]),
+      otros: lista(j["otros"]),
+      fuentesConError: [
+        for (final f in lista(j["fuentes"]))
+          if (f["ok"] == false) "${f["fuente"]}: ${(f["error"] ?? "no respondió").toString()}",
+      ],
+    );
+  }
+
+  /// «12:05» (hoy) o «22/10» / «22/10 07:00» (otro día) → fecha y hora.
+  static DateTime? leerDesde(Object? desde, DateTime ahora) {
+    final s = (desde ?? "").toString().trim();
+    final hora = RegExp(r"^(\d{1,2}):(\d{2})$").firstMatch(s);
+    if (hora != null) {
+      return DateTime(ahora.year, ahora.month, ahora.day, int.parse(hora.group(1)!), int.parse(hora.group(2)!));
+    }
+    final dia = RegExp(r"^(\d{1,2})/(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?$").firstMatch(s);
+    if (dia != null) {
+      var f = DateTime(ahora.year, int.parse(dia.group(2)!), int.parse(dia.group(1)!),
+          int.parse(dia.group(3) ?? "0"), int.parse(dia.group(4) ?? "0"));
+      if (f.isAfter(ahora)) f = DateTime(f.year - 1, f.month, f.day, f.hour, f.minute);
+      return f;
+    }
+    return null;
+  }
+}
+
+/// Un proceso en ejecución, venga del catálogo (Airflow) o de OP en vivo.
+class EnCurso {
+  final String nombre;
+  final String fuente;
+  final DateTime? inicio;
+  final List<String> pasos;
+  final Control? control;
+
+  const EnCurso({required this.nombre, required this.fuente, this.inicio, this.pasos = const [], this.control});
+}
+
+/// «Corriendo ahora»: lo que está en ejecución en este momento, con cuánto
+/// lleva. Junta Airflow (del catálogo) con DataStage y Pentaho (OP los consulta
+/// en vivo, cada minuto). Tocar uno abre su detalle.
 class CorriendoAhora extends StatefulWidget {
   const CorriendoAhora({
     super.key,
     required this.controles,
-    required this.onVerTodos,
     this.titulo = "Corriendo ahora",
+    this.consultarEnVivo = true,
+    this.mostrarOtros = true,
+    this.cargarEnVivo,
     this.ahora,
   });
 
   final List<Control> controles;
-  final VoidCallback onVerTodos;
   final String titulo;
 
-  /// Para las pruebas.
+  /// En la vista Tablas no tiene sentido preguntar por DataStage/Pentaho.
+  final bool consultarEnVivo;
+
+  /// Mostrar también lo que corre y no está en el monitor (sin filtros puestos).
+  final bool mostrarOtros;
+
+  /// Para las pruebas; normalmente pide `procesos.corriendo` a OP_PROD.
+  final Future<CorriendoEnVivo> Function()? cargarEnVivo;
   final DateTime Function()? ahora;
 
   static const maximoVisibles = 5;
 
-  /// Desde cuándo corre. Airflow manda la hora en UTC y DataStage/Pentaho en
-  /// hora local (sin zona en ambos casos): para Airflow se toma la lectura que
-  /// dé un tiempo transcurrido razonable.
+  /// Desde cuándo corre segun el catálogo. Airflow manda la hora en UTC y
+  /// DataStage/Pentaho en hora local (sin zona en ambos casos): para Airflow se
+  /// toma la lectura que no queda en el futuro.
   static DateTime? inicioDe(Control c, DateTime ahora) {
     final f = leerFechaCatalogo(c.horaLog);
     if (f == null) return null;
@@ -43,25 +103,146 @@ class CorriendoAhora extends StatefulWidget {
     return candidatos.isEmpty ? f : candidatos.first;
   }
 
+  /// Junta lo del catálogo (azul = en ejecución) con lo que OP ve en vivo.
+  static List<EnCurso> juntar(List<Control> controles, CorriendoEnVivo? vivo, DateTime ahora, {bool conOtros = true}) {
+    final porNombre = {for (final c in controles) c.nombre.toUpperCase(): c};
+    final vistos = <String>{};
+    final out = <EnCurso>[];
+    for (final p in vivo?.procesos ?? const <Map<String, dynamic>>[]) {
+      final nombre = (p["nombre"] ?? "").toString();
+      if (nombre.isEmpty) continue;
+      final c = porNombre[nombre.toUpperCase()];
+      if (c == null && !conOtros) continue; // fuera de los filtros puestos
+      vistos.add(nombre.toUpperCase());
+      out.add(EnCurso(
+        nombre: nombre,
+        fuente: c?.fuente ?? (p["fuente"] ?? "").toString().toUpperCase(),
+        inicio: CorriendoEnVivo.leerDesde(p["desde"], ahora),
+        pasos: ((p["pasos"] as List?) ?? const []).map((e) => e.toString()).toList(),
+        control: c,
+      ));
+    }
+    for (final c in controles) {
+      if (c.categoria != "blue" || vistos.contains(c.nombre.toUpperCase())) continue;
+      out.add(EnCurso(nombre: c.nombre, fuente: c.fuente, inicio: inicioDe(c, ahora), control: c));
+    }
+    out.sort((a, b) {
+      // Primero los que llevan más tiempo.
+      if (a.inicio == null && b.inicio == null) return a.nombre.compareTo(b.nombre);
+      if (a.inicio == null) return 1;
+      if (b.inicio == null) return -1;
+      return a.inicio!.compareTo(b.inicio!);
+    });
+    return out;
+  }
+
   @override
   State<CorriendoAhora> createState() => _CorriendoAhoraState();
 }
 
-class _CorriendoAhoraState extends State<CorriendoAhora> {
+class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObserver {
   Timer? _reloj;
+  int _ticks = 0;
+  CorriendoEnVivo? _vivo;
+  String? _errorVivo;
+  bool _pidiendo = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _pedir();
+    // Cada 30 s avanza el tiempo; cada minuto se vuelve a preguntar a OP.
     _reloj = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      _ticks++;
+      if (_ticks.isEven) _pedir();
+      setState(() {});
     });
   }
 
   @override
+  void didUpdateWidget(CorriendoAhora anterior) {
+    super.didUpdateWidget(anterior);
+    if (widget.consultarEnVivo && !anterior.consultarEnVivo) _pedir();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState estado) {
+    if (estado == AppLifecycleState.resumed) _pedir();
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _reloj?.cancel();
     super.dispose();
+  }
+
+  Future<void> _pedir() async {
+    if (!widget.consultarEnVivo || _pidiendo) return;
+    final estado = WidgetsBinding.instance.lifecycleState;
+    if (estado != null && estado != AppLifecycleState.resumed) return;
+    _pidiendo = true;
+    try {
+      final cargar = widget.cargarEnVivo;
+      final vivo = cargar != null
+          ? await cargar()
+          : CorriendoEnVivo.fromJson((await ComandosService().ejecutar("procesos.corriendo")).resultado);
+      if (mounted) {
+        setState(() {
+          _vivo = vivo;
+          _errorVivo = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _errorVivo = e is ComandoFallidoException ? e.mensaje : e.toString());
+    } finally {
+      _pidiendo = false;
+    }
+  }
+
+  List<String> _notas(CorriendoEnVivo? vivo) {
+    final notas = <String>[];
+    final error = _errorVivo;
+    if (widget.consultarEnVivo && error != null) {
+      notas.add(error.contains("reiniciar")
+          ? "Para ver DataStage y Pentaho en vivo hay que reiniciar el OP del .150."
+          : "No se pudo consultar DataStage y Pentaho: $error");
+    }
+    for (final f in vivo?.fuentesConError ?? const <String>[]) {
+      notas.add("No respondió $f");
+    }
+    final otros = vivo?.otros ?? const <Map<String, dynamic>>[];
+    if (widget.mostrarOtros && otros.isNotEmpty) {
+      final nombres = otros.map((o) => (o["job"] ?? "").toString()).where((n) => n.isNotEmpty).take(3).join(", ");
+      notas.add("Además corren ${otros.length} job(s) que no están en el monitor${nombres.isEmpty ? "" : ": $nombres"}"
+          "${otros.length > 3 ? "…" : ""}");
+    }
+    return notas;
+  }
+
+  void _verTodos(List<EnCurso> items, DateTime ahora) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        maxChildSize: 0.95,
+        builder: (context, scroll) => ListView(
+          controller: scroll,
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          children: [
+            Text("${widget.titulo} · ${items.length}",
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            for (final i in items) _Fila(item: i, ahora: ahora),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -69,36 +250,46 @@ class _CorriendoAhoraState extends State<CorriendoAhora> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final ahora = widget.ahora?.call() ?? DateTime.now();
-    final corriendo = widget.controles.where((c) => c.categoria == "blue").toList()
-      ..sort((a, b) {
-        // Primero los que llevan más tiempo.
-        final ia = CorriendoAhora.inicioDe(a, ahora);
-        final ib = CorriendoAhora.inicioDe(b, ahora);
-        if (ia == null && ib == null) return a.nombre.compareTo(b.nombre);
-        if (ia == null) return 1;
-        if (ib == null) return -1;
-        return ia.compareTo(ib);
-      });
+    final vivo = widget.consultarEnVivo ? _vivo : null;
+    final items = CorriendoAhora.juntar(widget.controles, vivo, ahora, conOtros: widget.mostrarOtros);
+    final notas = _notas(vivo);
 
-    if (corriendo.isEmpty) {
+    Widget pie() => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final n in notas)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(n, style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.outline, height: 1.3)),
+              ),
+          ],
+        );
+
+    if (items.isEmpty) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.pause_circle_outline_rounded, size: 16, color: colorScheme.outline),
-            const SizedBox(width: 6),
-            Text("Nada corriendo en este momento",
-                style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
+            Row(
+              children: [
+                Icon(Icons.pause_circle_outline_rounded, size: 16, color: colorScheme.outline),
+                const SizedBox(width: 6),
+                Text("Nada corriendo en este momento",
+                    style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
+              ],
+            ),
+            pie(),
           ],
         ),
       );
     }
 
-    final visibles = corriendo.take(CorriendoAhora.maximoVisibles).toList();
+    final visibles = items.take(CorriendoAhora.maximoVisibles).toList();
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
       child: Vidrio(
-        padding: const EdgeInsets.fromLTRB(14, 12, 8, 6),
+        padding: const EdgeInsets.fromLTRB(14, 12, 8, 10),
         borderColor: StatusColors.info.withValues(alpha: 0.45),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -107,20 +298,26 @@ class _CorriendoAhoraState extends State<CorriendoAhora> {
               children: [
                 const _Pulso(),
                 const SizedBox(width: 8),
-                Text(widget.titulo, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
-                const SizedBox(width: 8),
-                PillEstado("${corriendo.length}", color: StatusColors.info),
-                const Spacer(),
-                TextButton(
-                  key: const Key("corriendo_ver_todos"),
-                  onPressed: widget.onVerTodos,
-                  style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                  child: Text(corriendo.length > visibles.length ? "Ver los ${corriendo.length}" : "Ver en la lista"),
+                Flexible(
+                  child: Text(widget.titulo,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
                 ),
+                const SizedBox(width: 8),
+                PillEstado("${items.length}", color: StatusColors.info),
+                const Spacer(),
+                if (items.length > visibles.length)
+                  TextButton(
+                    key: const Key("corriendo_ver_todos"),
+                    onPressed: () => _verTodos(items, ahora),
+                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                    child: Text("Ver los ${items.length}"),
+                  ),
               ],
             ),
             const SizedBox(height: 4),
-            for (final c in visibles) _Fila(control: c, ahora: ahora),
+            for (final i in visibles) _Fila(item: i, ahora: ahora),
+            Padding(padding: const EdgeInsets.only(right: 6), child: pie()),
           ],
         ),
       ),
@@ -129,24 +326,28 @@ class _CorriendoAhoraState extends State<CorriendoAhora> {
 }
 
 class _Fila extends StatelessWidget {
-  const _Fila({required this.control, required this.ahora});
+  const _Fila({required this.item, required this.ahora});
 
-  final Control control;
+  final EnCurso item;
   final DateTime ahora;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final c = control;
-    final inicio = CorriendoAhora.inicioDe(c, ahora);
+    final i = item;
+    final inicio = i.inicio;
     final lleva = inicio == null ? null : duracionCorta(ahora.difference(inicio).inSeconds);
-    final desde = inicio == null || c.fuente.toUpperCase() == "AIRFLOW"
-        ? null
-        : "desde ${inicio.hour.toString().padLeft(2, "0")}:${inicio.minute.toString().padLeft(2, "0")}";
+    String? desde;
+    if (inicio != null && i.fuente.toUpperCase() != "AIRFLOW") {
+      final hhmm = "${inicio.hour.toString().padLeft(2, "0")}:${inicio.minute.toString().padLeft(2, "0")}";
+      final esHoy = inicio.year == ahora.year && inicio.month == ahora.month && inicio.day == ahora.day;
+      desde = esHoy ? "desde $hhmm" : "desde ${inicio.day}/${inicio.month} $hhmm";
+    }
+    final control = i.control;
     return InkWell(
       borderRadius: BorderRadius.circular(10),
-      onTap: () => mostrarDetalleProceso(context, c),
+      onTap: control == null ? null : () => mostrarDetalleProceso(context, control),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 7),
         child: Row(
@@ -155,13 +356,19 @@ class _Fila extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(c.nombre,
+                  Text(i.nombre,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
                   const SizedBox(height: 1),
                   Text(
-                    [c.fuente, if (desde != null) desde].join(" · "),
+                    [
+                      i.fuente,
+                      if (desde != null) desde,
+                      if (i.pasos.isNotEmpty) "paso ${i.pasos.last}",
+                    ].join(" · "),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
                   ),
                 ],
@@ -176,7 +383,7 @@ class _Fila extends StatelessWidget {
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
-            Icon(Icons.chevron_right_rounded, size: 18, color: colorScheme.outline),
+            Icon(Icons.chevron_right_rounded, size: 18, color: control == null ? Colors.transparent : colorScheme.outline),
           ],
         ),
       ),
