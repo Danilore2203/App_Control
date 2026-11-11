@@ -1,3 +1,4 @@
+import "package:flutter/foundation.dart" show kIsWeb;
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 
@@ -115,70 +116,85 @@ class _AjustesScreenState extends State<AjustesScreen> {
                   MensajeInline(_error!),
                   const SizedBox(height: 16),
                 ],
-                const TituloSeccion("Notificaciones"),
-                const SizedBox(height: 10),
-                FilaOpcion(
-                  icono: Icons.notifications_active_outlined,
-                  titulo: "Recibir notificaciones",
-                  subtitulo: "Alertas críticas y avisos de procesos. Al desactivar, este "
-                      "dispositivo deja de recibir push del todo.",
-                  trailing: _actualizandoNotificaciones
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Switch(
-                          value: _notificacionesHabilitadas,
-                          onChanged: _cambiarNotificaciones,
-                        ),
-                ),
-                if (_diagnosticoFcm != null && _diagnosticoFcm != "ok") ...[
-                  const SizedBox(height: 10),
+                // En Safari (version web) no hay notificaciones push ni huella:
+                // se explica en vez de mostrar opciones que no hacen nada.
+                if (kIsWeb)
                   MensajeInline(
-                    "Diagnóstico de notificaciones: $_diagnosticoFcm",
-                    icono: Icons.info_outline_rounded,
-                  ),
-                ],
-                const SizedBox(height: 22),
-                const TituloSeccion("Seguridad"),
-                const SizedBox(height: 10),
-                FilaOpcion(
-                  icono: Icons.fingerprint_rounded,
-                  titulo: "Volver a pedir huella después de",
-                  subtitulo: "Si reabrís la app dentro de este tiempo desde el último "
-                      "ingreso, no vuelve a pedir huella. \"Siempre\" la pide cada vez.",
-                  trailing: PopupMenuButton<int>(
-                    initialValue: _ventanaGraciaMinutos,
-                    onSelected: _cambiarVentanaGracia,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    itemBuilder: (context) => [
-                      for (final minutos in _opcionesVentanaGracia)
-                        PopupMenuItem(value: minutos, child: Text(_etiquetaGracia(minutos))),
-                    ],
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-                      decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: colorScheme.outlineVariant),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _etiquetaGracia(_ventanaGraciaMinutos),
-                            style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(width: 2),
-                          Icon(Icons.expand_more_rounded, size: 18, color: colorScheme.onSurfaceVariant),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+                    "Estás usando Controles en el navegador. Las notificaciones y la huella o Face ID "
+                    "están en la app instalada en Android. Aquí la sesión queda guardada en este navegador: "
+                    "si otra persona usa este equipo, cierra sesión desde el menú.",
+                    color: colorScheme.primary,
+                    icono: Icons.info_outline,
+                  )
+                else
+                  ..._opcionesDelCelular(theme, colorScheme),
               ],
             ),
     );
   }
+
+  List<Widget> _opcionesDelCelular(ThemeData theme, ColorScheme colorScheme) => [
+        const TituloSeccion("Notificaciones"),
+        const SizedBox(height: 10),
+        FilaOpcion(
+          icono: Icons.notifications_active_outlined,
+          titulo: "Recibir notificaciones",
+          subtitulo: "Alertas críticas y avisos de procesos. Al desactivar, este "
+              "dispositivo deja de recibir push del todo.",
+          trailing: _actualizandoNotificaciones
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Switch(
+                  value: _notificacionesHabilitadas,
+                  onChanged: _cambiarNotificaciones,
+                ),
+        ),
+        if (_diagnosticoFcm != null && _diagnosticoFcm != "ok") ...[
+          const SizedBox(height: 10),
+          MensajeInline(
+            "Diagnóstico de notificaciones: $_diagnosticoFcm",
+            icono: Icons.info_outline_rounded,
+          ),
+        ],
+        const SizedBox(height: 22),
+        const TituloSeccion("Seguridad"),
+        const SizedBox(height: 10),
+        FilaOpcion(
+          icono: Icons.fingerprint_rounded,
+          titulo: "Volver a pedir huella después de",
+          subtitulo: "Si reabrís la app dentro de este tiempo desde el último "
+              "ingreso, no vuelve a pedir huella. \"Siempre\" la pide cada vez.",
+          trailing: PopupMenuButton<int>(
+            initialValue: _ventanaGraciaMinutos,
+            onSelected: _cambiarVentanaGracia,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            itemBuilder: (context) => [
+              for (final minutos in _opcionesVentanaGracia)
+                PopupMenuItem(value: minutos, child: Text(_etiquetaGracia(minutos))),
+            ],
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: colorScheme.outlineVariant),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _etiquetaGracia(_ventanaGraciaMinutos),
+                    style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(width: 2),
+                  Icon(Icons.expand_more_rounded, size: 18, color: colorScheme.onSurfaceVariant),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ];
 }

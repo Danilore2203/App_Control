@@ -202,7 +202,10 @@ def test_si_una_copia_vieja_de_op_no_lo_conoce_vuelve_a_la_cola_para_otra(db):
     R.solicitar(db, "ana", ahora=datetime.utcnow())
     (cmd,) = db.query(models.Comando).all()
 
-    # Una copia vieja (no anuncia tipos) lo toma y no lo conoce.
+    # Hay una copia nueva atendiendo que sabe mandarlo...
+    C._anotar_latido(db, {R.TIPO_COMANDO}, datetime.utcnow())
+    db.commit()
+    # ...pero una vieja (no anuncia tipos) lo toma primero y no lo conoce.
     assert [c.id for c in C.tomar_pendientes(db)] == [cmd.id]
     C.registrar_resultado(db, cmd.id, schemas.ComandoResultadoIn(ok=False, error="Comando desconocido para OP_PROD: x"))
     db.refresh(cmd)
@@ -219,6 +222,8 @@ def test_si_ninguna_copia_lo_conoce_al_final_falla(db):
     usuario(db)
     R.solicitar(db, "ana", ahora=datetime.utcnow())
     (cmd,) = db.query(models.Comando).all()
+    C._anotar_latido(db, {R.TIPO_COMANDO}, datetime.utcnow())
+    db.commit()
     for _ in range(C.MAX_RECHAZOS + 1):
         C.registrar_resultado(db, cmd.id, schemas.ComandoResultadoIn(ok=False, error="Comando desconocido para OP_PROD"))
     db.refresh(cmd)
@@ -314,3 +319,14 @@ def test_codigo_de_administrador_no_para_cuentas_desactivadas(db):
     with pytest.raises(HTTPException) as exc:
         generar_codigo_recuperacion(baja.id, db=db, admin=admin)
     assert exc.value.status_code == 400
+
+
+def test_si_ningun_op_atendiendo_lo_sabe_hacer_falla_enseguida_y_dice_que_reiniciar(db):
+    usuario(db)
+    R.solicitar(db, "ana", ahora=datetime.utcnow())
+    (cmd,) = db.query(models.Comando).all()
+    C.tomar_pendientes(db)  # el .150 sin reiniciar (no anuncia tipos)
+    salida = C.registrar_resultado(
+        db, cmd.id, schemas.ComandoResultadoIn(ok=False, error="Comando desconocido para OP_PROD: tablas.serie"))
+    assert (salida.estado, cmd.rechazos or 0) == ("error", 0)
+    assert "reiniciarlo" in salida.error

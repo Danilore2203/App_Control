@@ -1,5 +1,6 @@
 import "package:flutter/foundation.dart" show kIsWeb;
 import "package:flutter/material.dart";
+import "package:flutter/services.dart" show TextInput;
 
 import "../services/auth_service.dart";
 import "../services/biometric_service.dart";
@@ -134,6 +135,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       await _authService.login(_usuarioController.text.trim(), _passwordController.text);
+      // Login correcto: el sistema ofrece guardar usuario y contraseña en su gestor.
+      TextInput.finishAutofillContext();
       await _entrarADashboard();
     } on RequiereConfigurarPasswordException catch (_) {
       if (!mounted) return;
@@ -252,33 +255,51 @@ class _LoginScreenState extends State<LoginScreen> {
                                         child: const Text("Usar otra cuenta"),
                                       ),
                                     ] else ...[
-                                      const _EtiquetaCampo(texto: "Usuario o email"),
-                                      const SizedBox(height: 6),
-                                      TextField(
-                                        controller: _usuarioController,
-                                        decoration: const InputDecoration(
-                                          hintText: "nombre.apellido@nuevatel.com",
-                                          prefixIcon: Icon(Icons.alternate_email),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 16),
-                                      const _EtiquetaCampo(texto: "Contraseña"),
-                                      const SizedBox(height: 6),
-                                      TextField(
-                                        controller: _passwordController,
-                                        obscureText: _ocultarPassword,
-                                        decoration: InputDecoration(
-                                          hintText: "••••••••",
-                                          prefixIcon: const Icon(Icons.lock_outline),
-                                          suffixIcon: IconButton(
-                                            icon: Icon(
-                                              _ocultarPassword ? Icons.visibility_off : Icons.visibility,
+                                      // AutofillGroup + hints: el gestor de contraseñas del
+                                      // celular (Llavero en iPhone/Safari, Google en Android)
+                                      // ofrece guardarla y completarla. La app no la guarda.
+                                      AutofillGroup(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                                          children: [
+                                            const _EtiquetaCampo(texto: "Usuario o email"),
+                                            const SizedBox(height: 6),
+                                            TextField(
+                                              key: const Key("login_usuario"),
+                                              controller: _usuarioController,
+                                              autofillHints: const [AutofillHints.username],
+                                              autocorrect: false,
+                                              enableSuggestions: false,
+                                              textInputAction: TextInputAction.next,
+                                              decoration: const InputDecoration(
+                                                hintText: "nombre.apellido@nuevatel.com",
+                                                prefixIcon: Icon(Icons.alternate_email),
+                                              ),
                                             ),
-                                            onPressed: () =>
-                                                setState(() => _ocultarPassword = !_ocultarPassword),
-                                          ),
+                                            const SizedBox(height: 16),
+                                            const _EtiquetaCampo(texto: "Contraseña"),
+                                            const SizedBox(height: 6),
+                                            TextField(
+                                              key: const Key("login_password"),
+                                              controller: _passwordController,
+                                              obscureText: _ocultarPassword,
+                                              autofillHints: const [AutofillHints.password],
+                                              textInputAction: TextInputAction.done,
+                                              decoration: InputDecoration(
+                                                hintText: "••••••••",
+                                                prefixIcon: const Icon(Icons.lock_outline),
+                                                suffixIcon: IconButton(
+                                                  icon: Icon(
+                                                    _ocultarPassword ? Icons.visibility_off : Icons.visibility,
+                                                  ),
+                                                  onPressed: () =>
+                                                      setState(() => _ocultarPassword = !_ocultarPassword),
+                                                ),
+                                              ),
+                                              onSubmitted: (_) => _iniciarSesion(),
+                                            ),
+                                          ],
                                         ),
-                                        onSubmitted: (_) => _iniciarSesion(),
                                       ),
                                       const SizedBox(height: 4),
                                       Align(
