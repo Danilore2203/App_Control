@@ -201,6 +201,18 @@ def op_atiende(db: Session, tipo: str, ahora: Optional[datetime] = None) -> bool
     return tipo in (fila.tipos or "").split(",")
 
 
+def _alguien_lo_sabe_hacer(db: Session, tipo: str, ahora: Optional[datetime] = None) -> bool:
+    """Hay una copia de OP_PROD atendiendo ahora que anuncio saber hacer `tipo`
+    (a diferencia de op_atiende, sin datos es que no)."""
+    ahora = ahora or datetime.utcnow()
+    fila = db.get(models.LatidoOp, "comandos")
+    return (
+        fila is not None
+        and fila.visto_en >= ahora - timedelta(seconds=OP_CAIDO_SIN_LATIDO_SEGUNDOS)
+        and tipo in (fila.tipos or "").split(",")
+    )
+
+
 def tomar_pendientes(db: Session, limite: int = 10, tipos: Optional[set[str]] = None) -> list[schemas.ComandoOut]:
     """Para OP_PROD: devuelve los pendientes mas viejos y los marca en curso,
     asi dos copias de OP_PROD no ejecutan el mismo comando.
@@ -229,19 +241,25 @@ def registrar_resultado(db: Session, comando_id: int, resultado: schemas.Comando
     if comando is None:
         raise HTTPException(status_code=404, detail="Comando no encontrado")
     # «Comando desconocido»: lo retiro una copia de OP_PROD que no lo sabe
-    # hacer (vieja, o el .150 sin reiniciar) y no ejecuto nada. Vuelve a la
-    # cola para otra copia, en vez de fallar (ver tomar_pendientes).
-    if (
-        not resultado.ok
-        and (resultado.error or "").startswith("Comando desconocido")
-        and (comando.rechazos or 0) < MAX_RECHAZOS
-    ):
-        comando.rechazos = (comando.rechazos or 0) + 1
-        comando.estado = "pendiente"
-        comando.tomado_en = None
-        db.commit()
-        db.refresh(comando)
-        return _a_salida(comando)
+    # hacer (vieja, o el .150 sin reiniciar) y no ejecuto nada. Si hay otra
+    # copia atendiendo que dice saber hacerlo, vuelve a la cola para ella
+    # (ver tomar_pendientes). Si no hay ninguna, falla ya con un mensaje que
+    # dice que hacer, en vez de dejar a la app esperando hasta que expire.
+    if not resultado.ok and (resultado.error or "").startswith("Comando desconocido"):
+        if (comando.rechazos or 0) < MAX_RECHAZOS and _alguien_lo_sabe_hacer(db, comando.tipo):
+            comando.rechazos = (comando.rechazos or 0) + 1
+            comando.estado = "pendiente"
+            comando.tomado_en = None
+            db.commit()
+            db.refresh(comando)
+            return _a_salida(comando)
+        resultado = schemas.ComandoResultadoIn(
+            ok=False,
+            error=(
+                "El OP del servidor .150 todavía no tiene esta función (corre una versión anterior): "
+                "hay que reiniciarlo para que tome la nueva."
+            ),
+        )
 
     comando.estado = "ok" if resultado.ok else "error"
     comando.terminado_en = datetime.utcnow()

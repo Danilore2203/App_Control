@@ -1,3 +1,4 @@
+import "package:flutter/foundation.dart" show kIsWeb;
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";
 
@@ -93,6 +94,7 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
       });
       // Si quedo armada de una sesion anterior pero el servicio no esta
       // corriendo (p.ej. Android lo mato), se reconcilia aca.
+      if (kIsWeb) return; // sin alarma ni tonos en el navegador
       if (armado) establecerGuardiaActiva(true);
       _cargarNombreTono();
     } catch (_) {
@@ -182,15 +184,26 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
         : ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
-              _tarjetaArmado(colorScheme),
-              const SizedBox(height: 22),
-              const TituloSeccion("Horario de guardia"),
-              const SizedBox(height: 10),
-              _tarjetaHorario(colorScheme),
-              const SizedBox(height: 22),
-              const TituloSeccion("Tono de alarma"),
-              const SizedBox(height: 10),
-              _tarjetaTono(colorScheme),
+              // En Safari (version web) no hay alarma: no se puede armar ni
+              // elegir tono. Se explica y se muestra lo que si sirve.
+              if (kIsWeb)
+                MensajeInline(
+                  "En el navegador no suena la alarma de guardia: para eso usa la app instalada en Android. "
+                  "Aquí puedes ver los procesos vigilados y las fallas recientes.",
+                  color: colorScheme.primary,
+                  icono: Icons.info_outline,
+                )
+              else ...[
+                _tarjetaArmado(colorScheme),
+                const SizedBox(height: 22),
+                const TituloSeccion("Horario de guardia"),
+                const SizedBox(height: 10),
+                _tarjetaHorario(colorScheme),
+                const SizedBox(height: 22),
+                const TituloSeccion("Tono de alarma"),
+                const SizedBox(height: 10),
+                _tarjetaTono(colorScheme),
+              ],
               const SizedBox(height: 22),
               _seccionProcesosVigilados(colorScheme),
               const SizedBox(height: 22),
