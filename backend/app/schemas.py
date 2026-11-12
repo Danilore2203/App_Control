@@ -108,6 +108,44 @@ class RestablecerPasswordIn(BaseModel):
         return valor
 
 
+class AlertaInfraIn(BaseModel):
+    """Lo que manda OP_PROD cuando detecta (o deja de detectar) un problema de
+    infraestructura, p.ej. congestion en Netezza."""
+
+    clave: str = Field(min_length=1, max_length=60)
+    activa: bool
+    titulo: str = Field(default="", max_length=200)
+    mensaje: str = Field(default="", max_length=1000)
+
+
+class AlertaInfraOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    clave: str
+    abierta: bool
+    titulo: Optional[str] = None
+    mensaje: Optional[str] = None
+    abierta_en: Optional[datetime] = None
+    cerrada_en: Optional[datetime] = None
+    actualizada_en: Optional[datetime] = None
+
+
+class AlertaInfraEventoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    clave: str
+    tipo: str
+    titulo: Optional[str] = None
+    mensaje: Optional[str] = None
+    creado_en: datetime
+
+
+class AlertasInfraOut(BaseModel):
+    activas: list[AlertaInfraOut]
+    eventos: list[AlertaInfraEventoOut]
+
+
 class CodigoAdminOut(BaseModel):
     """Codigo que genera un administrador para que alguien cambie su
     contrasena sin correo. Se muestra una sola vez."""

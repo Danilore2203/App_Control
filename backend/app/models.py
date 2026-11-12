@@ -345,6 +345,36 @@ class Comando(Base):
     creado_por = relationship("Usuario", lazy="joined")
 
 
+class AlertaInfra(Base):
+    """Alarma de infraestructura que no es de un proceso (p.ej. congestion en
+    Netezza): la detecta OP_PROD y la avisa por /internal/alertas/infra. Una
+    fila por clave; `abierta` mientras dure (ver services/alertas_infra.py)."""
+
+    __tablename__ = "alertas_infra"
+
+    clave = Column(String(60), primary_key=True)
+    abierta = Column(Boolean, nullable=False, default=False)
+    titulo = Column(String(200), nullable=True)
+    mensaje = Column(String(1000), nullable=True)
+    abierta_en = Column(DateTime, nullable=True)
+    cerrada_en = Column(DateTime, nullable=True)
+    actualizada_en = Column(DateTime, nullable=True)
+    ultimo_aviso_en = Column(DateTime, nullable=True)
+
+
+class AlertaInfraEvento(Base):
+    """Historial de esas alarmas: cuando abrio, los recordatorios y cuando cerro."""
+
+    __tablename__ = "alertas_infra_eventos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    clave = Column(String(60), nullable=False, index=True)
+    tipo = Column(String(10), nullable=False)  # abre | sigue | cierra
+    titulo = Column(String(200), nullable=True)
+    mensaje = Column(String(1000), nullable=True)
+    creado_en = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class LatidoOp(Base):
     """Ultima vez que OP_PROD retiro comandos y que tipos dijo saber hacer.
     Asi la app puede avisar «el correo va a demorar» si nadie esta atendiendo."""
