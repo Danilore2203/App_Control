@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 
 import "../models/alerta.dart";
+import "../models/alerta_infra.dart";
 import "../models/bitacora_error.dart";
 import "../models/control.dart";
 import "../services/actualizaciones_service.dart";
@@ -11,6 +12,7 @@ import "../widgets/detalle_proceso_sheet.dart";
 import "../widgets/estado_vacio.dart";
 import "../widgets/fondo_app.dart";
 import "../widgets/monitoreo_por_fuente.dart" show esCore;
+import "../widgets/seccion_alertas_infra.dart";
 import "../widgets/titulo_seccion.dart";
 
 /// Reconstruye, a partir de una entrada de bitacora tipo INCOHERENCIA
@@ -64,6 +66,7 @@ class _AlertasScreenState extends State<AlertasScreen> {
   late Future<List<Alerta>> _alertasFuture;
   late Future<List<Control>> _controlesFuture;
   List<BitacoraError> _incoherenciasHoy = [];
+  AlertasInfra? _infra;
   bool _bannerDescartado = false;
   late final SuscripcionActualizaciones _actualizaciones;
 
@@ -73,6 +76,7 @@ class _AlertasScreenState extends State<AlertasScreen> {
     _alertasFuture = _apiService.obtenerAlertas();
     _controlesFuture = _apiService.obtenerControles();
     _cargarIncoherencias();
+    _cargarInfra();
     // Refresca cuando el backend avisa que hay datos nuevos (y al volver a
     // primer plano), en vez de preguntar cada 60 s aunque no haya nada.
     _actualizaciones = SuscripcionActualizaciones(() {
@@ -82,6 +86,7 @@ class _AlertasScreenState extends State<AlertasScreen> {
         _controlesFuture = _apiService.obtenerControles();
       });
       _cargarIncoherencias();
+      _cargarInfra();
     });
   }
 
@@ -112,6 +117,16 @@ class _AlertasScreenState extends State<AlertasScreen> {
     }
   }
 
+  /// Congestión en Netezza (alarma de guardia que avisa OP_PROD).
+  Future<void> _cargarInfra() async {
+    try {
+      final infra = await _apiService.obtenerAlertasInfra();
+      if (mounted) setState(() => _infra = infra);
+    } catch (_) {
+      // Sin esto la pantalla sigue igual: solo no se muestra la sección.
+    }
+  }
+
   Future<void> _recargarAlertas() async {
     final futureAlertas = _apiService.obtenerAlertas();
     final futureControles = _apiService.obtenerControles();
@@ -121,6 +136,7 @@ class _AlertasScreenState extends State<AlertasScreen> {
       _bannerDescartado = false;
     });
     _cargarIncoherencias();
+    _cargarInfra();
     await Future.wait([futureAlertas, futureControles]);
   }
 
@@ -238,6 +254,10 @@ class _AlertasScreenState extends State<AlertasScreen> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 children: [
                   ..._seccionCore(controles),
+                  if (_infra != null) ...[
+                    const SizedBox(height: 22),
+                    SeccionAlertasInfra(datos: _infra),
+                  ],
                   const SizedBox(height: 22),
                   TituloSeccion(
                     "Historial de alertas",

@@ -139,6 +139,19 @@ def recibir_estados_airflow(payload: schemas.AirflowEstadosIn, db: Session = Dep
     return schemas.AirflowEstadosOut(recibidos=len(payload.estados), actualizado_en=ahora)
 
 
+@router.post(
+    "/alertas/infra",
+    response_model=schemas.AlertaInfraOut,
+    dependencies=[Depends(auth.verificar_internal_key)],
+)
+def alerta_infra(entrada: schemas.AlertaInfraIn, db: Session = Depends(get_db)):
+    """OP_PROD avisa que detecto (o dejo de detectar) un problema de
+    infraestructura, p.ej. congestion en Netezza: alarma de guardia."""
+    from app.services import alertas_infra
+
+    return alertas_infra.registrar(db, entrada)
+
+
 @router.get(
     "/comandos/ultimos",
     response_model=list[schemas.ComandoOut],

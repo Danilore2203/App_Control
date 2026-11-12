@@ -5,6 +5,7 @@ import "package:http/http.dart" as http;
 
 import "../config.dart";
 import "../models/alerta.dart";
+import "../models/alerta_infra.dart";
 import "../models/bitacora_error.dart";
 import "../models/control.dart";
 import "../models/historial_falla.dart";
@@ -76,6 +77,17 @@ class ApiService {
 
     final List<dynamic> data = jsonDecode(response.body);
     return data.map((json) => HistorialFalla.fromJson(json)).toList();
+  }
+
+  /// Alarmas de infraestructura (congestión en Netezza): activas e historial.
+  Future<AlertasInfra> obtenerAlertasInfra() async {
+    final response = await ApiClient.enviar(() async => http
+        .get(Uri.parse("${AppConfig.apiBaseUrl}/alertas/infra"), headers: await _headers())
+        .timeout(_timeout, onTimeout: () => throw TimeoutException(_timeoutMsg)));
+    if (response.statusCode != 200) {
+      throw Exception("No se pudieron obtener las alarmas de infraestructura");
+    }
+    return AlertasInfra.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   Future<List<Alerta>> obtenerAlertas() async {

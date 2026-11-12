@@ -195,6 +195,14 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
                 )
               else ...[
                 _tarjetaArmado(colorScheme),
+                const SizedBox(height: 12),
+                // La alarma de congestion la detecta OP_PROD (vigia_netezza.py).
+                MensajeInline(
+                  "Además de los procesos core, suena si Netezza se congestiona: una sesión frenada "
+                  "10 min o más por un bloqueo, 5 o más sesiones esperando, o 10 o más consultas en cola.",
+                  color: colorScheme.primary,
+                  icono: Icons.storage_rounded,
+                ),
                 const SizedBox(height: 22),
                 const TituloSeccion("Horario de guardia"),
                 const SizedBox(height: 10),
