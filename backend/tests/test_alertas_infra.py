@@ -31,17 +31,25 @@ def test_abre_con_alarma_critica_y_no_repite_mientras_sigue(db):
         assert all(c.kwargs["critica"] and c.kwargs["tipo"] == "alerta_critica" for c in push.call_args_list)
         assert push.call_args.kwargs["titulo"] == "Netezza: bloqueo pesado"
 
-        # OP sigue avisando cada pocos minutos: no vuelve a sonar.
-        A.registrar(db, _aviso(True, "La sesión 123 frena a 5 sesiones."), ahora=T0 + timedelta(minutes=5))
+        # OP informa cada minuto: entre medio no vuelve a sonar, pero el mensaje se actualiza.
+        for minuto in (1, 2, 3, 4):
+            A.registrar(db, _aviso(True, f"La sesión 123 frena a {minuto + 3} sesiones."), ahora=T0 + timedelta(minutes=minuto))
         assert push.call_count == 2
-        assert db.get(models.AlertaInfra, CLAVE).mensaje == "La sesión 123 frena a 5 sesiones."
+        assert db.get(models.AlertaInfra, CLAVE).mensaje == "La sesión 123 frena a 7 sesiones."
 
-        # A los 30 min: recordatorio comun (sin alarma).
-        A.registrar(db, _aviso(True), ahora=T0 + timedelta(minutes=31))
+        # A los 5 min (aunque el aviso llegue unos segundos antes) vuelve a sonar como alarma.
+        A.registrar(db, _aviso(True), ahora=T0 + timedelta(minutes=4, seconds=50))
         assert push.call_count == 4
         recordatorio = push.call_args_list[-1].kwargs
-        assert (recordatorio["critica"], recordatorio["tipo"]) == (False, "alerta_normal")
+        assert (recordatorio["critica"], recordatorio["tipo"]) == (True, "alerta_critica")
         assert recordatorio["titulo"].startswith("Sigue:")
+        assert "Sigue hace 5 min" in recordatorio["cuerpo"]
+
+        # Y otra vez a los 10, no antes.
+        A.registrar(db, _aviso(True), ahora=T0 + timedelta(minutes=7))
+        assert push.call_count == 4
+        A.registrar(db, _aviso(True), ahora=T0 + timedelta(minutes=9, seconds=50))
+        assert push.call_count == 6
 
 
 def test_cierra_con_aviso_comun_y_queda_en_el_historial(db):
