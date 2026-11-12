@@ -149,6 +149,81 @@ def test_si_nadie_puede_entrar_a_pg_prod_falla_y_dice_por_que(db):
     assert "solo entra el servidor .150" in salida.error
 
 
+PC_150 = "s2nt-control-bi"
+PC_JHOJANS = "10.1.1.1 · python-requests/2.31.0"  # OP de antes del 12/11: no dice su nombre
+
+
+def _pg_prod(db, quien):
+    return S.crear_comando(db, quien, schemas.ComandoIn(tipo="infra.postgres.sesiones", payload={"entorno": "prod"}))
+
+
+def test_equipo_de_usa_el_nombre_de_la_pc_o_ip_y_agente():
+    assert S.equipo_de({"x-op-equipo": " S2NT-CONTROL-BI "}, "1.2.3.4") == ("S2NT-CONTROL-BI", True)
+    assert S.equipo_de({"x-forwarded-for": "200.85.145.126, 10.0.0.1", "user-agent": "python-requests/2.32.3"}, "10.0.0.9") == (
+        "200.85.145.126 · python-requests/2.32.3",
+        False,
+    )
+
+
+def test_con_el_150_atendiendo_otra_pc_sin_nombre_no_recibe_nada(db):
+    ana = usuario(db, "ana")
+    assert S.tomar_pendientes(db, tipos=TIPOS_OP, equipo=PC_150, identificado=True) == []
+    c = _pg_prod(db, ana)
+    # La PC de un compañero con OP abierto como primaria consulta primero: no se lo lleva.
+    assert S.tomar_pendientes(db, tipos=TIPOS_OP, equipo=PC_JHOJANS) == []
+    assert db.get(models.Comando, c.id).estado == "pendiente"
+    tomados = S.tomar_pendientes(db, tipos=TIPOS_OP, equipo=PC_150, identificado=True)
+    assert [t.id for t in tomados] == [c.id]
+    assert tomados[0].tomado_por == PC_150
+
+    # Si el .150 se apaga (mas de 90 s sin consultar), las demas vuelven a atender.
+    db.get(models.EquipoOp, PC_150).visto_en -= timedelta(seconds=S.EQUIPO_ACTIVO_SEGUNDOS + 5)
+    db.commit()
+    otro = _pg_prod(db, ana)
+    assert [t.id for t in S.tomar_pendientes(db, tipos=TIPOS_OP, equipo=PC_JHOJANS)] == [otro.id]
+
+
+def test_entre_dos_con_nombre_atiende_la_que_llega_a_pg_y_lleva_mas_tiempo(db):
+    ana = usuario(db, "ana")
+    S.tomar_pendientes(db, tipos=TIPOS_OP, equipo=PC_150, identificado=True)
+    S.tomar_pendientes(db, tipos=TIPOS_OP, equipo="JHOJRODRIGUEZ-LT", identificado=True)
+    c = _pg_prod(db, ana)
+    assert S.tomar_pendientes(db, tipos=TIPOS_OP, equipo="JHOJRODRIGUEZ-LT", identificado=True) == []
+    assert [t.id for t in S.tomar_pendientes(db, tipos=TIPOS_OP, equipo=PC_150, identificado=True)] == [c.id]
+    equipos = {e.nombre: e for e in S.listar_equipos(db)}
+    assert equipos[PC_150].titular and not equipos["JHOJRODRIGUEZ-LT"].titular
+
+    # Aunque el .150 se reinicie y vuelva despues, la que no llega a PG no se queda con la cola.
+    db.get(models.EquipoOp, PC_150).activo_desde += timedelta(hours=1)
+    db.get(models.EquipoOp, "JHOJRODRIGUEZ-LT").sin_pg_hasta = datetime.utcnow() + timedelta(minutes=5)
+    db.commit()
+    assert {e.nombre for e in S.listar_equipos(db) if e.titular} == {PC_150}
+
+
+def test_la_pc_que_no_pudo_entrar_a_pg_ya_no_recibe_esos_pedidos_si_hay_otra(db):
+    ana = usuario(db, "ana")
+    # Dos copias viejas (sin nombre) que salen por distinta IP: atienden las dos, como antes.
+    S.tomar_pendientes(db, tipos=TIPOS_OP, equipo="10.2.2.2 · python-requests/2.32.3")
+    c = _pg_prod(db, ana)
+    assert [t.id for t in S.tomar_pendientes(db, tipos=TIPOS_OP, equipo=PC_JHOJANS)] == [c.id]
+    S.registrar_resultado(db, c.id, schemas.ComandoResultadoIn(ok=False, error=SIN_ACCESO))
+    assert db.get(models.EquipoOp, PC_JHOJANS).sin_pg_hasta is not None
+
+    # Vuelve a la cola, pero esa PC ya no lo recibe (Netezza si); la otra, si.
+    nz = S.crear_comando(db, ana, schemas.ComandoIn(tipo="infra.netezza.sesiones"))
+    assert [t.id for t in S.tomar_pendientes(db, tipos=TIPOS_OP, equipo=PC_JHOJANS)] == [nz.id]
+    assert [t.id for t in S.tomar_pendientes(db, tipos=TIPOS_OP, equipo="10.2.2.2 · python-requests/2.32.3")] == [c.id]
+
+
+def test_si_es_la_unica_que_atiende_igual_lo_intenta(db):
+    ana = usuario(db, "ana")
+    c = _pg_prod(db, ana)
+    S.tomar_pendientes(db, tipos=TIPOS_OP, equipo=PC_JHOJANS)
+    S.registrar_resultado(db, c.id, schemas.ComandoResultadoIn(ok=False, error=SIN_ACCESO))
+    # No hay otra copia: no se queda esperando hasta expirar, lo vuelve a intentar y al final falla con el motivo.
+    assert [t.id for t in S.tomar_pendientes(db, tipos=TIPOS_OP, equipo=PC_JHOJANS)] == [c.id]
+
+
 def test_otros_errores_de_postgres_no_se_reintentan(db):
     ana = usuario(db, "ana")
     c = S.crear_comando(db, ana, schemas.ComandoIn(tipo="infra.postgres.sesiones", payload={"entorno": "prod"}))

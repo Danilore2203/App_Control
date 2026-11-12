@@ -187,13 +187,26 @@ def estado_recuperacion(identificador: str, db: Session = Depends(get_db)):
     response_model=list[schemas.ComandoOut],
     dependencies=[Depends(auth.verificar_internal_key)],
 )
-def comandos_pendientes(limite: int = 10, tipos: str | None = None, db: Session = Depends(get_db)):
+def comandos_pendientes(request: Request, limite: int = 10, tipos: str | None = None, db: Session = Depends(get_db)):
     """OP_PROD retira los comandos que la app dejo (quedan en curso).
     `tipos`: separados por coma, lo que esa copia de OP_PROD sabe hacer."""
     from app.services import comandos as servicio
 
     anunciados = {t.strip() for t in tipos.split(",") if t.strip()} if tipos else None
-    return servicio.tomar_pendientes(db, min(limite, 50), anunciados)
+    equipo, identificado = servicio.equipo_de(request.headers, request.client.host if request.client else None)
+    return servicio.tomar_pendientes(db, min(limite, 50), anunciados, equipo=equipo, identificado=identificado)
+
+
+@router.get(
+    "/comandos/equipos",
+    response_model=list[schemas.EquipoOpOut],
+    dependencies=[Depends(auth.verificar_internal_key)],
+)
+def comandos_equipos(db: Session = Depends(get_db)):
+    """Soporte: que copias de OP_PROD consultan la cola y cual atiende."""
+    from app.services import comandos as servicio
+
+    return servicio.listar_equipos(db)
 
 
 @router.post(
