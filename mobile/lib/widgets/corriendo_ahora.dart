@@ -58,7 +58,17 @@ class EnCurso {
   final List<String> pasos;
   final Control? control;
 
-  const EnCurso({required this.nombre, required this.fuente, this.inicio, this.pasos = const [], this.control});
+  /// Job que corre en el engine pero no es (directamente) un proceso del monitor.
+  final bool fueraDelMonitor;
+
+  const EnCurso({
+    required this.nombre,
+    required this.fuente,
+    this.inicio,
+    this.pasos = const [],
+    this.control,
+    this.fueraDelMonitor = false,
+  });
 }
 
 /// «Corriendo ahora»: lo que está en ejecución en este momento, con cuánto
@@ -70,7 +80,8 @@ class CorriendoAhora extends StatefulWidget {
     required this.controles,
     this.titulo = "Corriendo ahora",
     this.consultarEnVivo = true,
-    this.mostrarOtros = true,
+    this.filtroFuente,
+    this.soloCore = false,
     this.cargarEnVivo,
     this.ahora,
   });
@@ -81,8 +92,10 @@ class CorriendoAhora extends StatefulWidget {
   /// En la vista Tablas no tiene sentido preguntar por DataStage/Pentaho.
   final bool consultarEnVivo;
 
-  /// Mostrar también lo que corre y no está en el monitor (sin filtros puestos).
-  final bool mostrarOtros;
+  /// Los filtros del monitor: lo que corre fuera del monitor se muestra solo
+  /// si es de esa fuente (y nunca con «solo core»).
+  final String? filtroFuente;
+  final bool soloCore;
 
   /// Para las pruebas; normalmente pide `procesos.corriendo` a OP_PROD.
   final Future<CorriendoEnVivo> Function()? cargarEnVivo;
@@ -103,24 +116,66 @@ class CorriendoAhora extends StatefulWidget {
     return candidatos.isEmpty ? f : candidatos.first;
   }
 
-  /// Junta lo del catálogo (azul = en ejecución) con lo que OP ve en vivo.
-  static List<EnCurso> juntar(List<Control> controles, CorriendoEnVivo? vivo, DateTime ahora, {bool conOtros = true}) {
+  /// Un job del engine que no vino cruzado con el monitor: se busca su proceso
+  /// por los nombres habituales (JOB_X_LOG -> X_LOG_ALL / JOB_X_LOG_ALL), solo
+  /// para poder abrir su detalle.
+  static Control? _procesoDelJob(String job, Map<String, Control> porNombre) {
+    final j = job.toUpperCase();
+    final sinJob = j.startsWith("JOB_") ? j.substring(4) : j;
+    for (final n in [j, "${j}_ALL", sinJob, "${sinJob}_ALL"]) {
+      final c = porNombre[n];
+      if (c != null) return c;
+    }
+    return null;
+  }
+
+  /// Junta lo del catálogo (azul = en ejecución) con lo que OP ve en vivo:
+  /// los procesos del monitor que corren y los jobs que corren fuera de él
+  /// (la web también los cuenta). `controles` ya viene filtrado.
+  static List<EnCurso> juntar(
+    List<Control> controles,
+    CorriendoEnVivo? vivo,
+    DateTime ahora, {
+    String? filtroFuente,
+    bool soloCore = false,
+  }) {
     final porNombre = {for (final c in controles) c.nombre.toUpperCase(): c};
+    bool pasaFiltro(String fuente) =>
+        !soloCore && (filtroFuente == null || filtroFuente.toUpperCase() == fuente.toUpperCase());
     final vistos = <String>{};
     final out = <EnCurso>[];
     for (final p in vivo?.procesos ?? const <Map<String, dynamic>>[]) {
       final nombre = (p["nombre"] ?? "").toString();
       if (nombre.isEmpty) continue;
       final c = porNombre[nombre.toUpperCase()];
-      if (c == null && !conOtros) continue; // fuera de los filtros puestos
+      final fuente = c?.fuente ?? (p["fuente"] ?? "").toString().toUpperCase();
+      if (c == null && !pasaFiltro(fuente)) continue; // fuera de los filtros puestos
       vistos.add(nombre.toUpperCase());
       out.add(EnCurso(
         nombre: nombre,
-        fuente: c?.fuente ?? (p["fuente"] ?? "").toString().toUpperCase(),
+        fuente: fuente,
         inicio: CorriendoEnVivo.leerDesde(p["desde"], ahora),
         pasos: ((p["pasos"] as List?) ?? const []).map((e) => e.toString()).toList(),
         control: c,
       ));
+    }
+    // Lo que corre fuera del monitor (un mismo job puede tener varios PID: uno solo).
+    final otros = <String, EnCurso>{};
+    for (final o in vivo?.otros ?? const <Map<String, dynamic>>[]) {
+      final job = (o["job"] ?? "").toString();
+      final fuente = (o["fuente"] ?? "").toString().toUpperCase();
+      if (job.isEmpty || !pasaFiltro(fuente)) continue;
+      final c = _procesoDelJob(job, porNombre);
+      if (c != null && vistos.contains(c.nombre.toUpperCase())) continue;
+      final inicio = CorriendoEnVivo.leerDesde(o["desde"], ahora);
+      final clave = "$fuente|${job.toUpperCase()}";
+      final previo = otros[clave];
+      if (previo != null && (previo.inicio == null || (inicio != null && !inicio.isBefore(previo.inicio!)))) continue;
+      otros[clave] = EnCurso(nombre: job, fuente: fuente, inicio: inicio, control: c, fueraDelMonitor: c == null);
+    }
+    out.addAll(otros.values);
+    for (final e in otros.values) {
+      if (e.control != null) vistos.add(e.control!.nombre.toUpperCase());
     }
     for (final c in controles) {
       if (c.categoria != "blue" || vistos.contains(c.nombre.toUpperCase())) continue;
@@ -213,12 +268,6 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
     for (final f in vivo?.fuentesConError ?? const <String>[]) {
       notas.add("No respondió $f");
     }
-    final otros = vivo?.otros ?? const <Map<String, dynamic>>[];
-    if (widget.mostrarOtros && otros.isNotEmpty) {
-      final nombres = otros.map((o) => (o["job"] ?? "").toString()).where((n) => n.isNotEmpty).take(3).join(", ");
-      notas.add("Además corren ${otros.length} job(s) que no están en el monitor${nombres.isEmpty ? "" : ": $nombres"}"
-          "${otros.length > 3 ? "…" : ""}");
-    }
     return notas;
   }
 
@@ -251,7 +300,13 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
     final colorScheme = theme.colorScheme;
     final ahora = widget.ahora?.call() ?? DateTime.now();
     final vivo = widget.consultarEnVivo ? _vivo : null;
-    final items = CorriendoAhora.juntar(widget.controles, vivo, ahora, conOtros: widget.mostrarOtros);
+    final items = CorriendoAhora.juntar(
+      widget.controles,
+      vivo,
+      ahora,
+      filtroFuente: widget.filtroFuente,
+      soloCore: widget.soloCore,
+    );
     final notas = _notas(vivo);
 
     Widget pie() => Column(
@@ -366,6 +421,7 @@ class _Fila extends StatelessWidget {
                       i.fuente,
                       if (desde != null) desde,
                       if (i.pasos.isNotEmpty) "paso ${i.pasos.last}",
+                      if (i.fueraDelMonitor) "fuera del monitor",
                     ].join(" · "),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,

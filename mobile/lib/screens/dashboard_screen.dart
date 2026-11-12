@@ -592,7 +592,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       controles: segunCore,
                       titulo: _vista == "TABLAS" ? "Actualizándose ahora" : "Corriendo ahora",
                       consultarEnVivo: _vista != "TABLAS",
-                      mostrarOtros: _filtroFuente == null && !_filtroSoloCore,
+                      filtroFuente: _filtroFuente,
+                      soloCore: _filtroSoloCore,
                     ),
                     MonitoreoPorFuente(
                       controles: todos,
