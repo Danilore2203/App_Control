@@ -71,6 +71,13 @@ EXPIRA_PENDIENTE_POR_TIPO: dict[str, int] = {
 }
 # Veces que un comando vuelve a la cola porque una copia de OP_PROD no lo conocia.
 MAX_RECHAZOS = 5
+# PostgreSQL PROD solo deja entrar al servidor .150 (pg_hba.conf). Si otra PC
+# con OP abierto como primaria (o con OP_APP_CONTROL_COMANDOS=1) retira el
+# pedido, no llega a conectarse y no hace nada: vuelve a la cola para que lo
+# tome otra copia. OP agrega esta frase cuando no pudo ni conectar.
+REINTENTOS_SIN_ACCESO = 3
+_TIPOS_SIN_ACCESO = ("infra.postgres.sesiones", "infra.postgres.cancel")
+_FRASE_SIN_ACCESO = "que el servidor permita tu IP"
 # OP_PROD consulta cada ~3 s: si no aparece en este tiempo, nadie atiende.
 OP_CAIDO_SIN_LATIDO_SEGUNDOS = 90
 LATIDO_CADA_SEGUNDOS = 20
@@ -240,23 +247,41 @@ def tomar_pendientes(db: Session, limite: int = 10, tipos: Optional[set[str]] = 
     return [_a_salida(c, completo=True) for c in pendientes]
 
 
+def _devolver_a_la_cola(db: Session, comando: models.Comando) -> schemas.ComandoOut:
+    comando.rechazos = (comando.rechazos or 0) + 1
+    comando.estado = "pendiente"
+    comando.tomado_en = None
+    db.commit()
+    db.refresh(comando)
+    return _a_salida(comando)
+
+
 def registrar_resultado(db: Session, comando_id: int, resultado: schemas.ComandoResultadoIn) -> schemas.ComandoOut:
     comando = db.get(models.Comando, comando_id)
     if comando is None:
         raise HTTPException(status_code=404, detail="Comando no encontrado")
+    error = resultado.error or ""
+    # No pudo ni conectarse a PostgreSQL desde esa PC (ver REINTENTOS_SIN_ACCESO).
+    if not resultado.ok and comando.tipo in _TIPOS_SIN_ACCESO and _FRASE_SIN_ACCESO in error:
+        if (comando.rechazos or 0) < REINTENTOS_SIN_ACCESO:
+            return _devolver_a_la_cola(db, comando)
+        if str(_payload(comando).get("entorno") or "").lower() == "prod":
+            resultado = schemas.ComandoResultadoIn(
+                ok=False,
+                error=(
+                    f"{error} Se intentó {REINTENTOS_SIN_ACCESO + 1} veces. A PostgreSQL PROD solo entra el "
+                    "servidor .150: si otra PC tiene OP abierto con OP_SCHEDULER_PRIMARY=1 u "
+                    "OP_APP_CONTROL_COMANDOS=1, también toma los pedidos de la app y falla aquí."
+                ),
+            )
     # «Comando desconocido»: lo retiro una copia de OP_PROD que no lo sabe
     # hacer (vieja, o el .150 sin reiniciar) y no ejecuto nada. Si hay otra
     # copia atendiendo que dice saber hacerlo, vuelve a la cola para ella
     # (ver tomar_pendientes). Si no hay ninguna, falla ya con un mensaje que
     # dice que hacer, en vez de dejar a la app esperando hasta que expire.
-    if not resultado.ok and (resultado.error or "").startswith("Comando desconocido"):
+    if not resultado.ok and error.startswith("Comando desconocido"):
         if (comando.rechazos or 0) < MAX_RECHAZOS and _alguien_lo_sabe_hacer(db, comando.tipo):
-            comando.rechazos = (comando.rechazos or 0) + 1
-            comando.estado = "pendiente"
-            comando.tomado_en = None
-            db.commit()
-            db.refresh(comando)
-            return _a_salida(comando)
+            return _devolver_a_la_cola(db, comando)
         resultado = schemas.ComandoResultadoIn(
             ok=False,
             error=(
