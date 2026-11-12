@@ -595,6 +595,20 @@ class ComandoOut(BaseModel):
     resultado: Optional[dict] = None
     error: Optional[str] = None
     creado_por: Optional[str] = None
+    tomado_por: Optional[str] = None  # que copia de OP_PROD lo retiro
+
+
+class EquipoOpOut(BaseModel):
+    """GET /internal/comandos/equipos: que copias de OP_PROD consultan la cola."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    nombre: str
+    identificado: bool
+    activo_desde: datetime
+    visto_en: datetime
+    sin_pg_hasta: Optional[datetime] = None
+    titular: bool = False
 
 
 class ComandoResultadoIn(BaseModel):

@@ -341,8 +341,28 @@ class Comando(Base):
     # reiniciar). Vuelve a la cola y ya solo lo recibe una copia que diga que
     # sabe hacerlo (ver services/comandos.tomar_pendientes).
     rechazos = Column(Integer, nullable=False, default=0)
+    # Que copia de OP_PROD lo retiro (ver EquipoOp.nombre).
+    tomado_por = Column(String(120), nullable=True)
 
     creado_por = relationship("Usuario", lazy="joined")
+
+
+class EquipoOp(Base):
+    """Cada copia de OP_PROD que retira comandos. Solo el servidor .150 puede
+    entrar a PostgreSQL PROD, pero cualquier PC con OP abierto como primaria
+    (o con OP_APP_CONTROL_COMANDOS=1) tambien consulta la cola; esta tabla
+    permite entregarle los comandos a una sola (ver services/comandos.py)."""
+
+    __tablename__ = "op_equipos"
+
+    # X-OP-Equipo (nombre de la PC) si OP lo manda; si no, «IP · user-agent».
+    nombre = Column(String(120), primary_key=True)
+    identificado = Column(Boolean, nullable=False, default=False)
+    activo_desde = Column(DateTime, nullable=False)
+    visto_en = Column(DateTime, nullable=False)
+    # Fallo al conectar a PostgreSQL (no esta en pg_hba.conf): hasta entonces
+    # no se le dan esos comandos si hay otra copia atendiendo.
+    sin_pg_hasta = Column(DateTime, nullable=True)
 
 
 class AlertaInfra(Base):

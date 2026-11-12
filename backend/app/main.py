@@ -60,6 +60,7 @@ def _migrar_columnas_legacy():
         ("administradores", "origen VARCHAR(10)"),
         ("comandos", "rechazos INTEGER NOT NULL DEFAULT 0"),
         ("codigos_recuperacion", "comando_id INTEGER"),
+        ("comandos", "tomado_por VARCHAR(120)"),
     )
     for tabla, columna in columnas_nuevas:
         with engine.begin() as conn:

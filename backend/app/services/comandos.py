@@ -78,6 +78,12 @@ MAX_RECHAZOS = 5
 REINTENTOS_SIN_ACCESO = 3
 _TIPOS_SIN_ACCESO = ("infra.postgres.sesiones", "infra.postgres.cancel")
 _FRASE_SIN_ACCESO = "que el servidor permita tu IP"
+# Y esa copia no vuelve a recibir comandos de PostgreSQL por este tiempo
+# mientras haya otra atendiendo (ver tomar_pendientes).
+SIN_PG_RECORDAR = timedelta(minutes=30)
+# Una copia de OP_PROD que no consulta hace mas que esto ya no esta atendiendo
+# (consulta cada ~5 s; un reinicio del .150 tarda menos).
+EQUIPO_ACTIVO_SEGUNDOS = 90
 # OP_PROD consulta cada ~3 s: si no aparece en este tiempo, nadie atiende.
 OP_CAIDO_SIN_LATIDO_SEGUNDOS = 90
 LATIDO_CADA_SEGUNDOS = 20
@@ -120,6 +126,7 @@ def _a_salida(c: models.Comando, completo: bool = False) -> schemas.ComandoOut:
         resultado=json.loads(c.resultado) if c.resultado else None,
         error=c.error,
         creado_por=(c.creado_por.nombre or c.creado_por.username) if c.creado_por else None,
+        tomado_por=c.tomado_por,
     )
 
 
@@ -224,24 +231,109 @@ def _alguien_lo_sabe_hacer(db: Session, tipo: str, ahora: Optional[datetime] = N
     )
 
 
-def tomar_pendientes(db: Session, limite: int = 10, tipos: Optional[set[str]] = None) -> list[schemas.ComandoOut]:
+def equipo_de(headers, ip_cliente: Optional[str]) -> tuple[str, bool]:
+    """Quien consulta la cola: el nombre de la PC si OP_PROD lo manda
+    (X-OP-Equipo, desde el 12/11/2026); si no, «IP · user-agent», que alcanza
+    para distinguir dos copias si salen por distinta IP o version de requests."""
+    nombre = (headers.get("x-op-equipo") or "").strip()
+    if nombre:
+        return nombre[:120], True
+    ip = (headers.get("x-forwarded-for") or "").split(",")[0].strip() or ip_cliente or "?"
+    agente = (headers.get("user-agent") or "?").strip()
+    return f"{ip} · {agente}"[:120], False
+
+
+def _anotar_equipo(db: Session, nombre: str, identificado: bool, ahora: datetime) -> models.EquipoOp:
+    fila = db.get(models.EquipoOp, nombre)
+    if fila is None:
+        fila = models.EquipoOp(nombre=nombre, identificado=identificado, activo_desde=ahora, visto_en=ahora)
+        db.add(fila)
+        db.flush()
+        return fila
+    if fila.visto_en < ahora - timedelta(seconds=EQUIPO_ACTIVO_SEGUNDOS):
+        fila.activo_desde = ahora  # volvio despues de estar apagado
+    fila.visto_en = ahora
+    fila.identificado = identificado
+    return fila
+
+
+def _activos(db: Session, ahora: datetime) -> list[models.EquipoOp]:
+    return (
+        db.query(models.EquipoOp)
+        .filter(models.EquipoOp.visto_en >= ahora - timedelta(seconds=EQUIPO_ACTIVO_SEGUNDOS))
+        .all()
+    )
+
+
+def _llega_a_pg(e: models.EquipoOp, ahora: datetime) -> bool:
+    return e.sin_pg_hasta is None or e.sin_pg_hasta <= ahora
+
+
+def _titular(activos: list[models.EquipoOp], ahora: datetime) -> Optional[models.EquipoOp]:
+    """La copia que atiende cuando hay mas de una: entre las que dicen su nombre
+    (OP desde el 12/11/2026), la que llega a PostgreSQL y lleva mas tiempo
+    consultando sin cortes. None si ninguna dice su nombre (todas reciben,
+    como antes)."""
+    identificados = [e for e in activos if e.identificado]
+    if not identificados:
+        return None
+    candidatos = [e for e in identificados if _llega_a_pg(e, ahora)] or identificados
+    return min(candidatos, key=lambda e: (e.activo_desde, e.nombre))
+
+
+def listar_equipos(db: Session, ahora: Optional[datetime] = None) -> list[schemas.EquipoOpOut]:
+    ahora = ahora or datetime.utcnow()
+    titular = _titular(_activos(db, ahora), ahora)
+    filas = db.query(models.EquipoOp).order_by(models.EquipoOp.visto_en.desc()).limit(20).all()
+    return [
+        schemas.EquipoOpOut.model_validate(e).model_copy(update={"titular": titular is not None and e.nombre == titular.nombre})
+        for e in filas
+    ]
+
+
+def tomar_pendientes(
+    db: Session,
+    limite: int = 10,
+    tipos: Optional[set[str]] = None,
+    equipo: Optional[str] = None,
+    identificado: bool = False,
+) -> list[schemas.ComandoOut]:
     """Para OP_PROD: devuelve los pendientes mas viejos y los marca en curso,
     asi dos copias de OP_PROD no ejecutan el mismo comando.
 
     `tipos`: lo que esa copia de OP_PROD dice saber hacer; solo recibe eso.
     Una copia vieja no lo manda: recibe todo menos lo que ya rechazo alguna
-    copia por no conocerlo (eso queda para una que lo anuncie)."""
+    copia por no conocerlo (eso queda para una que lo anuncie).
+
+    `equipo`: quien consulta (ver equipo_de). Si hay una copia titular
+    atendiendo, las demas no reciben nada: asi una PC con OP abierto como
+    primaria no le gana los pedidos al .150. Y a una copia que no pudo entrar
+    a PostgreSQL no se le dan esos comandos mientras otra este atendiendo."""
     expirar_vencidos(db)
+    ahora = datetime.utcnow()
+    sin_pg = False
+    if equipo:
+        yo = _anotar_equipo(db, equipo, identificado, ahora)
+        activos = _activos(db, ahora)
+        titular = _titular(activos, ahora)
+        if titular is not None and titular.nombre != equipo:
+            db.commit()
+            return []
+        sin_pg = not _llega_a_pg(yo, ahora) and any(
+            e.nombre != equipo and _llega_a_pg(e, ahora) for e in activos
+        )
     consulta = db.query(models.Comando).filter(models.Comando.estado == "pendiente")
     if tipos is not None:
         consulta = consulta.filter(models.Comando.tipo.in_(sorted(tipos)))
     else:
         consulta = consulta.filter((models.Comando.rechazos == 0) | models.Comando.rechazos.is_(None))
+    if sin_pg:
+        consulta = consulta.filter(models.Comando.tipo.notin_(_TIPOS_SIN_ACCESO))
     pendientes = consulta.order_by(models.Comando.creado_en).limit(limite).all()
-    ahora = datetime.utcnow()
     for c in pendientes:
         c.estado = "en_curso"
         c.tomado_en = ahora
+        c.tomado_por = equipo
     _anotar_latido(db, tipos, ahora)
     db.commit()
     return [_a_salida(c, completo=True) for c in pendientes]
@@ -263,6 +355,9 @@ def registrar_resultado(db: Session, comando_id: int, resultado: schemas.Comando
     error = resultado.error or ""
     # No pudo ni conectarse a PostgreSQL desde esa PC (ver REINTENTOS_SIN_ACCESO).
     if not resultado.ok and comando.tipo in _TIPOS_SIN_ACCESO and _FRASE_SIN_ACCESO in error:
+        quien = db.get(models.EquipoOp, comando.tomado_por) if comando.tomado_por else None
+        if quien is not None:
+            quien.sin_pg_hasta = datetime.utcnow() + SIN_PG_RECORDAR
         if (comando.rechazos or 0) < REINTENTOS_SIN_ACCESO:
             return _devolver_a_la_cola(db, comando)
         if str(_payload(comando).get("entorno") or "").lower() == "prod":
