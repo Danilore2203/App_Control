@@ -7,8 +7,8 @@ avisa por POST /internal/alertas/infra con {clave, activa, titulo, mensaje}:
 - Se abre (activa y no estaba abierta): alarma CRITICA de guardia a todos los
   que tienen la app (tipo "alerta_critica": en el celular suena a pantalla
   completa si la guardia esta armada y en horario; si no, notificacion).
-- Sigue abierta: se actualiza el mensaje y cada RECORDAR_CADA se manda un
-  recordatorio (notificacion comun, sin alarma).
+- Sigue abierta: se actualiza el mensaje y cada RECORDAR_CADA vuelve a sonar
+  la alarma (critica, pedido de la guardia) hasta que se normalice.
 - Se cierra (activa false estando abierta): aviso comun «se normalizo».
 
 Cada cambio queda en el historial (AlertaInfraEvento), que la app muestra en
@@ -26,7 +26,10 @@ from app.services.fcm import enviar_alerta_push
 
 logger = logging.getLogger(__name__)
 
-RECORDAR_CADA = timedelta(minutes=30)
+RECORDAR_CADA = timedelta(minutes=5)
+# OP informa el estado cada minuto: este margen evita que un aviso que llega
+# unos segundos antes de los 5 min corra el recordatorio a los 6.
+_MARGEN = timedelta(seconds=20)
 
 
 def _destinatarios(db: Session):
@@ -84,11 +87,11 @@ def registrar(db: Session, entrada: schemas.AlertaInfraIn, ahora: Optional[datet
             logger.warning("Alarma de infraestructura %s abierta (avisada a %d): %s", fila.clave, n, mensaje)
         else:
             fila.titulo, fila.mensaje, fila.actualizada_en = titulo, mensaje, ahora
-            if fila.ultimo_aviso_en is None or ahora - fila.ultimo_aviso_en >= RECORDAR_CADA:
-                minutos = int((ahora - (fila.abierta_en or ahora)).total_seconds() // 60)
+            if fila.ultimo_aviso_en is None or ahora - fila.ultimo_aviso_en >= RECORDAR_CADA - _MARGEN:
+                minutos = round((ahora - (fila.abierta_en or ahora)).total_seconds() / 60)
                 recordatorio = f"Sigue hace {minutos} min. {mensaje}".strip()
                 _evento(db, fila.clave, "sigue", titulo, recordatorio, ahora)
-                _avisar(db, f"Sigue: {titulo}", recordatorio, critica=False)
+                _avisar(db, f"Sigue: {titulo}", recordatorio, critica=True)
                 fila.ultimo_aviso_en = ahora
     elif fila.abierta:
         fila.abierta = False

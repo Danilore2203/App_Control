@@ -199,7 +199,8 @@ class _GuardiaContenidoState extends State<GuardiaContenido> {
                 // La alarma de congestion la detecta OP_PROD (vigia_netezza.py).
                 MensajeInline(
                   "Además de los procesos core, suena si Netezza tiene 60 o más sesiones activas, o si hay "
-                  "sesiones bloqueándose (una frenada 10 min o más, o 5 o más esperando un bloqueo).",
+                  "sesiones bloqueándose (una frenada 10 min o más, o 5 o más esperando un bloqueo). "
+                  "Mientras siga, vuelve a sonar cada 5 minutos hasta que se normalice.",
                   color: colorScheme.primary,
                   icono: Icons.storage_rounded,
                 ),
