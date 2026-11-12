@@ -116,3 +116,42 @@ def test_soporte_ve_los_ultimos_de_un_tipo_sin_datos_reservados(db):
     (correo,) = comandos_ultimos(tipo=recuperacion.TIPO_COMANDO, db=db)
     assert correo.payload["codigo"] == "***"
     assert db.query(models.Comando).filter_by(estado="pendiente").count() == 2  # no retira nada
+
+
+SIN_ACCESO = (
+    'connection to server at "10.49.4.22", port 5432 failed: server does not support SSL, but SSL was required '
+    "Revisa BD, puerto, SSL y que el servidor permita tu IP."
+)
+TIPOS_OP = {"infra.postgres.sesiones", "infra.netezza.sesiones"}
+
+
+def test_si_otra_pc_no_puede_entrar_a_pg_prod_el_pedido_vuelve_a_la_cola_para_el_150(db):
+    ana = usuario(db, "ana")
+    c = S.crear_comando(db, ana, schemas.ComandoIn(tipo="infra.postgres.sesiones", payload={"entorno": "prod"}))
+    # Lo retira la PC de un compañero con OP abierto como primaria: no llega a PG PROD.
+    S.tomar_pendientes(db, tipos=TIPOS_OP)
+    salida = S.registrar_resultado(db, c.id, schemas.ComandoResultadoIn(ok=False, error=SIN_ACCESO))
+    assert salida.estado == "pendiente"  # la app sigue esperando
+    # El .150 lo toma en su siguiente consulta y responde bien.
+    assert [t.id for t in S.tomar_pendientes(db, tipos=TIPOS_OP)] == [c.id]
+    S.registrar_resultado(db, c.id, schemas.ComandoResultadoIn(ok=True, resultado={"rows": []}))
+    assert S.obtener_comando(db, c.id, ana).estado == "ok"
+
+
+def test_si_nadie_puede_entrar_a_pg_prod_falla_y_dice_por_que(db):
+    ana = usuario(db, "ana")
+    c = S.crear_comando(db, ana, schemas.ComandoIn(tipo="infra.postgres.sesiones", payload={"entorno": "prod"}))
+    for _ in range(S.REINTENTOS_SIN_ACCESO + 1):
+        S.tomar_pendientes(db, tipos=TIPOS_OP)
+        salida = S.registrar_resultado(db, c.id, schemas.ComandoResultadoIn(ok=False, error=SIN_ACCESO))
+    assert salida.estado == "error"
+    assert salida.error.startswith("connection to server")
+    assert "solo entra el servidor .150" in salida.error
+
+
+def test_otros_errores_de_postgres_no_se_reintentan(db):
+    ana = usuario(db, "ana")
+    c = S.crear_comando(db, ana, schemas.ComandoIn(tipo="infra.postgres.sesiones", payload={"entorno": "prod"}))
+    S.tomar_pendientes(db, tipos=TIPOS_OP)
+    salida = S.registrar_resultado(db, c.id, schemas.ComandoResultadoIn(ok=False, error="canceling statement due to statement timeout"))
+    assert (salida.estado, salida.error) == ("error", "canceling statement due to statement timeout")
