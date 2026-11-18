@@ -140,6 +140,68 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  group("los que hoy no corrieron", () {
+    final demorado = _control("DEMORADO_0506", fuente: "DATASTAGE", color: "red", estado: "DEMORADO", fin: "05:06:00");
+    final demoradoTemprano =
+        _control("DEMORADO_0336", fuente: "PENTAHO", color: "red", estado: "DEMORADO", fin: "03:36:00");
+    final enTiempo = _control("EN_TIEMPO_1003", fuente: "DATASTAGE", color: "gray", estado: "EN TIEMPO", fin: "10:03:00");
+    final enTiempoAntes = _control("EN_TIEMPO_0903", fuente: "PENTAHO", color: "gray", estado: "EN TIEMPO", fin: "09:03:00");
+    final ok = _control("CORRIO_OK", fuente: "DATASTAGE", inicio: "2026-11-10 06:38:34");
+    final fallo = _control("FALLO", fuente: "DATASTAGE", color: "red", estado: "ERROR", inicio: "2026-11-10 06:00:00");
+
+    test("demorados, en tiempo y sin ejecución de DataStage/Pentaho; nunca Airflow ni tablas", () {
+      for (final c in [demorado, enTiempo, _control("X", fuente: "OTRO", color: "gray", estado: "")]) {
+        expect(c.noCorrio, isTrue, reason: c.nombre);
+      }
+      for (final c in [
+        ok,
+        fallo,
+        _control("CORRIENDO", fuente: "PENTAHO", color: "blue", estado: "RUNNING"),
+        _control("dag", fuente: "AIRFLOW", color: "gray", estado: "EN TIEMPO"),
+        _control("dag_pausado", fuente: "AIRFLOW", color: "gray", estado: "PAUSADO"),
+        _control("bronze.t", tipo: "TABLA", fuente: "QA_CONTROL", color: "gray", estado: "EN TIEMPO"),
+      ]) {
+        expect(c.noCorrio, isFalse, reason: c.nombre);
+      }
+    });
+
+    test("van arriba: demorados primero, después por hora de fin; el resto no cambia de orden", () {
+      final lista = [ok, enTiempo, fallo, demorado, enTiempoAntes, demoradoTemprano];
+      expect(Control.noCorrieronPrimero(lista).map((c) => c.nombre), [
+        "DEMORADO_0336",
+        "DEMORADO_0506",
+        "EN_TIEMPO_0903",
+        "EN_TIEMPO_1003",
+        "CORRIO_OK",
+        "FALLO",
+      ]);
+      final sinPendientes = [fallo, ok];
+      expect(Control.noCorrieronPrimero(sinPendientes), same(sinPendientes));
+    });
+
+    testWidgets("la tarjeta lo marca en naranja con «NO CORRIÓ»", (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.dark,
+        home: Scaffold(
+          body: ListView(children: [
+            TarjetaProceso(control: enTiempo),
+            TarjetaProceso(control: ok),
+          ]),
+        ),
+      ));
+      expect(find.text("NO CORRIÓ"), findsOneWidget);
+      final estado = tester.widget<RichText>(find.byWidgetPredicate(
+          (w) => w is RichText && w.text.toPlainText().contains("En tiempo")));
+      final spans = <TextSpan>[];
+      estado.text.visitChildren((s) {
+        if (s is TextSpan) spans.add(s);
+        return true;
+      });
+      expect(spans.firstWhere((s) => s.text == "En tiempo").style?.color, StatusColors.advertencia);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   test("Airflow va aparte; DataStage, Pentaho y Otro quedan juntos", () {
     expect(esAirflow(_control("dag", fuente: "AIRFLOW")), isTrue);
     expect(esAirflow(_control("dag", fuente: " airflow ")), isTrue);

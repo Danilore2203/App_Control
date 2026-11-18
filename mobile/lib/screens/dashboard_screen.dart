@@ -559,6 +559,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   c.fuente.toLowerCase().contains(_busqueda))
               .toList();
         }
+        // Arriba, en naranja, los de DataStage/Pentaho que hoy no corrieron.
+        controles = Control.noCorrieronPrimero(controles);
 
         // Como en el monitor web: "error" es rojo de verdad; un demorado va
         // aparte (el backend lo pinta rojo para la alarma, pero no se cuenta
