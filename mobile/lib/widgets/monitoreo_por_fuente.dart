@@ -28,9 +28,6 @@ class MonitoreoPorFuente extends StatelessWidget {
   final bool coreSeleccionado;
   final VoidCallback? onSeleccionarCore;
 
-  /// En la vista Core la tarjeta CORE repetiría la lista entera.
-  final bool mostrarCore;
-
   const MonitoreoPorFuente({
     super.key,
     required this.controles,
@@ -38,7 +35,6 @@ class MonitoreoPorFuente extends StatelessWidget {
     this.onSeleccionarFuente,
     this.coreSeleccionado = false,
     this.onSeleccionarCore,
-    this.mostrarCore = true,
   });
 
   @override
@@ -56,7 +52,7 @@ class MonitoreoPorFuente extends StatelessWidget {
         final eb = porFuente[b]!.where((c) => c.categoria == "red").length;
         return ea != eb ? eb.compareTo(ea) : a.compareTo(b);
       });
-    final core = mostrarCore ? controles.where(esCore).toList() : const <Control>[];
+    final core = controles.where(esCore).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

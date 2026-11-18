@@ -148,28 +148,7 @@ void main() {
     }
   });
 
-  testWidgets("en la vista Core las tarjetas separan DataStage y Pentaho sin repetir CORE", (tester) async {
-    final elegidas = <String>[];
-    await tester.pumpWidget(MaterialApp(
-      theme: AppTheme.dark,
-      home: Scaffold(
-        body: MonitoreoPorFuente(
-          mostrarCore: false,
-          onSeleccionarFuente: elegidas.add,
-          controles: [
-            _control("a", fuente: "DATASTAGE", core: "SI"),
-            _control("b", fuente: "PENTAHO", core: "SI"),
-          ],
-        ),
-      ),
-    ));
-    expect(find.text("CORE"), findsNothing);
-    expect(find.text("DATASTAGE"), findsOneWidget);
-    await tester.tap(find.text("PENTAHO"));
-    expect(elegidas, ["PENTAHO"]);
-  });
-
-  testWidgets("las cinco pestañas entran en un celular angosto con letra grande", (tester) async {
+  testWidgets("las cuatro pestañas entran en un celular angosto con letra grande", (tester) async {
     tester.view.physicalSize = const Size(360, 640);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -183,10 +162,9 @@ void main() {
             padding: const EdgeInsets.all(16),
             child: Column(children: [
               Pestanas(
-                seleccionada: "CORE",
+                seleccionada: "PROCESOS",
                 opciones: const [
                   ("GENERAL", "General", 1126),
-                  ("CORE", "Core", 20),
                   ("PROCESOS", "Procesos", 168),
                   ("AIRFLOW", "Airflow", 670),
                   ("TABLAS", "Tablas", 290),
@@ -199,12 +177,12 @@ void main() {
       ),
     ));
     expect(tester.takeException(), isNull);
-    for (final t in ["General", "Core", "Procesos", "Airflow", "Tablas", "168", "670"]) {
+    for (final t in ["General", "Procesos", "Airflow", "Tablas", "168", "670"]) {
       expect(find.text(t), findsOneWidget);
     }
     // Todas miden lo mismo de alto.
     final altos = {
-      for (final t in ["General", "Core", "Procesos", "Airflow", "Tablas"])
+      for (final t in ["General", "Procesos", "Airflow", "Tablas"])
         tester.getSize(find.ancestor(of: find.text(t), matching: find.byType(InkWell)).first).height,
     };
     expect(altos, hasLength(1));
