@@ -69,15 +69,6 @@ class EnCurso {
     this.control,
     this.fueraDelMonitor = false,
   });
-
-  /// Botón del panel donde cae: Pentaho, Airflow o DataStage (como la web, lo
-  /// que no es Pentaho cuenta como DataStage).
-  String get origen {
-    final f = fuente.toUpperCase();
-    if (f.startsWith("PENTAHO")) return "Pentaho";
-    if (f.startsWith("AIRFLOW")) return "Airflow";
-    return "DataStage";
-  }
 }
 
 /// «Corriendo ahora»: lo que está en ejecución en este momento, con cuánto
@@ -91,25 +82,12 @@ class CorriendoAhora extends StatefulWidget {
     this.consultarEnVivo = true,
     this.filtroFuente,
     this.soloCore = false,
-    this.conOrigenes = false,
-    this.onVivo,
-    this.onFalloVivo,
     this.cargarEnVivo,
     this.ahora,
   });
 
   final List<Control> controles;
   final String titulo;
-
-  /// Botones Todo / DataStage / Pentaho / Airflow y «Actualizar», como el panel
-  /// de la web (vista Procesos).
-  final bool conOrigenes;
-
-  /// Avisa lo que OP ve corriendo, para el contador «Corriendo» y las filas.
-  final ValueChanged<CorriendoEnVivo>? onVivo;
-
-  /// No se pudo preguntar a OP (el contador deja de decir «Leyendo…»).
-  final VoidCallback? onFalloVivo;
 
   /// En la vista Tablas no tiene sentido preguntar por DataStage/Pentaho.
   final bool consultarEnVivo;
@@ -124,13 +102,19 @@ class CorriendoAhora extends StatefulWidget {
   final DateTime Function()? ahora;
 
   static const maximoVisibles = 5;
-  static const origenes = ["Todo", "DataStage", "Pentaho", "Airflow"];
 
   /// Desde cuándo corre segun el catálogo. Airflow manda la hora en UTC y
   /// DataStage/Pentaho en hora local (sin zona en ambos casos): para Airflow se
   /// toma la lectura que no queda en el futuro.
-  static DateTime? inicioDe(Control c, DateTime ahora) =>
-      c.fuente.toUpperCase() == "AIRFLOW" ? fechaAirflowLocal(c.horaLog, ahora) : leerFechaCatalogo(c.horaLog);
+  static DateTime? inicioDe(Control c, DateTime ahora) {
+    final f = leerFechaCatalogo(c.horaLog);
+    if (f == null) return null;
+    if (c.fuente.toUpperCase() != "AIRFLOW") return f;
+    final comoUtc = DateTime.utc(f.year, f.month, f.day, f.hour, f.minute, f.second).toLocal();
+    final candidatos = [f, comoUtc].where((d) => !d.isAfter(ahora.add(const Duration(minutes: 2)))).toList()
+      ..sort((a, b) => b.compareTo(a));
+    return candidatos.isEmpty ? f : candidatos.first;
+  }
 
   /// Un job del engine que no vino cruzado con el monitor: se busca su proceso
   /// por los nombres habituales (JOB_X_LOG -> X_LOG_ALL / JOB_X_LOG_ALL), solo
@@ -217,7 +201,6 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
   CorriendoEnVivo? _vivo;
   String? _errorVivo;
   bool _pidiendo = false;
-  String _origen = "Todo";
 
   @override
   void initState() {
@@ -251,37 +234,26 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
     super.dispose();
   }
 
-  /// `refrescar`: el botón «Actualizar»; OP pregunta otra vez a DataStage y
-  /// Pentaho en vez de dar lo que guardó hace menos de 30 s.
-  Future<void> _pedir({bool refrescar = false}) async {
+  Future<void> _pedir() async {
     if (!widget.consultarEnVivo || _pidiendo) return;
     final estado = WidgetsBinding.instance.lifecycleState;
     if (estado != null && estado != AppLifecycleState.resumed) return;
     _pidiendo = true;
-    if (refrescar && mounted) setState(() {});
     try {
       final cargar = widget.cargarEnVivo;
       final vivo = cargar != null
           ? await cargar()
-          : CorriendoEnVivo.fromJson((await ComandosService().ejecutar(
-              "procesos.corriendo",
-              payload: refrescar ? const {"refrescar": true} : const {},
-            )).resultado);
+          : CorriendoEnVivo.fromJson((await ComandosService().ejecutar("procesos.corriendo")).resultado);
       if (mounted) {
         setState(() {
           _vivo = vivo;
           _errorVivo = null;
         });
-        widget.onVivo?.call(vivo);
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _errorVivo = e is ComandoFallidoException ? e.mensaje : e.toString());
-        widget.onFalloVivo?.call();
-      }
+      if (mounted) setState(() => _errorVivo = e is ComandoFallidoException ? e.mensaje : e.toString());
     } finally {
       _pidiendo = false;
-      if (refrescar && mounted) setState(() {});
     }
   }
 
@@ -328,18 +300,13 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
     final colorScheme = theme.colorScheme;
     final ahora = widget.ahora?.call() ?? DateTime.now();
     final vivo = widget.consultarEnVivo ? _vivo : null;
-    final todos = CorriendoAhora.juntar(
+    final items = CorriendoAhora.juntar(
       widget.controles,
       vivo,
       ahora,
       filtroFuente: widget.filtroFuente,
       soloCore: widget.soloCore,
     );
-    final cuenta = {
-      for (final o in CorriendoAhora.origenes) o: o == "Todo" ? todos.length : todos.where((i) => i.origen == o).length,
-    };
-    final items =
-        !widget.conOrigenes || _origen == "Todo" ? todos : todos.where((i) => i.origen == _origen).toList();
     final notas = _notas(vivo);
 
     Widget pie() => Column(
@@ -353,7 +320,7 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
           ],
         );
 
-    if (todos.isEmpty) {
+    if (items.isEmpty) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
         child: Column(
@@ -386,9 +353,7 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
               children: [
                 const _Pulso(),
                 const SizedBox(width: 8),
-                // flex alto: el título usa el espacio libre antes que el hueco del Spacer.
                 Flexible(
-                  flex: 20,
                   child: Text(widget.titulo,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
@@ -396,16 +361,6 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
                 const SizedBox(width: 8),
                 PillEstado("${items.length}", color: StatusColors.info),
                 const Spacer(),
-                if (widget.conOrigenes && widget.consultarEnVivo)
-                  IconButton(
-                    key: const Key("corriendo_actualizar"),
-                    tooltip: "Preguntar ahora a DataStage y Pentaho",
-                    visualDensity: VisualDensity.compact,
-                    onPressed: _pidiendo ? null : () => _pedir(refrescar: true),
-                    icon: _pidiendo
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.refresh_rounded, size: 20),
-                  ),
                 if (items.length > visibles.length)
                   TextButton(
                     key: const Key("corriendo_ver_todos"),
@@ -415,79 +370,10 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
                   ),
               ],
             ),
-            if (widget.conOrigenes) ...[
-              const SizedBox(height: 6),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (final o in CorriendoAhora.origenes)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: _BotonOrigen(
-                          texto: o,
-                          cantidad: cuenta[o] ?? 0,
-                          elegido: _origen == o,
-                          onTap: () => setState(() => _origen = o),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
             const SizedBox(height: 4),
-            if (items.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text("Nada corriendo en $_origen en este momento.",
-                    style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
-              ),
             for (final i in visibles) _Fila(item: i, ahora: ahora),
             Padding(padding: const EdgeInsets.only(right: 6), child: pie()),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// «DataStage 3»: un botón del panel, marcado si es el elegido.
-class _BotonOrigen extends StatelessWidget {
-  const _BotonOrigen({required this.texto, required this.cantidad, required this.elegido, required this.onTap});
-
-  final String texto;
-  final int cantidad;
-  final bool elegido;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    return Material(
-      color: elegido ? StatusColors.info.withValues(alpha: 0.16) : Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(999),
-        side: BorderSide(color: elegido ? StatusColors.info : colorScheme.outlineVariant),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-          child: Text.rich(
-            TextSpan(children: [
-              TextSpan(text: texto, style: const TextStyle(fontWeight: FontWeight.w700)),
-              TextSpan(
-                text: "  $cantidad",
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: elegido ? StatusColors.info : colorScheme.outline,
-                ),
-              ),
-            ]),
-            style: theme.textTheme.labelMedium?.copyWith(color: colorScheme.onSurface),
-          ),
         ),
       ),
     );

@@ -24,7 +24,6 @@ import "../widgets/indicador_ejecucion.dart";
 import "../services/ejecucion_actual.dart";
 import "../widgets/detalle_proceso_sheet.dart";
 import "../widgets/estado_vacio.dart";
-import "../widgets/monitor_procesos.dart";
 import "../widgets/monitoreo_por_fuente.dart";
 import "../widgets/pestanas.dart";
 import "../widgets/salud_sistema.dart";
@@ -51,15 +50,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _filtroColor;
   String? _filtroFuente;
   bool _filtroSoloCore = false;
-
-  // Vista Procesos, como el monitor web: «Filtro» (motor/versión), contador
-  // elegido (ok, err, delay, run, pend o corriendo), hora de la agenda y lo
-  // que OP ve corriendo ahora en DataStage y Pentaho.
-  String _motor = "all";
-  String? _estadoProc;
-  int? _horaProc;
-  CorriendoEnVivo? _vivo;
-  bool _vivoFallo = false;
   Usuario? _usuario;
   final _busquedaController = TextEditingController();
   final _busquedaFocus = FocusNode();
@@ -233,9 +223,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _filtroColor = null;
       _filtroFuente = null;
       _filtroSoloCore = false;
-      _motor = "all";
-      _estadoProc = null;
-      _horaProc = null;
     });
     await future;
   }
@@ -328,33 +315,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildBusqueda(ColorScheme colorScheme) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: _campoBusqueda(),
-    );
-  }
-
-  Widget _campoBusqueda() {
-    return TextField(
-      controller: _busquedaController,
-      focusNode: _busquedaFocus,
-      onChanged: (valor) => setState(() => _busqueda = valor.trim().toLowerCase()),
-      decoration: InputDecoration(
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
-        hintText: switch (_vista) {
-          "TABLAS" => "Buscar tablas...",
-          "PROCESOS" => "Buscar proceso…",
-          _ => "Buscar procesos, ETLs o tablas...",
-        },
-        prefixIcon: const Icon(Icons.search),
-        suffixIcon: _busqueda.isEmpty
-            ? null
-            : IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () {
-                  _busquedaController.clear();
-                  setState(() => _busqueda = "");
-                },
-              ),
+      child: TextField(
+        controller: _busquedaController,
+        focusNode: _busquedaFocus,
+        onChanged: (valor) =>
+            setState(() => _busqueda = valor.trim().toLowerCase()),
+        decoration: InputDecoration(
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
+          hintText: _vista == "TABLAS"
+              ? "Buscar tablas..."
+              : "Buscar procesos, ETLs o tablas...",
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: _busqueda.isEmpty
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    _busquedaController.clear();
+                    setState(() => _busqueda = "");
+                  },
+                ),
+        ),
       ),
     );
   }
@@ -517,8 +499,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _filtroColor = null;
           _filtroFuente = null;
           _filtroSoloCore = false;
-          _estadoProc = null;
-          _horaProc = null;
         }),
       ),
     );
@@ -554,7 +534,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             colorIcono: colorScheme.onSurfaceVariant,
           );
         }
-        if (_vista == "PROCESOS") return _buildVistaProcesos(catalogo, colorScheme);
         final todos = _segunVista(catalogo);
 
         final segunFuente = _filtroFuente == null
@@ -650,199 +629,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       },
     );
-  }
-
-  /// Vista Procesos igual al «Monitor de procesos» de la web: contadores,
-  /// «Corriendo ahora», «Agenda del día» y la lista con su «Filtro», más los
-  /// DAG de Airflow. Contadores, agenda y «Corriendo ahora» siguen el «Filtro»
-  /// y «Solo core»; la lista, además, el contador y la hora elegidos.
-  Widget _buildVistaProcesos(_Catalogo catalogo, ColorScheme colorScheme) {
-    final ahora = DateTime.now();
-    final todos = catalogo.procesos;
-    final base = todos.where((c) => cumpleFiltroMotor(_motor, c) && (!_filtroSoloCore || esCore(c))).toList();
-    final enVivo = enVivoPorNombre(_vivo);
-
-    var lista = base;
-    if (_estadoProc == "corriendo") {
-      lista = lista.where((c) => estaCorriendo(c, enVivo)).toList();
-    } else if (_estadoProc != null) {
-      lista = lista.where((c) => tonoDe(c) == _estadoProc).toList();
-    }
-    if (_horaProc != null) lista = lista.where((c) => horaEsperada(c)?.h == _horaProc).toList();
-    if (_busqueda.isNotEmpty) lista = lista.where((c) => c.nombre.toLowerCase().contains(_busqueda)).toList();
-    lista = ordenarComoLaWeb(lista);
-
-    final criticos = todos.where((c) => c.color == "red" && !c.esDemorado).toList();
-
-    // El contador «Corriendo» y su línea de abajo, como la web.
-    final vivo = _vivo;
-    String subCorriendo;
-    var subAviso = false;
-    if (vivo == null) {
-      subCorriendo = _vivoFallo ? "No se pudo leer" : "Leyendo DataStage y Pentaho…";
-      subAviso = _vivoFallo;
-    } else if (vivo.fuentesConError.isNotEmpty) {
-      subCorriendo =
-          "${vivo.fuentesConError.map((f) => f.split(":").first.replaceFirst("DataStage ", "")).join(", ")} sin respuesta";
-      subAviso = true;
-    } else if (vivo.otros.isNotEmpty) {
-      subCorriendo = "+${vivo.otros.length} fuera del monitor";
-    } else {
-      subCorriendo = "DataStage, Pentaho y Airflow";
-    }
-
-    final activos = <(String, VoidCallback)>[
-      if (_estadoProc != null) (etiquetaTono(_estadoProc!), () => setState(() => _estadoProc = null)),
-      if (_horaProc != null)
-        ("Cierran a las ${_horaProc.toString().padLeft(2, "0")}", () => setState(() => _horaProc = null)),
-      if (_filtroSoloCore) ("Solo core", () => setState(() => _filtroSoloCore = false)),
-    ];
-
-    return RefreshIndicator(
-      onRefresh: _recargarControles,
-      child: CustomScrollView(
-        key: const PageStorageKey("lista-procesos"),
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          SliverToBoxAdapter(
-            child: Column(
-              children: [
-                AlertaBanner(
-                  cantidadCriticos: criticos.length,
-                  cantidadDemorados: todos.where((c) => c.esDemorado).length,
-                  fuentesAfectadas: criticos.map((c) => c.fuente).toSet().toList(),
-                  sustantivo: "proceso",
-                  onTap: () => setState(() => _estadoProc = "err"),
-                ),
-                _buildPestanas(catalogo),
-                const _EncabezadoProcesos(),
-                ContadoresProcesos(
-                  controles: base,
-                  corriendo: vivo == null ? null : base.where((c) => estaCorriendo(c, enVivo)).length,
-                  subCorriendo: subCorriendo,
-                  subCorriendoAviso: subAviso,
-                  seleccionado: _estadoProc,
-                  onSeleccionar: (clave) => setState(() => _estadoProc = clave),
-                ),
-                CorriendoAhora(
-                  controles: base,
-                  conOrigenes: true,
-                  filtroFuente: fuenteDelFiltroMotor(_motor),
-                  soloCore: _filtroSoloCore,
-                  onVivo: (v) => setState(() {
-                    _vivo = v;
-                    _vivoFallo = false;
-                  }),
-                  onFalloVivo: () {
-                    if (_vivo == null && !_vivoFallo) setState(() => _vivoFallo = true);
-                  },
-                ),
-                AgendaDelDia(
-                  controles: base,
-                  ahora: ahora,
-                  horaActiva: _horaProc,
-                  onHora: (h) => setState(() => _horaProc = h),
-                ),
-                const SizedBox(height: 6),
-              ],
-            ),
-          ),
-          SliverPersistentHeader(
-            pinned: true,
-            delegate: _FiltrosFijos(
-              alto: activos.isEmpty ? 66 : 106,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      children: [
-                        Expanded(child: _campoBusqueda()),
-                        const SizedBox(width: 8),
-                        _BotonFiltroMotor(
-                          etiqueta: etiquetaFiltroMotor(_motor),
-                          activo: _motor != "all",
-                          onTap: () => _elegirFiltroMotor(todos),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (activos.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 32,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        children: [
-                          for (final (texto, quitar) in activos)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 6),
-                              child: InputChip(
-                                label: Text(texto),
-                                visualDensity: VisualDensity.compact,
-                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                onDeleted: quitar,
-                                deleteButtonTooltipMessage: "Quitar filtro",
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(child: _buildEncabezadoLista(colorScheme, lista.length)),
-          if (lista.isEmpty)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: EstadoVacio(
-                  icono: Icons.filter_alt_off_outlined,
-                  mensaje: _estadoProc == "corriendo"
-                      ? "Ningún proceso del monitor está corriendo ahora"
-                      : "Sin procesos para mostrar",
-                  detalle: "Probá con otro filtro, contador u hora.",
-                  colorIcono: colorScheme.outline,
-                ),
-              ),
-            )
-          else
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              sliver: SliverList.builder(
-                itemCount: lista.length,
-                itemBuilder: (context, i) {
-                  final c = lista[i];
-                  return FilaProceso(
-                    control: c,
-                    ahora: ahora,
-                    enVivo: enVivo[c.nombre.toUpperCase()],
-                    primera: i == 0,
-                    ultima: i == lista.length - 1,
-                    onTap: () => mostrarDetalleProceso(context, c),
-                  );
-                },
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _elegirFiltroMotor(List<Control> procesos) async {
-    final r = await elegirFiltroMotor(context, controles: procesos, actual: _motor, soloCore: _filtroSoloCore);
-    if (!mounted || r == null) return;
-    setState(() {
-      if (r == "core") {
-        _filtroSoloCore = !_filtroSoloCore;
-      } else {
-        _motor = r;
-      }
-    });
   }
 
   @override
@@ -983,78 +769,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Cabecera de la vista Procesos, como la de la web.
-class _EncabezadoProcesos extends StatelessWidget {
-  const _EncabezadoProcesos();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 14, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Eyebrow("Operaciones · Carga diaria"),
-          const SizedBox(height: 3),
-          Text(
-            "Estado de los procesos en DataStage, Pentaho y Airflow. Tocá un contador o una hora de la agenda para filtrar la lista.",
-            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.3),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// «Filtro» de la lista (DataStage 11.7, Solo Pentaho, Solo Airflow...).
-class _BotonFiltroMotor extends StatelessWidget {
-  const _BotonFiltroMotor({required this.etiqueta, required this.activo, required this.onTap});
-
-  final String etiqueta;
-  final bool activo;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 150, minHeight: 46),
-      child: Material(
-        key: const Key("boton_filtro_motor"),
-        color: activo ? colorScheme.primary.withValues(alpha: 0.16) : colorScheme.surfaceContainerHigh,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: activo ? colorScheme.primary : colorScheme.outlineVariant),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.tune_rounded, size: 18, color: activo ? acentoTinta(context) : colorScheme.onSurfaceVariant),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    etiqueta,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }
