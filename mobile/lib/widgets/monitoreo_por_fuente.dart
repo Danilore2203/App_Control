@@ -9,6 +9,9 @@ import "titulo_seccion.dart";
 /// en palabras, cuantos fallan o estan demorados. Tocar una filtra la lista.
 bool esCore(Control control) => control.core?.trim().toLowerCase() == "si";
 
+/// Los DAG de Airflow van en su propia vista; DataStage y Pentaho, juntos.
+bool esAirflow(Control control) => control.fuente.trim().toUpperCase() == "AIRFLOW";
+
 /// "proceso", "tabla" o "elemento" segun lo que agrupa la tarjeta (en la
 /// vista General una fuente puede mezclar procesos y tablas).
 String _unidad(List<Control> grupo) {
@@ -25,6 +28,9 @@ class MonitoreoPorFuente extends StatelessWidget {
   final bool coreSeleccionado;
   final VoidCallback? onSeleccionarCore;
 
+  /// En la vista Core la tarjeta CORE repetiría la lista entera.
+  final bool mostrarCore;
+
   const MonitoreoPorFuente({
     super.key,
     required this.controles,
@@ -32,6 +38,7 @@ class MonitoreoPorFuente extends StatelessWidget {
     this.onSeleccionarFuente,
     this.coreSeleccionado = false,
     this.onSeleccionarCore,
+    this.mostrarCore = true,
   });
 
   @override
@@ -49,7 +56,7 @@ class MonitoreoPorFuente extends StatelessWidget {
         final eb = porFuente[b]!.where((c) => c.categoria == "red").length;
         return ea != eb ? eb.compareTo(ea) : a.compareTo(b);
       });
-    final core = controles.where(esCore).toList();
+    final core = mostrarCore ? controles.where(esCore).toList() : const <Control>[];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
