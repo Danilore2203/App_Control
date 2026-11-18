@@ -16,6 +16,8 @@ class TarjetaProceso extends StatelessWidget {
   const TarjetaProceso({super.key, required this.control, this.onTap});
 
   Color get _color {
+    // Los que hoy no corrieron (demorados y en tiempo) van en naranja.
+    if (control.noCorrio) return StatusColors.advertencia;
     switch (control.categoria) {
       case "red":
         return StatusColors.critico;
@@ -82,7 +84,9 @@ class TarjetaProceso extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final color = _color;
-    final esCritico = control.categoria == "red";
+    final noCorrio = control.noCorrio;
+    // Fondo y borde teñidos: rojo si falló, naranja si hoy no corrió.
+    final esCritico = control.categoria == "red" || noCorrio;
     final core = control.core?.trim().toLowerCase() == "si";
     final (frase, cuando) = _estado;
 
@@ -121,6 +125,10 @@ class TarjetaProceso extends StatelessWidget {
                             style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700, height: 1.2),
                           ),
                         ),
+                        if (noCorrio) ...[
+                          const SizedBox(width: 6),
+                          const _Insignia("NO CORRIÓ", color: StatusColors.advertencia, icono: Icons.schedule_rounded),
+                        ],
                         if (core) ...[
                           const SizedBox(width: 6),
                           const _Insignia("CORE", color: StatusColors.critico, icono: Icons.bolt_rounded),

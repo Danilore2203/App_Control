@@ -107,6 +107,35 @@ class Control {
     }
   }
 
+  /// Proceso de DataStage/Pentaho que hoy todavia no corrio: demorado, en
+  /// tiempo (aun no le toca) o sin ejecucion; en el catalogo no tienen hora de
+  /// inicio. Los que si corrieron terminaron OK, fallaron o estan corriendo.
+  /// Airflow no entra: un DAG semanal o pausado tiene su ultima corrida en
+  /// otro dia sin que falte nada.
+  bool get noCorrio {
+    if (esTabla || fuente.trim().toUpperCase() == "AIRFLOW") return false;
+    final c = categoria;
+    return c == "orange" || c == "tiempo" || c == "gray";
+  }
+
+  /// Los que no corrieron van arriba: primero los demorados y despues por
+  /// hora de fin esperada. El resto queda en el orden en que venia.
+  static List<Control> noCorrieronPrimero(List<Control> lista) {
+    final pendientes = lista.where((c) => c.noCorrio).toList()
+      ..sort((a, b) {
+        final da = a.categoria == "orange" ? 0 : 1;
+        final db = b.categoria == "orange" ? 0 : 1;
+        if (da != db) return da - db;
+        final fa = (a.horaFin ?? "").trim();
+        final fb = (b.horaFin ?? "").trim();
+        if (fa.isEmpty != fb.isEmpty) return fa.isEmpty ? 1 : -1;
+        final porHora = fa.compareTo(fb);
+        return porHora != 0 ? porHora : a.nombre.compareTo(b.nombre);
+      });
+    if (pendientes.isEmpty) return lista;
+    return [...pendientes, ...lista.where((c) => !c.noCorrio)];
+  }
+
   /// Cantidad de registros con separador de miles ("1.234.567").
   String? get cantidadFormateada {
     final n = cantidad;
