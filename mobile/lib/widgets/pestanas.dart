@@ -101,7 +101,7 @@ class Pestanas extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    // Con mas de tres (General / Core / Procesos / Airflow / Tablas) no entran
+    // Con mas de tres (General / Procesos / Airflow / Tablas) no entran
     // nombre y cantidad lado a lado en un celular: la cantidad va debajo y, si
     // aun asi no entra (letra grande), se achica en vez de cortarse.
     final apretadas = opciones.length > 3;
