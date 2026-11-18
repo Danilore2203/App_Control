@@ -101,6 +101,10 @@ class Pestanas extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    // Con mas de tres (General / Core / Procesos / Airflow / Tablas) no entran
+    // nombre y cantidad lado a lado en un celular: la cantidad va debajo y, si
+    // aun asi no entra (letra grande), se achica en vez de cortarse.
+    final apretadas = opciones.length > 3;
     return Vidrio(
       padding: const EdgeInsets.all(4),
       radius: 14,
@@ -115,31 +119,50 @@ class Pestanas extends StatelessWidget {
                 child: InkWell(
                   borderRadius: BorderRadius.circular(10),
                   onTap: () => onCambiar(clave),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          etiqueta,
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: clave == seleccionada ? colorScheme.onPrimary : colorScheme.onSurfaceVariant,
+                  child: Builder(builder: (context) {
+                    final nombre = Text(
+                      etiqueta,
+                      maxLines: 1,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: clave == seleccionada ? colorScheme.onPrimary : colorScheme.onSurfaceVariant,
+                      ),
+                    );
+                    final numero = Text(
+                      "$cantidad",
+                      maxLines: 1,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: clave == seleccionada
+                            ? colorScheme.onPrimary.withValues(alpha: 0.7)
+                            : colorScheme.outline,
+                      ),
+                    );
+                    if (apretadas) {
+                      // Alto fijo: todas las pestanas miden lo mismo aunque
+                      // alguna tenga que achicar el texto.
+                      return SizedBox(
+                        height: 48,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 3),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [nombre, const SizedBox(height: 1), numero],
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        Text(
-                          "$cantidad",
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: clave == seleccionada
-                                ? colorScheme.onPrimary.withValues(alpha: 0.7)
-                                : colorScheme.outline,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                      );
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [nombre, const SizedBox(width: 6), numero],
+                      ),
+                    );
+                  }),
                 ),
               ),
             ),

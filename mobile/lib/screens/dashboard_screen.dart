@@ -44,9 +44,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _apiService = ApiService();
   final _infraService = InfraService();
   late Future<_Catalogo> _controlesFuture;
-  // General / Procesos / Tablas, como el monitor web. Arranca en Procesos:
-  // es lo que la app mostro siempre y lo que mas se mira.
-  String _vista = "PROCESOS";
+  // General / Core / Procesos / Airflow / Tablas. Arranca en Core: los
+  // procesos criticos son lo primero que se mira. Procesos junta DataStage y
+  // Pentaho (las tarjetas «Por fuente» los separan si hace falta) y Airflow
+  // va aparte, porque sus ~670 DAG tapaban al resto.
+  String _vista = "CORE";
   String? _filtroColor;
   String? _filtroFuente;
   bool _filtroSoloCore = false;
@@ -196,8 +198,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   List<Control> _segunVista(_Catalogo catalogo) {
     switch (_vista) {
+      case "CORE":
+        return catalogo.core;
       case "PROCESOS":
-        return catalogo.procesos;
+        return catalogo.sinAirflow;
+      case "AIRFLOW":
+        return catalogo.airflow;
       case "TABLAS":
         return catalogo.tablas;
       default:
@@ -207,8 +213,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   String get _tituloLista {
     switch (_vista) {
+      case "CORE":
+        return "Procesos core";
       case "PROCESOS":
         return "Procesos";
+      case "AIRFLOW":
+        return "Airflow";
       case "TABLAS":
         return "Tablas";
       default:
@@ -343,8 +353,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildEncabezadoLista(ColorScheme colorScheme, int cantidad) {
     // "Actualizar todos" como en el monitor web: solo administradores y
-    // solo en Procesos o Tablas (General mezcla las dos cosas).
-    final puedeActualizar = (_usuario?.esAdmin ?? false) && _vista != "GENERAL";
+    // solo en Procesos o Tablas (General mezcla las dos cosas, y en Core o
+    // Airflow parecería que relanza solo esos cuando OP relanza todos).
+    final puedeActualizar = (_usuario?.esAdmin ?? false) && (_vista == "PROCESOS" || _vista == "TABLAS");
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
@@ -490,7 +501,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         opciones: [
           ("GENERAL", "General",
               catalogo.procesos.length + catalogo.tablas.length),
-          ("PROCESOS", "Procesos", catalogo.procesos.length),
+          ("CORE", "Core", catalogo.core.length),
+          ("PROCESOS", "Procesos", catalogo.sinAirflow.length),
+          ("AIRFLOW", "Airflow", catalogo.airflow.length),
           ("TABLAS", "Tablas", catalogo.tablas.length),
         ],
         onCambiar: (vista) => setState(() {
@@ -576,9 +589,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       cantidadDemorados: todos.where((c) => c.esDemorado).length,
                       fuentesAfectadas: fuentesCriticas,
                       sustantivo: switch (_vista) {
-                        "PROCESOS" => "proceso",
                         "TABLAS" => "tabla",
-                        _ => "elemento",
+                        "GENERAL" => "elemento",
+                        _ => "proceso",
                       },
                       onTap: () => setState(() => _filtroColor = "red"),
                     ),
@@ -587,22 +600,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     // poder comparar AIRFLOW o DATASTAGE con su monitor.
                     SaludSistema(controles: segunCore),
                     // Airflow sale del catalogo; DataStage y Pentaho, de OP en
-                    // vivo (el «Corriendo» de la web), cada minuto.
+                    // vivo (el «Corriendo» de la web), cada minuto. En Airflow
+                    // no hace falta preguntarle a OP; en Core solo cuentan
+                    // los core (nada de lo que corre fuera del monitor).
                     CorriendoAhora(
                       controles: segunCore,
                       titulo: _vista == "TABLAS" ? "Actualizándose ahora" : "Corriendo ahora",
-                      consultarEnVivo: _vista != "TABLAS",
+                      consultarEnVivo: _vista != "TABLAS" && _vista != "AIRFLOW",
                       filtroFuente: _filtroFuente,
-                      soloCore: _filtroSoloCore,
+                      soloCore: _filtroSoloCore || _vista == "CORE",
                     ),
-                    MonitoreoPorFuente(
-                      controles: todos,
-                      fuenteSeleccionada: _filtroFuente,
-                      onSeleccionarFuente: (fuente) =>
-                          setState(() => _filtroFuente = _filtroFuente == fuente ? null : fuente),
-                      coreSeleccionado: _filtroSoloCore,
-                      onSeleccionarCore: () => setState(() => _filtroSoloCore = !_filtroSoloCore),
-                    ),
+                    // Las tarjetas separan DataStage y Pentaho (tocar una
+                    // filtra). En Airflow habria una sola tarjeta: no va.
+                    if (_vista != "AIRFLOW")
+                      MonitoreoPorFuente(
+                        controles: todos,
+                        mostrarCore: _vista != "CORE",
+                        fuenteSeleccionada: _filtroFuente,
+                        onSeleccionarFuente: (fuente) =>
+                            setState(() => _filtroFuente = _filtroFuente == fuente ? null : fuente),
+                        coreSeleccionado: _filtroSoloCore,
+                        onSeleccionarCore: () => setState(() => _filtroSoloCore = !_filtroSoloCore),
+                      ),
                     const SizedBox(height: 6),
                   ],
                 ),
@@ -781,6 +800,14 @@ class _Catalogo {
   final List<Control> tablas;
 
   const _Catalogo({this.procesos = const [], this.tablas = const []});
+
+  /// Los procesos criticos (hoy todos de DataStage o Pentaho).
+  List<Control> get core => procesos.where(esCore).toList();
+
+  /// DataStage y Pentaho juntos (y algun «Otro»): todo menos Airflow.
+  List<Control> get sinAirflow => procesos.where((c) => !esAirflow(c)).toList();
+
+  List<Control> get airflow => procesos.where(esAirflow).toList();
 }
 
 /// Banner persistente en toda la app (no solo en Infraestructura) cuando hay

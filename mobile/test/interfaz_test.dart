@@ -3,6 +3,7 @@ import "package:app_controles/screens/alertas_screen.dart";
 import "package:app_controles/theme.dart";
 import "package:app_controles/utils/formato.dart";
 import "package:app_controles/widgets/monitoreo_por_fuente.dart";
+import "package:app_controles/widgets/pestanas.dart";
 import "package:app_controles/widgets/tarjeta_proceso.dart";
 import "package:flutter/material.dart";
 import "package:flutter_test/flutter_test.dart";
@@ -137,5 +138,77 @@ void main() {
       expect((e.renderObject as RenderBox).size.height, greaterThan(0));
     }
     expect(tester.takeException(), isNull);
+  });
+
+  test("Airflow va aparte; DataStage, Pentaho y Otro quedan juntos", () {
+    expect(esAirflow(_control("dag", fuente: "AIRFLOW")), isTrue);
+    expect(esAirflow(_control("dag", fuente: " airflow ")), isTrue);
+    for (final fuente in ["DATASTAGE", "PENTAHO", "OTRO"]) {
+      expect(esAirflow(_control("x", fuente: fuente)), isFalse);
+    }
+  });
+
+  testWidgets("en la vista Core las tarjetas separan DataStage y Pentaho sin repetir CORE", (tester) async {
+    final elegidas = <String>[];
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.dark,
+      home: Scaffold(
+        body: MonitoreoPorFuente(
+          mostrarCore: false,
+          onSeleccionarFuente: elegidas.add,
+          controles: [
+            _control("a", fuente: "DATASTAGE", core: "SI"),
+            _control("b", fuente: "PENTAHO", core: "SI"),
+          ],
+        ),
+      ),
+    ));
+    expect(find.text("CORE"), findsNothing);
+    expect(find.text("DATASTAGE"), findsOneWidget);
+    await tester.tap(find.text("PENTAHO"));
+    expect(elegidas, ["PENTAHO"]);
+  });
+
+  testWidgets("las cinco pestañas entran en un celular angosto con letra grande", (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    String? elegida;
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.dark,
+      home: MediaQuery(
+        data: const MediaQueryData(size: Size(360, 640), textScaler: TextScaler.linear(1.3)),
+        child: Scaffold(
+          body: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(children: [
+              Pestanas(
+                seleccionada: "CORE",
+                opciones: const [
+                  ("GENERAL", "General", 1126),
+                  ("CORE", "Core", 20),
+                  ("PROCESOS", "Procesos", 168),
+                  ("AIRFLOW", "Airflow", 670),
+                  ("TABLAS", "Tablas", 290),
+                ],
+                onCambiar: (v) => elegida = v,
+              ),
+            ]),
+          ),
+        ),
+      ),
+    ));
+    expect(tester.takeException(), isNull);
+    for (final t in ["General", "Core", "Procesos", "Airflow", "Tablas", "168", "670"]) {
+      expect(find.text(t), findsOneWidget);
+    }
+    // Todas miden lo mismo de alto.
+    final altos = {
+      for (final t in ["General", "Core", "Procesos", "Airflow", "Tablas"])
+        tester.getSize(find.ancestor(of: find.text(t), matching: find.byType(InkWell)).first).height,
+    };
+    expect(altos, hasLength(1));
+    await tester.tap(find.text("Airflow"));
+    expect(elegida, "AIRFLOW");
   });
 }
