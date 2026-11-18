@@ -73,18 +73,6 @@ DateTime? leerFechaCatalogo(String? v) {
   return DateTime.tryParse(s.substring(0, s.length >= 19 ? 19 : 16).replaceFirst(" ", "T"));
 }
 
-/// Fecha de un DAG de Airflow en hora del celular. Airflow la manda en UTC y
-/// DataStage/Pentaho en hora local, las dos sin zona: de las dos lecturas se
-/// toma la más reciente que no queda en el futuro.
-DateTime? fechaAirflowLocal(String? v, DateTime ahora) {
-  final f = leerFechaCatalogo(v);
-  if (f == null) return null;
-  final comoUtc = DateTime.utc(f.year, f.month, f.day, f.hour, f.minute, f.second).toLocal();
-  final candidatos = [f, comoUtc].where((d) => !d.isAfter(ahora.add(const Duration(minutes: 2)))).toList()
-    ..sort((a, b) => b.compareTo(a));
-  return candidatos.isEmpty ? f : candidatos.first;
-}
-
 /// La fecha del catalogo legible: «Hoy 14:00», «9 nov · 15:15», o «08:09» si solo trae la hora.
 String? fechaCatalogo(String? v, {DateTime? ahora}) {
   final s = (v ?? "").trim();
