@@ -111,7 +111,10 @@ class _DetalleProcesoSheetState extends State<_DetalleProcesoSheet> {
                     esAirflow ? "Disparar ${control.nombre}" : "Ejecutar ${control.nombre}",
                     esAirflow
                         ? "Se crea una corrida manual del DAG en Airflow, como desde el monitor web."
-                        : "Se lanza el proceso en ${control.fuente} a través del scheduler de OP, como desde la web.",
+                        : control.fuente.toUpperCase() == "PENTAHO"
+                            ? "Se ejecuta el job en el servidor Pentaho, como «Ejecutar en Pentaho» de la web. "
+                                "Puede tardar varios minutos: verás el cronómetro y cómo terminó."
+                            : "Se lanza el proceso en ${control.fuente} a través del scheduler de OP, como desde la web.",
                     "procesos.lanzar",
                     {"nombre": control.nombre, "fuente": control.fuente, "ruta": control.ruta ?? ""},
                     seguir: !esAirflow,

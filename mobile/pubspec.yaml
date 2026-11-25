@@ -1,7 +1,7 @@
 name: app_controles
 description: App movil de controles y alertas.
 publish_to: "none"
-version: 0.2.5+7
+version: 0.2.6+8
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -26,6 +26,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  fake_async: any
   flutter_launcher_icons: ^0.14.3
 
 flutter:
