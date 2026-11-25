@@ -19,6 +19,10 @@ class SeguimientoLanzamiento {
 
   static const intervaloConsulta = Duration(seconds: 10);
   static const maximo = Duration(minutes: 45);
+
+  /// Un job de Pentaho corre en el servidor y puede tardar bastante más
+  /// (JOB_ETL_CAMBIOS_DE_SIM, unos 36 min): se lo espera como a DataStage.
+  static const maximoPentaho = Duration(hours: 2);
   static const maxFallosSeguidos = 3;
 
   /// «48s», «3m 05s», «1h 02m 09s».
@@ -59,10 +63,14 @@ class SeguimientoLanzamiento {
     /// Corrida real de DataStage (OP_PROD la devuelve en `run_id`): el estado
     /// se sigue por ese id, con el resultado y el log del job al terminar.
     String? runId,
+    /// Lo que OP_PROD necesita para seguir la corrida, tal como lo devolvió
+    /// al lanzar (Pentaho: `carte_object_id` y `secuencia`).
+    Map<String, dynamic> extra = const {},
+    Duration? espera,
   }) async {
     final inicio = lanzadoEnLocal ?? DateTime.now();
-    final limite = inicio.add(maximo);
-    var extra = "";
+    final limite = inicio.add(espera ?? maximo);
+    var detalleExtra = "";
     var fallosSeguidos = 0;
 
     bool vigente() => EjecucionActual.notifier.value?.titulo == titulo;
@@ -70,7 +78,7 @@ class SeguimientoLanzamiento {
       if (!vigente()) return;
       EjecucionActual.mostrar(EstadoEjecucion(
         titulo: titulo,
-        detalle: "Ejecutando… ${duracion(DateTime.now().difference(inicio))}$extra",
+        detalle: "Ejecutando… ${duracion(DateTime.now().difference(inicio))}$detalleExtra",
         fase: FaseEjecucion.ejecutando,
       ));
     }
@@ -89,6 +97,7 @@ class SeguimientoLanzamiento {
               "nombre": nombre,
               "lanzado_en": lanzadoEnServidor,
               if (runId != null && runId.isNotEmpty) "run_id": runId,
+              ...extra,
             },
           ))
               .resultado;
@@ -110,7 +119,14 @@ class SeguimientoLanzamiento {
         if (!vigente()) return;
         if (estado["corriendo"] == true) {
           final proceso = (estado["estado_proceso"] ?? "").toString();
-          extra = proceso.isEmpty ? "" : " · proceso en $proceso";
+          // Pentaho: «Running» no agrega nada; sí «Waiting» o, en una
+          // secuencia, en qué paso va («Ejecutando JOB_X»).
+          final pentaho = (estado["estado_pentaho"] ?? "").toString().trim();
+          detalleExtra = pentaho.isNotEmpty && pentaho.toLowerCase() != "running"
+              ? " · $pentaho"
+              : proceso.isEmpty
+                  ? ""
+                  : " · proceso en $proceso";
           continue;
         }
         final (texto, ok) = resumenFinal(estado, DateTime.now().difference(inicio));
@@ -125,7 +141,7 @@ class SeguimientoLanzamiento {
       if (vigente()) {
         EjecucionActual.mostrar(EstadoEjecucion(
           titulo: titulo,
-          detalle: "Sigue corriendo después de ${duracion(maximo)}; míralo en el monitor.",
+          detalle: "Sigue corriendo después de ${duracion(espera ?? maximo)}; míralo en el monitor.",
           fase: FaseEjecucion.error,
         ));
       }
@@ -138,7 +154,8 @@ class SeguimientoLanzamiento {
 /// Ejecuta un comando de OP_PROD con su barra de avance y, con `seguir`
 /// (lanzar un proceso), se queda siguiendo la corrida hasta que termina:
 /// DataStage responde al terminar (resultado y duracion vienen en la
-/// respuesta); Pentaho y el resto se siguen con `procesos.lanzar.estado`.
+/// respuesta); Pentaho corre en su servidor y se sigue por el id del job
+/// (`carte_object_id`), y el resto por la tarea, con `procesos.lanzar.estado`.
 /// Lo usan el detalle de un proceso y las dependencias de un archivo RA.
 Future<void> ejecutarYSeguir({
   required String tipo,
@@ -169,10 +186,19 @@ Future<void> ejecutarYSeguir({
     ));
     return;
   }
-  // «Actualizar proceso» (Pentaho): OP_PROD lo lanzo; se sigue la tarea.
+  // Pentaho en su servidor: OP_PROD le pregunta a Pentaho por ese job. Si OP
+  // es de antes (no devuelve modo «pentaho») o corrió local, se sigue la tarea.
+  final enServidorPentaho = r.resultado["modo"] == "pentaho";
   await SeguimientoLanzamiento(comandos: servicio).seguir(
     titulo: titulo,
     nombre: payload["nombre"].toString(),
     lanzadoEnServidor: (r.resultado["lanzado_en"] ?? "").toString(),
+    extra: enServidorPentaho
+        ? {
+            "carte_object_id": (r.resultado["carte_object_id"] ?? "").toString(),
+            "secuencia": r.resultado["secuencia"] == true,
+          }
+        : const {},
+    espera: enServidorPentaho ? SeguimientoLanzamiento.maximoPentaho : null,
   );
 }
