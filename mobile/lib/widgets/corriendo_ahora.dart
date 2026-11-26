@@ -17,20 +17,55 @@ class CorriendoEnVivo {
   final List<Map<String, dynamic>> otros;
   final List<String> fuentesConError;
 
-  const CorriendoEnVivo({this.procesos = const [], this.otros = const [], this.fuentesConError = const []});
+  /// Motores DataStage que OP mira («ds117», «ds115»…), en ese orden. Con más
+  /// de uno, el filtro DataStage se parte en uno por motor (como en la web).
+  final List<String> motores;
+
+  /// Motores cuyo primer barrido sigue en curso (la 11.5 tarda unos 40 s).
+  final List<String> leyendo;
+
+  /// «10:42»: a qué hora OP miró lo que corre.
+  final String? vistoALas;
+
+  const CorriendoEnVivo({
+    this.procesos = const [],
+    this.otros = const [],
+    this.fuentesConError = const [],
+    this.motores = const [],
+    this.leyendo = const [],
+    this.vistoALas,
+  });
 
   factory CorriendoEnVivo.fromJson(Map<String, dynamic> j) {
     List<Map<String, dynamic>> lista(Object? v) =>
         ((v as List?) ?? const []).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+    final fuentes = lista(j["fuentes"]);
+    String? motorDe(Map<String, dynamic> f) {
+      final n = (f["fuente"] ?? "").toString();
+      if (!n.startsWith("DataStage ")) return null;
+      final m = n.substring(10).trim().toLowerCase();
+      return m.isEmpty ? null : m;
+    }
+
+    final generado = (j["generado_en"] ?? "").toString();
     return CorriendoEnVivo(
       procesos: lista(j["procesos"]),
       otros: lista(j["otros"]),
       fuentesConError: [
-        for (final f in lista(j["fuentes"]))
-          if (f["ok"] == false) "${f["fuente"]}: ${(f["error"] ?? "no respondió").toString()}",
+        for (final f in fuentes)
+          if (f["ok"] == false && f["leyendo"] != true)
+            "${f["fuente"]}: ${(f["error"] ?? "no respondió").toString()}",
       ],
+      motores: [for (final f in fuentes) if (motorDe(f) != null) motorDe(f)!],
+      leyendo: [for (final f in fuentes) if (f["leyendo"] == true && motorDe(f) != null) motorDe(f)!],
+      vistoALas: generado.length >= 16 ? generado.substring(11, 16) : null,
     );
   }
+
+  static const _version = {"ds117": "11.7", "ds115": "11.5", "ds150": "150"};
+
+  /// «ds115» → «DataStage 11.5».
+  static String nombreMotor(String motor) => "DataStage ${_version[motor] ?? motor}";
 
   /// «12:05» (hoy) o «22/10» / «22/10 07:00» (otro día) → fecha y hora.
   static DateTime? leerDesde(Object? desde, DateTime ahora) {
@@ -61,6 +96,10 @@ class EnCurso {
   /// Job que corre en el engine pero no es (directamente) un proceso del monitor.
   final bool fueraDelMonitor;
 
+  /// Motor DataStage donde corre («ds117», «ds115»); vacío si no es DataStage
+  /// en vivo.
+  final String motor;
+
   const EnCurso({
     required this.nombre,
     required this.fuente,
@@ -68,7 +107,15 @@ class EnCurso {
     this.pasos = const [],
     this.control,
     this.fueraDelMonitor = false,
+    this.motor = "",
   });
+
+  /// «DataStage 11.5» si se sabe el motor; si no, la fuente tal cual.
+  String get donde => motor.isEmpty ? fuente : CorriendoEnVivo.nombreMotor(motor);
+
+  /// Filtro del panel: «todo», un motor («ds115») o una fuente («PENTAHO»).
+  bool pasa(String origen) =>
+      origen == "todo" || (origen.startsWith("ds") ? motor == origen : fuente.toUpperCase() == origen);
 }
 
 /// «Corriendo ahora»: lo que está en ejecución en este momento, con cuánto
@@ -157,6 +204,7 @@ class CorriendoAhora extends StatefulWidget {
         inicio: CorriendoEnVivo.leerDesde(p["desde"], ahora),
         pasos: ((p["pasos"] as List?) ?? const []).map((e) => e.toString()).toList(),
         control: c,
+        motor: fuente == "DATASTAGE" ? (p["target"] ?? "").toString().toLowerCase() : "",
       ));
     }
     // Lo que corre fuera del monitor (un mismo job puede tener varios PID: uno solo).
@@ -168,10 +216,12 @@ class CorriendoAhora extends StatefulWidget {
       final c = _procesoDelJob(job, porNombre);
       if (c != null && vistos.contains(c.nombre.toUpperCase())) continue;
       final inicio = CorriendoEnVivo.leerDesde(o["desde"], ahora);
-      final clave = "$fuente|${job.toUpperCase()}";
+      final motor = fuente == "DATASTAGE" ? (o["target"] ?? "").toString().toLowerCase() : "";
+      final clave = "$fuente|$motor|${job.toUpperCase()}";
       final previo = otros[clave];
       if (previo != null && (previo.inicio == null || (inicio != null && !inicio.isBefore(previo.inicio!)))) continue;
-      otros[clave] = EnCurso(nombre: job, fuente: fuente, inicio: inicio, control: c, fueraDelMonitor: c == null);
+      otros[clave] =
+          EnCurso(nombre: job, fuente: fuente, inicio: inicio, control: c, fueraDelMonitor: c == null, motor: motor);
     }
     out.addAll(otros.values);
     for (final e in otros.values) {
@@ -197,10 +247,18 @@ class CorriendoAhora extends StatefulWidget {
 
 class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObserver {
   Timer? _reloj;
+  Timer? _reintento;
   int _ticks = 0;
   CorriendoEnVivo? _vivo;
   String? _errorVivo;
   bool _pidiendo = false;
+
+  /// Filtro del panel: «todo», un motor («ds117», «ds115») o una fuente.
+  String _origen = "todo";
+
+  /// Panel plegado: queda solo la cabecera con el resumen. Se recuerda
+  /// mientras la app siga abierta.
+  static bool _oculto = false;
 
   @override
   void initState() {
@@ -231,29 +289,40 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _reloj?.cancel();
+    _reintento?.cancel();
     super.dispose();
   }
 
-  Future<void> _pedir() async {
+  /// [refrescar]: el botón «Actualizar» le pide a OP que no use su caché de 30 s.
+  Future<void> _pedir({bool refrescar = false}) async {
     if (!widget.consultarEnVivo || _pidiendo) return;
     final estado = WidgetsBinding.instance.lifecycleState;
     if (estado != null && estado != AppLifecycleState.resumed) return;
     _pidiendo = true;
+    if (refrescar && mounted) setState(() {});
     try {
       final cargar = widget.cargarEnVivo;
       final vivo = cargar != null
           ? await cargar()
-          : CorriendoEnVivo.fromJson((await ComandosService().ejecutar("procesos.corriendo")).resultado);
+          : CorriendoEnVivo.fromJson((await ComandosService().ejecutar(
+              "procesos.corriendo",
+              payload: refrescar ? const {"refrescar": true} : const {},
+            ))
+              .resultado);
       if (mounted) {
         setState(() {
           _vivo = vivo;
           _errorVivo = null;
         });
+        // Primer barrido de un motor en curso: se vuelve a preguntar solo.
+        _reintento?.cancel();
+        if (vivo.leyendo.isNotEmpty) _reintento = Timer(const Duration(seconds: 12), _pedir);
       }
     } catch (e) {
       if (mounted) setState(() => _errorVivo = e is ComandoFallidoException ? e.mensaje : e.toString());
     } finally {
       _pidiendo = false;
+      if (refrescar && mounted) setState(() {});
     }
   }
 
@@ -268,10 +337,26 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
     for (final f in vivo?.fuentesConError ?? const <String>[]) {
       notas.add("No respondió $f");
     }
+    for (final m in vivo?.leyendo ?? const <String>[]) {
+      notas.add("Leyendo por primera vez lo que corre en ${CorriendoEnVivo.nombreMotor(m)} (unos 40 s). Se actualiza solo.");
+    }
     return notas;
   }
 
+  /// Escala de la barra: lo más largo que empezó hoy (al menos una hora).
+  static int _escala(List<EnCurso> items, DateTime ahora) {
+    var max = 60;
+    for (final i in items) {
+      final ini = i.inicio;
+      if (ini == null || !_esHoy(ini, ahora)) continue;
+      final min = ahora.difference(ini).inMinutes;
+      if (min > max) max = min;
+    }
+    return max;
+  }
+
   void _verTodos(List<EnCurso> items, DateTime ahora) {
+    final escala = _escala(items, ahora);
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -287,7 +372,10 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
             Text("${widget.titulo} · ${items.length}",
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
             const SizedBox(height: 8),
-            for (final i in items) _Fila(item: i, ahora: ahora),
+            for (final (k, i) in items.indexed) ...[
+              if (k > 0) Divider(height: 1, thickness: 1, color: _colorBorde(context)),
+              _Fila(item: i, ahora: ahora, escala: escala),
+            ],
           ],
         ),
       ),
@@ -330,8 +418,10 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
               children: [
                 Icon(Icons.pause_circle_outline_rounded, size: 16, color: colorScheme.outline),
                 const SizedBox(width: 6),
-                Text("Nada corriendo en este momento",
-                    style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
+                Flexible(
+                  child: Text("Nada corriendo en este momento",
+                      style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
+                ),
               ],
             ),
             pie(),
@@ -340,39 +430,173 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
       );
     }
 
-    final visibles = items.take(CorriendoAhora.maximoVisibles).toList();
+    // Filtros del panel: Todo / DataStage (uno por motor si OP mira más de
+    // uno: 11.7 y 11.5) / Pentaho / Airflow, cada uno con cuántos corren.
+    final motores = vivo?.motores ?? const <String>[];
+    final hay = {for (final i in items) i.fuente.toUpperCase()};
+    final opciones = <(String, String)>[
+      ("todo", "Todo"),
+      if (motores.length > 1)
+        for (final m in motores) (m, CorriendoEnVivo.nombreMotor(m))
+      else if (vivo != null || hay.contains("DATASTAGE"))
+        ("DATASTAGE", "DataStage"),
+      if (vivo != null || hay.contains("PENTAHO")) ("PENTAHO", "Pentaho"),
+      if (hay.contains("AIRFLOW")) ("AIRFLOW", "Airflow"),
+    ];
+    final origen = opciones.any((o) => o.$1 == _origen) ? _origen : "todo";
+    final lista = items.where((i) => i.pasa(origen)).toList();
+    final escala = _escala(lista, ahora);
+    final nombreOrigen = opciones.firstWhere((o) => o.$1 == origen).$2;
+    final visto = vivo?.vistoALas;
+
+    final visibles = lista.take(CorriendoAhora.maximoVisibles).toList();
+    final run = _colorRun(context);
+    final borde = _colorBorde(context);
+    // Plegado queda el resumen de todo lo que corre; abierto, a qué hora se vio.
+    final primero = items.where((i) => i.inicio != null).firstOrNull;
+    final String? pista;
+    if (_oculto) {
+      pista = [
+        "${items.length} corriendo",
+        if (primero != null)
+          "el que más lleva: ${primero.nombre} (${duracionCorta(ahora.difference(primero.inicio!).inSeconds)})",
+        if (visto != null) "visto a las $visto",
+      ].join(" · ");
+    } else if (widget.consultarEnVivo && visto != null) {
+      pista = "Visto a las $visto · se vuelve a preguntar cada minuto";
+    } else {
+      pista = null;
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
       child: Vidrio(
-        padding: const EdgeInsets.fromLTRB(14, 12, 8, 10),
-        borderColor: StatusColors.info.withValues(alpha: 0.45),
+        padding: EdgeInsets.zero,
+        borderColor: run.withValues(alpha: 0.3),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                const _Pulso(),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(widget.titulo,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
-                ),
-                const SizedBox(width: 8),
-                PillEstado("${items.length}", color: StatusColors.info),
-                const Spacer(),
-                if (items.length > visibles.length)
-                  TextButton(
-                    key: const Key("corriendo_ver_todos"),
-                    onPressed: () => _verTodos(items, ahora),
-                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                    child: Text("Ver los ${items.length}"),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 10, 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            _Pulso(color: run),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(widget.titulo,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+                            ),
+                            if (opciones.length <= 2) ...[
+                              const SizedBox(width: 8),
+                              PillEstado("${lista.length}", color: run),
+                            ],
+                          ],
+                        ),
+                        if (pista != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 3),
+                            child: Text(pista,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.outline, fontSize: 11.5)),
+                          ),
+                      ],
+                    ),
                   ),
-              ],
+                  if (widget.consultarEnVivo && !_oculto) ...[
+                    const SizedBox(width: 8),
+                    _BotonPanel(
+                      key: const Key("corriendo_actualizar"),
+                      icono: Icons.refresh_rounded,
+                      ayuda: "Actualizar",
+                      onTap: _pidiendo ? null : () => _pedir(refrescar: true),
+                    ),
+                  ],
+                  const SizedBox(width: 6),
+                  _BotonPanel(
+                    key: const Key("corriendo_ocultar"),
+                    icono: _oculto ? Icons.expand_more_rounded : Icons.expand_less_rounded,
+                    texto: _oculto ? "Mostrar" : "Ocultar",
+                    ayuda: _oculto ? "Mostrar la lista de lo que corre" : "Ocultar la lista; queda solo el resumen",
+                    onTap: () => setState(() => _oculto = !_oculto),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 4),
-            for (final i in visibles) _Fila(item: i, ahora: ahora),
-            Padding(padding: const EdgeInsets.only(right: 6), child: pie()),
+            if (!_oculto) ...[
+              if (opciones.length > 2)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 0, 10, 10),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: borde),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final o in opciones)
+                            _Filtro(
+                              key: Key("corriendo_filtro_${o.$1}"),
+                              texto: o.$2,
+                              cantidad: items.where((i) => i.pasa(o.$1)).length,
+                              elegido: o.$1 == origen,
+                              onTap: () => setState(() => _origen = o.$1),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              Divider(height: 1, thickness: 1, color: borde),
+              if (lista.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 10, 4),
+                  child: Row(
+                    children: [
+                      Icon(Icons.pause_circle_outline_rounded, size: 16, color: colorScheme.outline),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          (vivo?.leyendo ?? const <String>[]).contains(origen)
+                              ? "Leyendo lo que corre en $nombreOrigen… aparece solo en unos segundos."
+                              : "Nada corriendo en $nombreOrigen en este momento.",
+                          style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              for (final (k, i) in visibles.indexed) ...[
+                if (k > 0) Divider(height: 1, thickness: 1, color: borde),
+                _Fila(item: i, ahora: ahora, escala: escala),
+              ],
+              if (lista.length > visibles.length)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: TextButton(
+                      key: const Key("corriendo_ver_todos"),
+                      onPressed: () => _verTodos(lista, ahora),
+                      style: TextButton.styleFrom(foregroundColor: run, visualDensity: VisualDensity.compact),
+                      child: Text("Ver los ${lista.length}",
+                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ),
+              Padding(padding: const EdgeInsets.fromLTRB(14, 0, 10, 10), child: pie()),
+            ],
           ],
         ),
       ),
@@ -380,11 +604,144 @@ class _CorriendoAhoraState extends State<CorriendoAhora> with WidgetsBindingObse
   }
 }
 
+bool _esHoy(DateTime d, DateTime ahora) => d.year == ahora.year && d.month == ahora.month && d.day == ahora.day;
+
+bool _oscuro(BuildContext context) => Theme.of(context).brightness == Brightness.dark;
+
+/// El celeste «corriendo» de la web (--pr-run en procesos.css).
+Color _colorRun(BuildContext context) => _oscuro(context) ? const Color(0xFF67E8F9) : const Color(0xFF0E7490);
+
+/// Empezó otro día: ámbar (--pm-delay).
+Color _colorViejo(BuildContext context) => _oscuro(context) ? const Color(0xFFFFC766) : const Color(0xFFC97F05);
+
+Color _colorBorde(BuildContext context) => _oscuro(context) ? OpTokens.borderStrongDark : OpTokens.borderStrongLight;
+
+/// Botón con borde de la cabecera del panel («Actualizar», «Ocultar»).
+class _BotonPanel extends StatelessWidget {
+  const _BotonPanel({super.key, required this.icono, required this.ayuda, required this.onTap, this.texto});
+
+  final IconData icono;
+  final String ayuda;
+  final String? texto;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme.onSurface.withValues(alpha: onTap == null ? 0.4 : 0.9);
+    return Tooltip(
+      message: ayuda,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 36, minWidth: 36),
+          padding: EdgeInsets.symmetric(horizontal: texto == null ? 0 : 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _colorBorde(context)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icono, size: 17, color: color),
+              if (texto != null) ...[
+                const SizedBox(width: 4),
+                Text(texto!, style: theme.textTheme.labelMedium?.copyWith(color: color, fontWeight: FontWeight.w700)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Botón de filtro del panel, dentro de la cápsula: «DataStage 11.5  3».
+class _Filtro extends StatelessWidget {
+  const _Filtro({super.key, required this.texto, required this.cantidad, required this.elegido, required this.onTap});
+
+  final String texto;
+  final int cantidad;
+  final bool elegido;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final run = _colorRun(context);
+    final color = elegido ? run : theme.colorScheme.onSurfaceVariant;
+    return Semantics(
+      button: true,
+      selected: elegido,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 32),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          decoration: BoxDecoration(
+            color: elegido ? run.withValues(alpha: 0.14) : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text.rich(
+            TextSpan(
+              text: texto,
+              children: [
+                TextSpan(text: "  $cantidad", style: TextStyle(color: color.withValues(alpha: 0.75))),
+              ],
+            ),
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Barra de cuánto lleva: degradado celeste, como en la web.
+class _Barra extends StatelessWidget {
+  const _Barra({required this.avance, required this.color});
+
+  final double avance;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 6,
+      clipBehavior: Clip.antiAlias,
+      alignment: Alignment.centerLeft,
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(999)),
+      child: FractionallySizedBox(
+        widthFactor: avance,
+        heightFactor: 1,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            gradient: LinearGradient(colors: [color.withValues(alpha: 0.3), color]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _Fila extends StatelessWidget {
-  const _Fila({required this.item, required this.ahora});
+  const _Fila({required this.item, required this.ahora, required this.escala});
 
   final EnCurso item;
   final DateTime ahora;
+
+  /// Minutos que valen la barra entera (lo más largo que empezó hoy).
+  final int escala;
 
   @override
   Widget build(BuildContext context) {
@@ -393,63 +750,94 @@ class _Fila extends StatelessWidget {
     final i = item;
     final inicio = i.inicio;
     final lleva = inicio == null ? null : duracionCorta(ahora.difference(inicio).inSeconds);
+    // Si empezó otro día va en ámbar y con la barra llena: puede estar colgado.
+    final viejo = inicio != null && !_esHoy(inicio, ahora);
+    final acento = viejo ? _colorViejo(context) : _colorRun(context);
+    final avance =
+        inicio == null || viejo ? 1.0 : (ahora.difference(inicio).inMinutes / escala).clamp(0.03, 1.0).toDouble();
     String? desde;
     if (inicio != null && i.fuente.toUpperCase() != "AIRFLOW") {
       final hhmm = "${inicio.hour.toString().padLeft(2, "0")}:${inicio.minute.toString().padLeft(2, "0")}";
-      final esHoy = inicio.year == ahora.year && inicio.month == ahora.month && inicio.day == ahora.day;
-      desde = esHoy ? "desde $hhmm" : "desde ${inicio.day}/${inicio.month} $hhmm";
+      desde = viejo ? "desde el ${inicio.day}/${inicio.month} $hhmm" : "desde las $hhmm";
     }
     final control = i.control;
+    final quien = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(i.nombre,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontSize: 13,
+              height: 1.2,
+              fontWeight: i.fueraDelMonitor ? FontWeight.w600 : FontWeight.w700,
+              color: i.fueraDelMonitor ? colorScheme.onSurface.withValues(alpha: 0.82) : colorScheme.onSurface,
+            )),
+        const SizedBox(height: 2),
+        Text(
+          [
+            i.donde,
+            if (desde != null) desde,
+            if (i.pasos.isNotEmpty) "paso ${i.pasos.last}",
+            if (i.fueraDelMonitor) "fuera del monitor",
+          ].join(" · "),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.outline, fontSize: 11.5),
+        ),
+      ],
+    );
+    final barra = _Barra(avance: avance, color: acento);
     return InkWell(
-      borderRadius: BorderRadius.circular(10),
       onTap: control == null ? null : () => mostrarDetalleProceso(context, control),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 7),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(i.nombre,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 1),
-                  Text(
-                    [
-                      i.fuente,
-                      if (desde != null) desde,
-                      if (i.pasos.isNotEmpty) "paso ${i.pasos.last}",
-                      if (i.fueraDelMonitor) "fuera del monitor",
-                    ].join(" · "),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
-                  ),
+        padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+        // Como en la web: nombre, barra al medio y cuánto lleva a la derecha.
+        // Si no entra (pantalla muy angosta), la barra baja a una segunda línea.
+        child: LayoutBuilder(
+          builder: (context, c) {
+            final alMedio = c.maxWidth >= 280;
+            final fila = Row(
+              children: [
+                Expanded(flex: 11, child: quien),
+                if (alMedio) ...[
+                  const SizedBox(width: 10),
+                  Expanded(flex: 5, child: barra),
                 ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              lleva ?? "en curso",
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: StatusColors.info,
-                fontWeight: FontWeight.w800,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-            Icon(Icons.chevron_right_rounded, size: 18, color: control == null ? Colors.transparent : colorScheme.outline),
-          ],
+                const SizedBox(width: 10),
+                Text(
+                  lleva ?? "en curso",
+                  textAlign: TextAlign.right,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: acento,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    size: 16, color: control == null ? Colors.transparent : colorScheme.outline),
+              ],
+            );
+            if (alMedio) return fila;
+            return Column(
+              children: [
+                fila,
+                Padding(padding: const EdgeInsets.only(top: 6, right: 8), child: barra),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 }
 
-/// Punto azul que late: «esto está pasando ahora».
+/// Punto celeste que late: «esto está pasando ahora».
 class _Pulso extends StatefulWidget {
-  const _Pulso();
+  const _Pulso({required this.color});
+
+  final Color color;
 
   @override
   State<_Pulso> createState() => _PulsoState();
@@ -472,7 +860,7 @@ class _PulsoState extends State<_Pulso> with SingleTickerProviderStateMixin {
       child: Container(
         width: 10,
         height: 10,
-        decoration: const BoxDecoration(color: StatusColors.info, shape: BoxShape.circle),
+        decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
       ),
     );
   }

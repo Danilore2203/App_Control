@@ -81,12 +81,12 @@ void main() {
     await tester.pump();
 
     expect(find.text("Corriendo ahora"), findsOneWidget);
-    expect(find.text("4"), findsOneWidget);
-    expect(find.text("DATASTAGE · desde 11:40 · paso JOB_HIJO"), findsOneWidget);
+    expect(find.text("Todo  4"), findsOneWidget);
+    expect(find.text("DATASTAGE · desde las 11:40 · paso JOB_HIJO"), findsOneWidget);
     expect(find.text("20 min"), findsOneWidget);
     expect(find.textContaining("No respondió Pentaho"), findsOneWidget);
     expect(find.text("JOB_SUELTO"), findsOneWidget);
-    expect(find.text("DATASTAGE · desde 11:55 · fuera del monitor"), findsOneWidget);
+    expect(find.text("DATASTAGE · desde las 11:55 · fuera del monitor"), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
@@ -112,6 +112,68 @@ void main() {
     )));
     await tester.pump();
     expect(find.text("Nada corriendo en este momento"), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets("con 11.7 y 11.5 hay un filtro por motor, con cuántos corren en cada uno", (tester) async {
+    final vivo = CorriendoEnVivo.fromJson({
+      "generado_en": "2026-11-11 11:58:30",
+      "procesos": [
+        {"nombre": "PROC_117", "fuente": "DataStage", "target": "ds117", "desde": "11:40", "hoy": true},
+        {"nombre": "PROC_115", "fuente": "DataStage", "target": "ds115", "desde": "09:00", "hoy": true},
+      ],
+      "otros": [
+        {"fuente": "DataStage", "target": "ds117", "job": "JOB_MALLA", "desde": "10/11", "hoy": false},
+        {"fuente": "Pentaho", "job": "carga_pt", "desde": "11:00", "hoy": true},
+      ],
+      "fuentes": [
+        {"fuente": "DataStage ds117", "ok": true, "n": 2},
+        {"fuente": "DataStage ds115", "ok": true, "n": 1},
+        {"fuente": "Pentaho", "ok": true, "n": 1},
+      ],
+    });
+    expect(vivo.motores, ["ds117", "ds115"]);
+    await tester.pumpWidget(_app(CorriendoAhora(ahora: () => ahora, cargarEnVivo: () async => vivo, controles: const [])));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text("Visto a las 11:58 · se vuelve a preguntar cada minuto"), findsOneWidget);
+    expect(find.text("Todo  4"), findsOneWidget);
+    expect(find.text("DataStage 11.7  2"), findsOneWidget);
+    expect(find.text("DataStage 11.5  1"), findsOneWidget);
+    expect(find.text("Pentaho  1"), findsOneWidget);
+    expect(find.text("DataStage 11.5 · desde las 09:00"), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key("corriendo_filtro_ds115")));
+    await tester.pump();
+    expect(find.text("PROC_115"), findsOneWidget);
+    expect(find.text("PROC_117"), findsNothing);
+    expect(find.text("carga_pt"), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets("la 11.5 leyendo por primera vez: lo dice y no la da por caída", (tester) async {
+    final vivo = CorriendoEnVivo.fromJson({
+      "procesos": [
+        {"nombre": "PROC_117", "fuente": "DataStage", "target": "ds117", "desde": "11:40", "hoy": true},
+      ],
+      "otros": [],
+      "fuentes": [
+        {"fuente": "DataStage ds117", "ok": true, "n": 1},
+        {"fuente": "DataStage ds115", "ok": false, "error": "Leyendo…", "n": 0, "leyendo": true},
+        {"fuente": "Pentaho", "ok": true, "n": 0},
+      ],
+    });
+    expect(vivo.leyendo, ["ds115"]);
+    expect(vivo.fuentesConError, isEmpty);
+    await tester.pumpWidget(_app(CorriendoAhora(ahora: () => ahora, cargarEnVivo: () async => vivo, controles: const [])));
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key("corriendo_filtro_ds115")));
+    await tester.pump();
+    expect(find.textContaining("Leyendo lo que corre en DataStage 11.5"), findsOneWidget);
+    expect(find.textContaining("No respondió"), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
